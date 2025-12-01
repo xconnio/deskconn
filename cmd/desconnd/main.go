@@ -27,9 +27,9 @@ func main() {
 	}
 
 	brightness := deskconn.NewBrightness()
-	deskconndApis := deskconn.NewDeskconnd(session, brightness)
+	deskconnApis := deskconn.NewDeskconn(session, brightness)
 
-	if err := deskconndApis.Start(); err != nil {
+	if err := deskconnApis.Start(); err != nil {
 		log.Fatal(err)
 	}
 

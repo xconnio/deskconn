@@ -16,19 +16,19 @@ const (
 	ErrOperationFailed = "wamp.error.operation_failed"
 )
 
-type Deskconnd struct {
+type Deskconn struct {
 	session    *xconn.Session
 	brightness *Brightness
 }
 
-func NewDeskconnd(session *xconn.Session, brightness *Brightness) *Deskconnd {
-	return &Deskconnd{
+func NewDeskconn(session *xconn.Session, brightness *Brightness) *Deskconn {
+	return &Deskconn{
 		brightness: brightness,
 		session:    session,
 	}
 }
 
-func (d *Deskconnd) Start() error {
+func (d *Deskconn) Start() error {
 	for uri, handler := range map[string]xconn.InvocationHandler{
 		ProcedureBrightnessGet: d.brightnessGetHandler,
 		ProcedureBrightnessSet: d.brightnessSetHandler,
@@ -43,7 +43,7 @@ func (d *Deskconnd) Start() error {
 	return nil
 }
 
-func (d *Deskconnd) brightnessGetHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) brightnessGetHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 	brightness, err := d.brightness.GetBrightness()
 	if err != nil {
 		return xconn.NewInvocationError(ErrInvalidArgument, err)
@@ -52,7 +52,7 @@ func (d *Deskconnd) brightnessGetHandler(_ context.Context, _ *xconn.Invocation)
 	return xconn.NewInvocationResult(brightness)
 }
 
-func (d *Deskconnd) brightnessSetHandler(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) brightnessSetHandler(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 	brightness, err := inv.ArgInt64(0)
 	if err != nil {
 		return xconn.NewInvocationError(ErrInvalidArgument, err)
