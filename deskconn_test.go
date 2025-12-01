@@ -1,11 +1,11 @@
-package deskconnd_test
+package deskconn_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconnd"
+	"github.com/xconnio/deskconn"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -30,23 +30,23 @@ func TestBrightnessGetSet(t *testing.T) {
 
 	mockBacklightDir(t)
 
-	b := deskconnd.NewBrightness()
-	d := deskconnd.NewDeskconnd(callee, b)
+	b := deskconn.NewBrightness()
+	d := deskconn.NewDeskconnd(callee, b)
 	require.NoError(t, d.Start())
 
-	callResp := caller.Call(deskconnd.ProcedureBrightnessGet).Do()
+	callResp := caller.Call(deskconn.ProcedureBrightnessGet).Do()
 	require.NoError(t, callResp.Err)
 	require.Equal(t, 20, int(callResp.ArgInt64Or(0, 0)))
 
 	// call without required argument
-	callResp = caller.Call(deskconnd.ProcedureBrightnessSet).Do()
+	callResp = caller.Call(deskconn.ProcedureBrightnessSet).Do()
 	require.ErrorContains(t, callResp.Err, "wamp.error.invalid_argument")
 
-	callResp = caller.Call(deskconnd.ProcedureBrightnessSet).Arg(70).Do()
+	callResp = caller.Call(deskconn.ProcedureBrightnessSet).Arg(70).Do()
 	require.NoError(t, callResp.Err)
 
 	// verify that brightness was updated
-	callResp = caller.Call(deskconnd.ProcedureBrightnessGet).Do()
+	callResp = caller.Call(deskconn.ProcedureBrightnessGet).Do()
 	require.NoError(t, callResp.Err)
 	require.Equal(t, 70, int(callResp.ArgInt64Or(0, 0)))
 }

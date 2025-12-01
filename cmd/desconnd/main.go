@@ -7,7 +7,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/deskconnd"
+	"github.com/xconnio/deskconn"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -17,8 +17,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	brightness := deskconnd.NewBrightness()
-	deskconndApis := deskconnd.NewDeskconnd(session, brightness)
+	brightness := deskconn.NewBrightness()
+	deskconndApis := deskconn.NewDeskconnd(session, brightness)
 
 	if err := deskconndApis.Start(); err != nil {
 		log.Fatal(err)
