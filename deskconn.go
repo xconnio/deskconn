@@ -1,4 +1,4 @@
-package deskconnd
+package deskconn
 
 import (
 	"context"

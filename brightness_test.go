@@ -1,4 +1,4 @@
-package deskconnd_test
+package deskconn_test
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconnd"
+	"github.com/xconnio/deskconn"
 )
 
 func mockBacklightDir(t *testing.T) string {
@@ -25,9 +25,9 @@ func mockBacklightDir(t *testing.T) string {
 	err = os.WriteFile(filepath.Join(dev, "brightness"), []byte("20"), 0600)
 	require.NoError(t, err)
 
-	old := deskconnd.BacklightBasePath
-	t.Cleanup(func() { deskconnd.BacklightBasePath = old })
-	deskconnd.BacklightBasePath = tmp
+	old := deskconn.BacklightBasePath
+	t.Cleanup(func() { deskconn.BacklightBasePath = old })
+	deskconn.BacklightBasePath = tmp
 
 	return tmp
 }
@@ -35,7 +35,7 @@ func mockBacklightDir(t *testing.T) string {
 func TestNewBrightnessDeviceFound(t *testing.T) {
 	mockBacklightDir(t)
 
-	b := deskconnd.NewBrightness()
+	b := deskconn.NewBrightness()
 
 	err := b.SetBrightness(70)
 	require.NoError(t, err)
@@ -46,12 +46,12 @@ func TestNewBrightnessDeviceFound(t *testing.T) {
 }
 
 func TestNewBrightnessNoDevice(t *testing.T) {
-	old := deskconnd.BacklightBasePath
-	defer func() { deskconnd.BacklightBasePath = old }()
+	old := deskconn.BacklightBasePath
+	defer func() { deskconn.BacklightBasePath = old }()
 
-	deskconnd.BacklightBasePath = t.TempDir()
+	deskconn.BacklightBasePath = t.TempDir()
 
-	b := deskconnd.NewBrightness()
+	b := deskconn.NewBrightness()
 
 	err := b.SetBrightness(70)
 	require.EqualError(t, err, "brightness device not available")
@@ -63,7 +63,7 @@ func TestNewBrightnessNoDevice(t *testing.T) {
 func TestGetBrightness(t *testing.T) {
 	mockBacklightDir(t)
 
-	b := deskconnd.NewBrightness()
+	b := deskconn.NewBrightness()
 	value, err := b.GetBrightness()
 	require.NoError(t, err)
 	require.Equal(t, 20, value)
@@ -72,7 +72,7 @@ func TestGetBrightness(t *testing.T) {
 func TestSetBrightness(t *testing.T) {
 	mockBacklightDir(t)
 
-	b := deskconnd.NewBrightness()
+	b := deskconn.NewBrightness()
 
 	tests := []struct {
 		input    int
@@ -88,7 +88,7 @@ func TestSetBrightness(t *testing.T) {
 		err := b.SetBrightness(tt.input)
 		require.NoError(t, err)
 
-		raw, err := os.ReadFile(deskconnd.BacklightBasePath + "/intel_backlight/brightness")
+		raw, err := os.ReadFile(deskconn.BacklightBasePath + "/intel_backlight/brightness")
 		require.NoError(t, err)
 		require.Equal(t, tt.expected, string(raw))
 	}
@@ -101,9 +101,9 @@ func TestGetBrightnessFileError(t *testing.T) {
 	err := os.Remove(filepath.Join(tmp, "intel_backlight", "brightness"))
 	require.NoError(t, err)
 
-	deskconnd.BacklightBasePath = tmp
+	deskconn.BacklightBasePath = tmp
 
-	b := deskconnd.NewBrightness()
+	b := deskconn.NewBrightness()
 
 	_, err = b.GetBrightness()
 	require.Error(t, err)

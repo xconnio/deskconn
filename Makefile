@@ -5,7 +5,7 @@ lint:
 	golangci-lint run
 
 build:
-	go build github.com/xconnio/deskconnd/cmd/desconnd
+	go build github.com/xconnio/deskconn/cmd/desconnd
 
 run:
-	go run github.com/xconnio/deskconnd/cmd/desconnd
+	go run github.com/xconnio/deskconn/cmd/desconnd

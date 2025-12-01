@@ -1,4 +1,4 @@
-module github.com/xconnio/deskconnd
+module github.com/xconnio/deskconn
 
 go 1.22
 
