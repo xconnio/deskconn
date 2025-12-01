@@ -31,7 +31,7 @@ func TestBrightnessGetSet(t *testing.T) {
 	mockBacklightDir(t)
 
 	b := deskconn.NewBrightness()
-	d := deskconn.NewDeskconnd(callee, b)
+	d := deskconn.NewDeskconn(callee, b)
 	require.NoError(t, d.Start())
 
 	callResp := caller.Call(deskconn.ProcedureBrightnessGet).Do()
