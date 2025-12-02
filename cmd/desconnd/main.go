@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"os/signal"
 
@@ -19,9 +17,34 @@ const (
 
 func main() {
 	host, _ := os.Hostname()
-	url := fmt.Sprintf("ws://0.0.0.0:%d/ws", port)
 
-	session, err := xconn.ConnectAnonymous(context.Background(), url, realm)
+	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
+	if err != nil {
+		log.Fatalln(err)
+	}
+	err = router.AddRealm(realm, &xconn.RealmConfig{
+		Roles: []xconn.RealmRole{
+			{Name: "anonymous", Permissions: []xconn.Permission{
+				{
+					URI:         "io.xconn.",
+					MatchPolicy: "prefix",
+					AllowCall:   true,
+				},
+			}},
+		},
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	server := xconn.NewServer(router, nil, &xconn.ServerConfig{})
+	listener, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:8080")
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer listener.Close()
+
+	session, err := xconn.ConnectInMemory(router, realm)
 	if err != nil {
 		log.Fatal(err)
 	}
