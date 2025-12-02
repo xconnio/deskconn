@@ -2,21 +2,26 @@ package deskconn
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/godbus/dbus/v5"
 )
 
 var BacklightBasePath = "/sys/class/backlight" //nolint: gochecknoglobals
 
 type Brightness struct {
+	dbusConn           *dbus.Conn
 	brightnessFilePath string
 	maxBrightness      int
+	deviceName         string
 	deviceExists       bool
 }
 
-func NewBrightness() *Brightness {
+func NewBrightness(conn *dbus.Conn) *Brightness {
 	entries, err := os.ReadDir(BacklightBasePath)
 	if err != nil {
 		return &Brightness{deviceExists: false}
@@ -32,7 +37,7 @@ func NewBrightness() *Brightness {
 		}
 
 		if info.IsDir() {
-			device = full
+			device = e.Name()
 			break
 		}
 	}
@@ -42,15 +47,18 @@ func NewBrightness() *Brightness {
 	}
 
 	b := &Brightness{
-		brightnessFilePath: filepath.Join(device, "brightness"),
+		deviceName:         device,
+		brightnessFilePath: filepath.Join(BacklightBasePath, device, "brightness"),
 		deviceExists:       true,
 	}
 
-	raw, err := os.ReadFile(filepath.Join(device, "max_brightness"))
+	raw, err := os.ReadFile(filepath.Join(BacklightBasePath, device, "max_brightness"))
 	if err != nil {
 		return &Brightness{deviceExists: false}
 	}
 	b.maxBrightness, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+
+	b.dbusConn = conn
 
 	return b
 }
@@ -84,10 +92,10 @@ func (b *Brightness) SetBrightness(percent int) error {
 	}
 
 	value := (percent * b.maxBrightness) / 100
-
-	if err := os.WriteFile(b.brightnessFilePath, []byte(strconv.Itoa(value)), 0600); err != nil {
-		return fmt.Errorf("failed to write brightness value (%d): %w", value, err)
+	if value < 0 || value > math.MaxUint32 {
+		return fmt.Errorf("brightness value out of uint32 range: %d", value)
 	}
 
-	return nil
+	obj := b.dbusConn.Object("org.freedesktop.login1", "/org/freedesktop/login1/session/auto")
+	return obj.Call("org.freedesktop.login1.Session.SetBrightness", 0, "backlight", b.deviceName, uint32(value)).Err
 }

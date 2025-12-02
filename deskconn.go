@@ -46,7 +46,7 @@ func (d *Deskconn) Start() error {
 func (d *Deskconn) brightnessGetHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 	brightness, err := d.brightness.GetBrightness()
 	if err != nil {
-		return xconn.NewInvocationError(ErrInvalidArgument, err)
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 	}
 
 	return xconn.NewInvocationResult(brightness)
