@@ -2,80 +2,33 @@ package deskconn
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
+	"math"
+
+	"github.com/godbus/dbus/v5"
 )
 
-var BacklightBasePath = "/sys/class/backlight" //nolint: gochecknoglobals
-
 type Brightness struct {
-	brightnessFilePath string
-	maxBrightness      int
-	deviceExists       bool
+	conn *dbus.Conn
 }
 
 func NewBrightness() *Brightness {
-	entries, err := os.ReadDir(BacklightBasePath)
-	if err != nil {
-		return &Brightness{deviceExists: false}
-	}
-
-	var device string
-	for _, e := range entries {
-		full := filepath.Join(BacklightBasePath, e.Name())
-
-		info, err := os.Stat(full)
-		if err != nil {
-			continue
-		}
-
-		if info.IsDir() {
-			device = full
-			break
-		}
-	}
-
-	if device == "" {
-		return &Brightness{deviceExists: false}
-	}
-
-	b := &Brightness{
-		brightnessFilePath: filepath.Join(device, "brightness"),
-		deviceExists:       true,
-	}
-
-	raw, err := os.ReadFile(filepath.Join(device, "max_brightness"))
-	if err != nil {
-		return &Brightness{deviceExists: false}
-	}
-	b.maxBrightness, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
-
-	return b
+	conn, _ := dbus.ConnectSessionBus()
+	return &Brightness{conn: conn}
 }
 
 func (b *Brightness) GetBrightness() (int, error) {
-	if !b.deviceExists {
-		return 0, fmt.Errorf("brightness device not available")
+	if b.conn != nil {
+		if v, err := b.getGNOME(); err == nil {
+			return v, nil
+		}
+		if v, err := b.getKDE(); err == nil {
+			return v, nil
+		}
 	}
-
-	raw, err := os.ReadFile(b.brightnessFilePath)
-	if err != nil {
-		return 0, err
-	}
-
-	current, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
-	percent := (current * 100) / b.maxBrightness
-
-	return percent, nil
+	return 0, fmt.Errorf("brightness not available")
 }
 
 func (b *Brightness) SetBrightness(percent int) error {
-	if !b.deviceExists {
-		return fmt.Errorf("brightness device not available")
-	}
-
 	if percent < 1 {
 		percent = 1
 	}
@@ -83,11 +36,61 @@ func (b *Brightness) SetBrightness(percent int) error {
 		percent = 100
 	}
 
-	value := (percent * b.maxBrightness) / 100
+	if b.conn != nil {
+		if err := b.setGNOME(percent); err == nil {
+			return nil
+		}
+		if err := b.setKDE(percent); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to set brightness")
+}
 
-	if err := os.WriteFile(b.brightnessFilePath, []byte(strconv.Itoa(value)), 0600); err != nil {
-		return fmt.Errorf("failed to write brightness value (%d): %w", value, err)
+func (b *Brightness) getGNOME() (int, error) {
+	obj := b.conn.Object("org.gnome.SettingsDaemon.Power", "/org/gnome/SettingsDaemon/Power")
+	var val int32
+	err := obj.Call("org.freedesktop.DBus.Properties.Get", 0,
+		"org.gnome.SettingsDaemon.Power.Screen", "Brightness").Store(&val)
+	if err != nil {
+		return 0, err
+	}
+	return int(val), nil
+}
+
+func (b *Brightness) setGNOME(percent int) error {
+	obj := b.conn.Object("org.gnome.SettingsDaemon.Power", "/org/gnome/SettingsDaemon/Power")
+
+	if percent > math.MaxInt32 || percent < math.MinInt32 {
+		return fmt.Errorf("brightness value out of int32 range")
 	}
 
-	return nil
+	return obj.Call("org.freedesktop.DBus.Properties.Set", 0,
+		"org.gnome.SettingsDaemon.Power.Screen", "Brightness",
+		dbus.MakeVariant(int32(percent))).Err
+}
+
+func (b *Brightness) getKDE() (int, error) {
+	obj := b.conn.Object("org.kde.Solid.PowerManagement",
+		"/org/kde/Solid/PowerManagement/Actions/BrightnessControl")
+
+	var brightness int32
+	err := obj.Call("org.kde.Solid.PowerManagement.Actions.BrightnessControl.brightness",
+		0).Store(&brightness)
+	if err != nil {
+		return 0, err
+	}
+	return int(brightness), nil
+}
+
+func (b *Brightness) setKDE(percent int) error {
+	obj := b.conn.Object("org.kde.Solid.PowerManagement",
+		"/org/kde/Solid/PowerManagement/Actions/BrightnessControl")
+
+	if percent > math.MaxInt32 || percent < math.MinInt32 {
+		return fmt.Errorf("brightness value out of int32 range")
+	}
+
+	return obj.Call("org.kde.Solid.PowerManagement.Actions.BrightnessControl.setBrightness",
+		0, int32(percent)).Err
 }
