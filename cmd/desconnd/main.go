@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn"
@@ -49,7 +50,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	brightness := deskconn.NewBrightness()
+	dbusConn, err := dbus.ConnectSystemBus()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dbusConn.Close()
+
+	brightness := deskconn.NewBrightness(dbusConn)
 	deskconnApis := deskconn.NewDeskconn(session, brightness)
 
 	if err := deskconnApis.Start(); err != nil {

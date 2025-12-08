@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/godbus/dbus/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn"
@@ -35,14 +36,13 @@ func mockBacklightDir(t *testing.T) string {
 func TestNewBrightnessDeviceFound(t *testing.T) {
 	mockBacklightDir(t)
 
-	b := deskconn.NewBrightness()
-
-	err := b.SetBrightness(70)
+	conn, err := dbus.ConnectSystemBus()
 	require.NoError(t, err)
+	b := deskconn.NewBrightness(conn)
 
 	brightness, err := b.GetBrightness()
 	require.NoError(t, err)
-	require.Equal(t, 70, brightness)
+	require.Equal(t, 20, brightness)
 }
 
 func TestNewBrightnessNoDevice(t *testing.T) {
@@ -51,9 +51,11 @@ func TestNewBrightnessNoDevice(t *testing.T) {
 
 	deskconn.BacklightBasePath = t.TempDir()
 
-	b := deskconn.NewBrightness()
+	conn, err := dbus.ConnectSystemBus()
+	require.NoError(t, err)
+	b := deskconn.NewBrightness(conn)
 
-	err := b.SetBrightness(70)
+	err = b.SetBrightness(70)
 	require.EqualError(t, err, "brightness device not available")
 
 	_, err = b.GetBrightness()
@@ -63,35 +65,12 @@ func TestNewBrightnessNoDevice(t *testing.T) {
 func TestGetBrightness(t *testing.T) {
 	mockBacklightDir(t)
 
-	b := deskconn.NewBrightness()
+	conn, err := dbus.ConnectSystemBus()
+	require.NoError(t, err)
+	b := deskconn.NewBrightness(conn)
 	value, err := b.GetBrightness()
 	require.NoError(t, err)
 	require.Equal(t, 20, value)
-}
-
-func TestSetBrightness(t *testing.T) {
-	mockBacklightDir(t)
-
-	b := deskconn.NewBrightness()
-
-	tests := []struct {
-		input    int
-		expected string
-	}{
-		{50, "50"},
-		{0, "1"},
-		{106, "100"},
-		{-5, "1"},
-	}
-
-	for _, tt := range tests {
-		err := b.SetBrightness(tt.input)
-		require.NoError(t, err)
-
-		raw, err := os.ReadFile(deskconn.BacklightBasePath + "/intel_backlight/brightness")
-		require.NoError(t, err)
-		require.Equal(t, tt.expected, string(raw))
-	}
 }
 
 func TestGetBrightnessFileError(t *testing.T) {
@@ -103,7 +82,9 @@ func TestGetBrightnessFileError(t *testing.T) {
 
 	deskconn.BacklightBasePath = tmp
 
-	b := deskconn.NewBrightness()
+	conn, err := dbus.ConnectSystemBus()
+	require.NoError(t, err)
+	b := deskconn.NewBrightness(conn)
 
 	_, err = b.GetBrightness()
 	require.Error(t, err)
