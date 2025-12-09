@@ -9,8 +9,10 @@ import (
 )
 
 const (
-	ProcedureBrightnessGet = "io.xconn.deskconnd.brightness.get"
-	ProcedureBrightnessSet = "io.xconn.deskconnd.brightness.set"
+	ProcedureBrightnessGet  = "io.xconn.deskconnd.brightness.get"
+	ProcedureBrightnessSet  = "io.xconn.deskconnd.brightness.set"
+	ProcedureScreenLock     = "io.xconn.deskconnd.screen.lock"
+	ProcedureScreenIsLocked = "io.xconn.deskconnd.screen.islocked"
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
@@ -19,19 +21,23 @@ const (
 type Deskconn struct {
 	session    *xconn.Session
 	brightness *Brightness
+	screen     *Screen
 }
 
-func NewDeskconn(session *xconn.Session, brightness *Brightness) *Deskconn {
+func NewDeskconn(session *xconn.Session, brightness *Brightness, screen *Screen) *Deskconn {
 	return &Deskconn{
 		brightness: brightness,
 		session:    session,
+		screen:     screen,
 	}
 }
 
 func (d *Deskconn) Start() error {
 	for uri, handler := range map[string]xconn.InvocationHandler{
-		ProcedureBrightnessGet: d.brightnessGetHandler,
-		ProcedureBrightnessSet: d.brightnessSetHandler,
+		ProcedureBrightnessGet:  d.brightnessGetHandler,
+		ProcedureBrightnessSet:  d.brightnessSetHandler,
+		ProcedureScreenLock:     d.lockScreenLockHandler,
+		ProcedureScreenIsLocked: d.lockScreenIsLockedHandler,
 	} {
 		response := d.session.Register(uri, handler).Do()
 		if response.Err != nil {
@@ -63,4 +69,21 @@ func (d *Deskconn) brightnessSetHandler(_ context.Context, inv *xconn.Invocation
 	}
 
 	return xconn.NewInvocationResult()
+}
+
+func (d *Deskconn) lockScreenLockHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	if err := d.screen.Lock(); err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err)
+	}
+
+	return xconn.NewInvocationResult()
+}
+
+func (d *Deskconn) lockScreenIsLockedHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	isLocked, err := d.screen.IsLocked()
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err)
+	}
+
+	return xconn.NewInvocationResult(isLocked)
 }
