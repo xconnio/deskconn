@@ -31,11 +31,13 @@ func TestBrightnessGetSet(t *testing.T) {
 
 	conn, err := dbus.ConnectSystemBus()
 	require.NoError(t, err)
-	b := deskconn.NewBrightness(conn)
-	d := deskconn.NewDeskconn(callee, b, nil)
+	sessionConn, err := dbus.ConnectSessionBus()
+	require.NoError(t, err)
+	screen := deskconn.NewScreen(sessionConn, conn)
+	d := deskconn.NewDeskconn(callee, screen)
 	require.NoError(t, d.Start())
 
-	callResp := caller.Call(deskconn.ProcedureBrightnessGet).Do()
+	callResp := caller.Call(deskconn.ProcedureScreenBrightnessGet).Do()
 	if callResp.Err != nil {
 		// Headless / DBus unavailable case
 		require.ErrorContains(t, callResp.Err, "brightness device not available")
@@ -46,13 +48,13 @@ func TestBrightnessGetSet(t *testing.T) {
 	require.GreaterOrEqual(t, initial, 0)
 	require.LessOrEqual(t, initial, 100)
 
-	callResp = caller.Call(deskconn.ProcedureBrightnessSet).Do()
+	callResp = caller.Call(deskconn.ProcedureScreenBrightnessSet).Do()
 	require.ErrorContains(t, callResp.Err, "wamp.error.invalid_argument")
 
-	callResp = caller.Call(deskconn.ProcedureBrightnessSet).Arg(70).Do()
+	callResp = caller.Call(deskconn.ProcedureScreenBrightnessSet).Arg(70).Do()
 	require.NoError(t, callResp.Err)
 
-	callResp = caller.Call(deskconn.ProcedureBrightnessGet).Do()
+	callResp = caller.Call(deskconn.ProcedureScreenBrightnessGet).Do()
 	require.NoError(t, callResp.Err)
 
 	updated := int(callResp.ArgInt64Or(0, 0))

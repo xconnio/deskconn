@@ -9,35 +9,33 @@ import (
 )
 
 const (
-	ProcedureBrightnessGet  = "io.xconn.deskconnd.brightness.get"
-	ProcedureBrightnessSet  = "io.xconn.deskconnd.brightness.set"
-	ProcedureScreenLock     = "io.xconn.deskconnd.screen.lock"
-	ProcedureScreenIsLocked = "io.xconn.deskconnd.screen.islocked"
+	ProcedureScreenBrightnessGet = "io.xconn.deskconnd.screen.brightness.get"
+	ProcedureScreenBrightnessSet = "io.xconn.deskconnd.screen.brightness.set"
+	ProcedureScreenLock          = "io.xconn.deskconnd.screen.lock"
+	ProcedureScreenIsLocked      = "io.xconn.deskconnd.screen.islocked"
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
 )
 
 type Deskconn struct {
-	session    *xconn.Session
-	brightness *Brightness
-	screen     *Screen
+	session *xconn.Session
+	screen  *Screen
 }
 
-func NewDeskconn(session *xconn.Session, brightness *Brightness, screen *Screen) *Deskconn {
+func NewDeskconn(session *xconn.Session, screen *Screen) *Deskconn {
 	return &Deskconn{
-		brightness: brightness,
-		session:    session,
-		screen:     screen,
+		session: session,
+		screen:  screen,
 	}
 }
 
 func (d *Deskconn) Start() error {
 	for uri, handler := range map[string]xconn.InvocationHandler{
-		ProcedureBrightnessGet:  d.brightnessGetHandler,
-		ProcedureBrightnessSet:  d.brightnessSetHandler,
-		ProcedureScreenLock:     d.lockScreenLockHandler,
-		ProcedureScreenIsLocked: d.lockScreenIsLockedHandler,
+		ProcedureScreenBrightnessGet: d.brightnessGetHandler,
+		ProcedureScreenBrightnessSet: d.brightnessSetHandler,
+		ProcedureScreenLock:          d.lockScreenLockHandler,
+		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
 	} {
 		response := d.session.Register(uri, handler).Do()
 		if response.Err != nil {
@@ -50,7 +48,7 @@ func (d *Deskconn) Start() error {
 }
 
 func (d *Deskconn) brightnessGetHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	brightness, err := d.brightness.GetBrightness()
+	brightness, err := d.screen.GetBrightness()
 	if err != nil {
 		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 	}
@@ -64,7 +62,7 @@ func (d *Deskconn) brightnessSetHandler(_ context.Context, inv *xconn.Invocation
 		return xconn.NewInvocationError(ErrInvalidArgument, err)
 	}
 
-	if err := d.brightness.SetBrightness(int(brightness)); err != nil {
+	if err := d.screen.SetBrightness(int(brightness)); err != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, err)
 	}
 
