@@ -1,4 +1,4 @@
-name: desconnd CI
+name: deskconnd CI
 
 on:
   push:
