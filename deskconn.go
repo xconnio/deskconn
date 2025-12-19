@@ -27,6 +27,7 @@ const (
 	ProcedureMPRISPlay      = "io.xconn.deskconnd.mpris.play"
 	ProcedureMPRISPause     = "io.xconn.deskconnd.mpris.pause"
 	ProcedureMPRISNext      = "io.xconn.deskconnd.mpris.next"
+	ProcedureMPRISPrevious  = "io.xconn.deskconnd.mpris.previous"
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
@@ -60,6 +61,7 @@ func (d *Deskconn) RegisterLocal(session *xconn.Session) error {
 		ProcedureMPRISPlay:           d.handlePlay,
 		ProcedureMPRISPause:          d.handlePause,
 		ProcedureMPRISNext:           d.handleNext,
+		ProcedureMPRISPrevious:       d.handlePrevious,
 	} {
 		response := session.Register(uri, handler).Do()
 		if response.Err != nil {
@@ -199,6 +201,23 @@ func (d *Deskconn) handleNext(_ context.Context, inv *xconn.Invocation) *xconn.I
 
 	if nextErr != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, nextErr.Error())
+	}
+
+	return xconn.NewInvocationResult()
+}
+
+func (d *Deskconn) handlePrevious(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	player, err := inv.ArgString(0)
+
+	var previousErr error
+	if err != nil {
+		previousErr = d.mpris.Previous()
+	} else {
+		previousErr = d.mpris.PreviousPlayer(player)
+	}
+
+	if previousErr != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, previousErr.Error())
 	}
 
 	return xconn.NewInvocationResult()
