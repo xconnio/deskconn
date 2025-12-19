@@ -4,6 +4,9 @@ test:
 lint:
 	golangci-lint run
 
+format:
+	golangci-lint fmt
+
 build:
 	go build github.com/xconnio/deskconn/cmd/desconnd
 

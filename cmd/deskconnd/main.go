@@ -31,6 +31,9 @@ func main() {
 					MatchPolicy: "prefix",
 					AllowCall:   true,
 				},
+				{
+					URI: "exchange.public.keys",
+				},
 			}},
 		},
 	})
