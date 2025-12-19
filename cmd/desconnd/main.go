@@ -50,11 +50,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	dbusConn, err := dbus.ConnectSystemBus()
+	systemBus, err := dbus.ConnectSystemBus()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer dbusConn.Close()
+	defer systemBus.Close()
 
 	sessionBus, err := dbus.ConnectSessionBus()
 	if err != nil {
@@ -62,9 +62,8 @@ func main() {
 	}
 	defer sessionBus.Close()
 
-	brightness := deskconn.NewBrightness(dbusConn)
-	lockScreen := deskconn.NewScreen(sessionBus)
-	deskconnApis := deskconn.NewDeskconn(session, brightness, lockScreen)
+	screen := deskconn.NewScreen(sessionBus, systemBus)
+	deskconnApis := deskconn.NewDeskconn(session, screen)
 
 	if err := deskconnApis.Start(); err != nil {
 		log.Fatal(err)
