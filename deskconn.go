@@ -22,19 +22,25 @@ const (
 	ProcedureScreenIsLockedCloud      = "io.xconn.deskconn.deskconnd.%s.screen.islocked"
 	ProcedureShellCloud               = "io.xconn.deskconn.deskconnd.%s.shell"
 
+	ProcedureMPRISPlayers = "io.xconn.deskconnd.mpris.players"
+
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
 )
 
 type Deskconn struct {
-	screen       *Screen
+	session      *xconn.Session
 	shellSession *interactiveShellSession
+	screen       *Screen
+	mpris        *MPRIS
 }
 
-func NewDeskconn(screen *Screen) *Deskconn {
+func NewDeskconn(session *xconn.Session, screen *Screen, mpris *MPRIS) *Deskconn {
 	return &Deskconn{
-		screen:       screen,
+		session:      session,
 		shellSession: newInteractiveShellSession(),
+		screen:       screen,
+		mpris:        mpris,
 	}
 }
 
@@ -45,6 +51,7 @@ func (d *Deskconn) RegisterLocal(session *xconn.Session) error {
 		ProcedureScreenLock:          d.lockScreenLockHandler,
 		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
 		ProcedureShell:               d.shellSession.handleShell(),
+		ProcedureMPRISPlayers:        d.handleListPlayers,
 	} {
 		response := session.Register(uri, handler).Do()
 		if response.Err != nil {
@@ -111,4 +118,12 @@ func (d *Deskconn) lockScreenIsLockedHandler(_ context.Context, _ *xconn.Invocat
 	}
 
 	return xconn.NewInvocationResult(isLocked)
+}
+
+func (d *Deskconn) handleListPlayers(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	players, err := d.mpris.ListPlayers()
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(players)
 }
