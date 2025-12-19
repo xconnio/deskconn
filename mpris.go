@@ -114,6 +114,14 @@ func (m *MPRIS) Play() error {
 	return call(objs, "Play")
 }
 
+func (m *MPRIS) Pause() error {
+	objs, err := m.allPlayers()
+	if err != nil {
+		return err
+	}
+	return call(objs, "Pause")
+}
+
 func (m *MPRIS) PlayPausePlayer(name string) error {
 	obj := m.conn.Object(name, mprisPath)
 	return obj.Call(playerIface+".PlayPause", 0).Err
@@ -122,4 +130,9 @@ func (m *MPRIS) PlayPausePlayer(name string) error {
 func (m *MPRIS) PlayPlayer(name string) error {
 	obj := m.conn.Object(name, mprisPath)
 	return obj.Call(playerIface+".Play", 0).Err
+}
+
+func (m *MPRIS) PausePlayer(name string) error {
+	obj := m.conn.Object(name, mprisPath)
+	return obj.Call(playerIface+".Pause", 0).Err
 }
