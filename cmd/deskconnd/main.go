@@ -63,7 +63,8 @@ func main() {
 	defer sessionBus.Close()
 
 	screen := deskconn.NewScreen(sessionBus, systemBus)
-	deskconnApis := deskconn.NewDeskconn(session, screen)
+	mpris := deskconn.NewMPRIS(sessionBus)
+	deskconnApis := deskconn.NewDeskconn(session, screen, mpris)
 
 	if err := deskconnApis.Start(); err != nil {
 		log.Fatal(err)
