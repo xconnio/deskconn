@@ -1,12 +1,16 @@
 package deskconn
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/godbus/dbus/v5"
 )
 
-const mprisPath = "/org/mpris/MediaPlayer2"
+const (
+	mprisPath   = "/org/mpris/MediaPlayer2"
+	playerIface = "org.mpris.MediaPlayer2.Player"
+)
 
 type MPRIS struct {
 	conn *dbus.Conn
@@ -64,4 +68,45 @@ func (m *MPRIS) ListPlayers() (map[string]string, error) {
 	}
 
 	return result, nil
+}
+
+func (m *MPRIS) allPlayers() ([]dbus.BusObject, error) {
+	players, err := m.mprisPlayers()
+	if err != nil {
+		return nil, err
+	}
+
+	var busObjects []dbus.BusObject
+	for _, bus := range players {
+		busObjects = append(busObjects, m.conn.Object(bus, mprisPath))
+	}
+
+	if len(busObjects) == 0 {
+		return nil, errors.New("no active players")
+	}
+
+	return busObjects, nil
+}
+
+func call(objs []dbus.BusObject, method string) error {
+	var lastErr error
+	for _, obj := range objs {
+		if err := obj.Call(playerIface+"."+method, 0).Err; err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+func (m *MPRIS) PlayPause() error {
+	objs, err := m.allPlayers()
+	if err != nil {
+		return err
+	}
+	return call(objs, "PlayPause")
+}
+
+func (m *MPRIS) PlayPausePlayer(name string) error {
+	obj := m.conn.Object(name, mprisPath)
+	return obj.Call(playerIface+".PlayPause", 0).Err
 }

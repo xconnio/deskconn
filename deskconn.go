@@ -22,7 +22,8 @@ const (
 	ProcedureScreenIsLockedCloud      = "io.xconn.deskconn.deskconnd.%s.screen.islocked"
 	ProcedureShellCloud               = "io.xconn.deskconn.deskconnd.%s.shell"
 
-	ProcedureMPRISPlayers = "io.xconn.deskconnd.mpris.players"
+	ProcedureMPRISPlayers   = "io.xconn.deskconnd.mpris.players"
+	ProcedureMPRISPlayPause = "io.xconn.deskconnd.mpris.playpause"
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
@@ -52,6 +53,7 @@ func (d *Deskconn) RegisterLocal(session *xconn.Session) error {
 		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
 		ProcedureShell:               d.shellSession.handleShell(),
 		ProcedureMPRISPlayers:        d.handleListPlayers,
+		ProcedureMPRISPlayPause:      d.handlePlayPause,
 	} {
 		response := session.Register(uri, handler).Do()
 		if response.Err != nil {
@@ -126,4 +128,21 @@ func (d *Deskconn) handleListPlayers(_ context.Context, _ *xconn.Invocation) *xc
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 	return xconn.NewInvocationResult(players)
+}
+
+func (d *Deskconn) handlePlayPause(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	player, err := inv.ArgString(0)
+
+	var playPauseErr error
+	if err != nil {
+		playPauseErr = d.mpris.PlayPause()
+	} else {
+		playPauseErr = d.mpris.PlayPausePlayer(player)
+	}
+
+	if playPauseErr != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, playPauseErr.Error())
+	}
+
+	return xconn.NewInvocationResult()
 }
