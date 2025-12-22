@@ -2,6 +2,7 @@ package deskconn
 
 import (
 	"context"
+	"fmt"
 
 	log "github.com/sirupsen/logrus"
 
@@ -9,35 +10,55 @@ import (
 )
 
 const (
-	ProcedureScreenBrightnessGet = "io.xconn.deskconnd.screen.brightness.get"
-	ProcedureScreenBrightnessSet = "io.xconn.deskconnd.screen.brightness.set"
-	ProcedureScreenLock          = "io.xconn.deskconnd.screen.lock"
-	ProcedureScreenIsLocked      = "io.xconn.deskconnd.screen.islocked"
+	ProcedureScreenBrightnessGet = "io.xconn.deskconn.deskconnd.screen.brightness.get"
+	ProcedureScreenBrightnessSet = "io.xconn.deskconn.deskconnd.screen.brightness.set"
+	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
+	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
+
+	ProcedureScreenBrightnessGetCloud = "io.xconn.deskconn.deskconnd.%s.screen.brightness.get"
+	ProcedureScreenBrightnessSetCloud = "io.xconn.deskconn.deskconnd.%s.screen.brightness.set"
+	ProcedureScreenLockCloud          = "io.xconn.deskconn.deskconnd.%s.screen.lock"
+	ProcedureScreenIsLockedCloud      = "io.xconn.deskconn.deskconnd.%s.screen.islocked"
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
 )
 
 type Deskconn struct {
-	session *xconn.Session
-	screen  *Screen
+	screen *Screen
 }
 
-func NewDeskconn(session *xconn.Session, screen *Screen) *Deskconn {
+func NewDeskconn(screen *Screen) *Deskconn {
 	return &Deskconn{
-		session: session,
-		screen:  screen,
+		screen: screen,
 	}
 }
 
-func (d *Deskconn) Start() error {
+func (d *Deskconn) RegisterLocal(session *xconn.Session) error {
 	for uri, handler := range map[string]xconn.InvocationHandler{
 		ProcedureScreenBrightnessGet: d.brightnessGetHandler,
 		ProcedureScreenBrightnessSet: d.brightnessSetHandler,
 		ProcedureScreenLock:          d.lockScreenLockHandler,
 		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
 	} {
-		response := d.session.Register(uri, handler).Do()
+		response := session.Register(uri, handler).Do()
+		if response.Err != nil {
+			return response.Err
+		}
+
+		log.Printf("Registered procedure %s", uri)
+	}
+	return nil
+}
+
+func (d *Deskconn) RegisterCloud(session *xconn.Session, machineID string) error {
+	for uri, handler := range map[string]xconn.InvocationHandler{
+		fmt.Sprintf(ProcedureScreenBrightnessGetCloud, machineID): d.brightnessGetHandler,
+		fmt.Sprintf(ProcedureScreenBrightnessSetCloud, machineID): d.brightnessSetHandler,
+		fmt.Sprintf(ProcedureScreenLockCloud, machineID):          d.lockScreenLockHandler,
+		fmt.Sprintf(ProcedureScreenIsLockedCloud, machineID):      d.lockScreenIsLockedHandler,
+	} {
+		response := session.Register(uri, handler).Do()
 		if response.Err != nil {
 			return response.Err
 		}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/xconnio/wampproto-go/auth"
@@ -13,7 +12,7 @@ import (
 )
 
 const (
-	URI                            = "ws://192.168.0.176:8080/ws"
+	URI                            = "ws://192.168.1.5:8080/ws"
 	Realm                          = "io.xconn.deskconn"
 	ProcedureDeskconnAttachDesktop = "io.xconn.deskconn.desktop.attach"
 	MachineIDPath                  = "/etc/machine-id"
@@ -51,13 +50,8 @@ func Attach(ctx context.Context, username, password, desktopName string) error {
 }
 
 func writeCredentialsFile(machineID, publicKey, privateKey string) error {
-	homedir, err := os.UserHomeDir()
+	credFilePath, err := credentialsFilePath()
 	if err != nil {
-		return fmt.Errorf("failed to get user home dir: %w", err)
-	}
-	credFilePath := filepath.Join(homedir, ".deskconn/credentials.json")
-
-	if err := os.MkdirAll(filepath.Dir(credFilePath), 0755); err != nil {
 		return err
 	}
 

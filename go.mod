@@ -3,6 +3,7 @@ module github.com/xconnio/deskconn
 go 1.22
 
 require (
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/godbus/dbus/v5 v5.2.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/sirupsen/logrus v1.9.3
