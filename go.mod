@@ -3,6 +3,7 @@ module github.com/xconnio/deskconn
 go 1.22
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/godbus/dbus/v5 v5.2.0
 	github.com/grandcat/zeroconf v1.0.0
@@ -10,6 +11,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/xconnio/wampproto-go v0.0.0-20251105154130-632905d8a3d9
 	github.com/xconnio/xconn-go v0.0.0-20251108143232-364781a4f29a
+	golang.org/x/term v0.29.0
 )
 
 require (

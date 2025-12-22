@@ -14,23 +14,27 @@ const (
 	ProcedureScreenBrightnessSet = "io.xconn.deskconn.deskconnd.screen.brightness.set"
 	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
+	ProcedureShell               = "io.xconn.deskconn.deskconnd.shell"
 
 	ProcedureScreenBrightnessGetCloud = "io.xconn.deskconn.deskconnd.%s.screen.brightness.get"
 	ProcedureScreenBrightnessSetCloud = "io.xconn.deskconn.deskconnd.%s.screen.brightness.set"
 	ProcedureScreenLockCloud          = "io.xconn.deskconn.deskconnd.%s.screen.lock"
 	ProcedureScreenIsLockedCloud      = "io.xconn.deskconn.deskconnd.%s.screen.islocked"
+	ProcedureShellCloud               = "io.xconn.deskconn.deskconnd.%s.shell"
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
 )
 
 type Deskconn struct {
-	screen *Screen
+	screen       *Screen
+	shellSession *interactiveShellSession
 }
 
 func NewDeskconn(screen *Screen) *Deskconn {
 	return &Deskconn{
-		screen: screen,
+		screen:       screen,
+		shellSession: newInteractiveShellSession(),
 	}
 }
 
@@ -40,6 +44,7 @@ func (d *Deskconn) RegisterLocal(session *xconn.Session) error {
 		ProcedureScreenBrightnessSet: d.brightnessSetHandler,
 		ProcedureScreenLock:          d.lockScreenLockHandler,
 		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
+		ProcedureShell:               d.shellSession.handleShell(),
 	} {
 		response := session.Register(uri, handler).Do()
 		if response.Err != nil {
@@ -57,6 +62,7 @@ func (d *Deskconn) RegisterCloud(session *xconn.Session, machineID string) error
 		fmt.Sprintf(ProcedureScreenBrightnessSetCloud, machineID): d.brightnessSetHandler,
 		fmt.Sprintf(ProcedureScreenLockCloud, machineID):          d.lockScreenLockHandler,
 		fmt.Sprintf(ProcedureScreenIsLockedCloud, machineID):      d.lockScreenIsLockedHandler,
+		fmt.Sprintf(ProcedureShellCloud, machineID):               d.shellSession.handleShell(),
 	} {
 		response := session.Register(uri, handler).Do()
 		if response.Err != nil {
