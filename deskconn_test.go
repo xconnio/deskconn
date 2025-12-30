@@ -34,8 +34,8 @@ func TestBrightnessGetSet(t *testing.T) {
 	sessionConn, err := dbus.ConnectSessionBus()
 	require.NoError(t, err)
 	screen := deskconn.NewScreen(sessionConn, conn)
-	d := deskconn.NewDeskconn(callee, screen)
-	require.NoError(t, d.Start())
+	d := deskconn.NewDeskconn(screen)
+	require.NoError(t, d.RegisterLocal(callee))
 
 	callResp := caller.Call(deskconn.ProcedureScreenBrightnessGet).Do()
 	if callResp.Err != nil {
