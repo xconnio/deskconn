@@ -87,7 +87,7 @@ func main() {
 		retryDelay := 1 * time.Second
 		maxDelay := 30 * time.Second
 		for {
-			cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.URI, deskconn.Realm,
+			cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm,
 				cred.AuthID, cred.PrivateKey)
 			if err != nil {
 				log.Printf("failed to connect to cloud, will retry in %v: %v", retryDelay, err)

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/xconnio/deskconn"
 	"github.com/xconnio/xconn-go"
 )
@@ -35,6 +37,8 @@ func main() {
 }
 
 func attach(args []string) error {
+	useStdin, args := extractPasswordStdin(args)
+
 	fs := flag.NewFlagSet("attach", flag.ExitOnError)
 
 	name := fs.String("name", "", "")
@@ -42,13 +46,10 @@ func attach(args []string) error {
 
 	_ = fs.Parse(args)
 
-	rest := fs.Args()
-	if len(rest) != 2 {
-		return fmt.Errorf("attach requires <username> <password>")
+	username, err := parseUsername(fs.Args())
+	if err != nil {
+		return err
 	}
-
-	username := rest[0]
-	password := rest[1]
 
 	deviceName := *name
 	if deviceName == "" {
@@ -58,16 +59,32 @@ func attach(args []string) error {
 		}
 		deviceName = host
 	}
+
+	password, err := readPassword(useStdin)
+	if err != nil {
+		return err
+	}
+
 	return deskconn.Attach(context.Background(), username, password, deviceName)
 }
 
 func shell(args []string) error {
-	if len(args) != 2 {
-		return fmt.Errorf("shell requires <username> <password>")
+	useStdin, args := extractPasswordStdin(args)
+
+	fs := flag.NewFlagSet("shell", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	username, err := parseUsername(fs.Args())
+	if err != nil {
+		return err
 	}
-	username := args[0]
-	password := args[1]
-	session, err := xconn.ConnectCRA(context.Background(), deskconn.URI, deskconn.Realm, username, password)
+
+	password, err := readPassword(useStdin)
+	if err != nil {
+		return err
+	}
+
+	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
 	if err != nil {
 		return err
 	}
@@ -96,6 +113,55 @@ func shell(args []string) error {
 	}
 
 	return deskconn.StartInteractiveShell(session, fmt.Sprintf(deskconn.ProcedureShellCloud, machineID))
+}
+
+func extractPasswordStdin(args []string) (bool, []string) {
+	out := make([]string, 0, len(args))
+	useStdin := false
+
+	for _, a := range args {
+		if a == "--password-stdin" {
+			useStdin = true
+			continue
+		}
+		out = append(out, a)
+	}
+
+	return useStdin, out
+}
+
+func parseUsername(args []string) (string, error) {
+	if len(args) != 1 {
+		return "", fmt.Errorf("requires <username>")
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return "", fmt.Errorf("invalid username: %s", args[0])
+	}
+	return args[0], nil
+}
+
+func readPassword(fromStdin bool) (string, error) {
+	if fromStdin {
+		reader := bufio.NewReader(os.Stdin)
+		pwd, err := reader.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(pwd, "\r\n"), nil
+	}
+
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", fmt.Errorf("password required from TTY or use --password-stdin")
+	}
+
+	fmt.Fprint(os.Stderr, "Password: ")
+	pwd, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+
+	return string(pwd), nil
 }
 
 func selectDevice(callResp xconn.CallResponse) (int, error) {
@@ -173,5 +239,13 @@ func selectDevice(callResp xconn.CallResponse) (int, error) {
 
 func usage() {
 	fmt.Println(`Usage:
-  deskconnctl attach [--name|-n <name>] <username> <password>`)
+  deskconnctl attach [--name|-n <name>] [--password-stdin] <username>
+  deskconnctl shell  [--password-stdin] <username>
+
+Examples:
+  deskconnctl attach admin
+  deskconnctl attach -n laptop admin
+  deskconnctl shell admin
+  echo secret | deskconnctl attach --password-stdin admin
+  echo secret | deskconnctl shell admin --password-stdin`)
 }

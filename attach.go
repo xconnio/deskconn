@@ -12,11 +12,17 @@ import (
 )
 
 const (
-	URI                            = "ws://192.168.1.5:8080/ws"
 	Realm                          = "io.xconn.deskconn"
 	ProcedureDeskconnAttachDesktop = "io.xconn.deskconn.desktop.attach"
 	MachineIDPath                  = "/etc/machine-id"
 )
+
+func CloudURI() string {
+	if v, ok := os.LookupEnv("DESKCONN_CLOUD_URI"); ok {
+		return v
+	}
+	return "ws://182.191.70.194:8080/ws"
+}
 
 type Credentials struct {
 	AuthID     string `json:"auth_id"`
@@ -25,7 +31,7 @@ type Credentials struct {
 }
 
 func Attach(ctx context.Context, username, password, desktopName string) error {
-	session, err := xconn.ConnectCRA(ctx, URI, Realm, username, password)
+	session, err := xconn.ConnectCRA(ctx, CloudURI(), Realm, username, password)
 	if err != nil {
 		return err
 	}
