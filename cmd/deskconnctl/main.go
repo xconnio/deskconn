@@ -65,7 +65,29 @@ func attach(args []string) error {
 		return err
 	}
 
-	return deskconn.Attach(context.Background(), username, password, deviceName)
+	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
+	if err != nil {
+		return err
+	}
+
+	callResp := session.Call(deskconn.ProcedureDeskconnOrganizationList).Do()
+	if callResp.Err != nil {
+		return callResp.Err
+	}
+	if len(callResp.Args()) == 0 {
+		return fmt.Errorf("no organization found")
+	}
+
+	idx, err := selectOrganization(callResp)
+	if err != nil {
+		return err
+	}
+
+	organizationDict, err := callResp.ArgDict(idx)
+	if err != nil {
+		return err
+	}
+	return deskconn.Attach(session, deviceName, organizationDict.StringOr("id", ""))
 }
 
 func shell(args []string) error {
@@ -164,7 +186,7 @@ func readPassword(fromStdin bool) (string, error) {
 	return string(pwd), nil
 }
 
-func selectDevice(callResp xconn.CallResponse) (int, error) {
+func selectOption(callResp xconn.CallResponse, title string, idField string, prompt string) (int, error) {
 	count := len(callResp.Args())
 	if count == 1 {
 		return 0, nil
@@ -187,7 +209,8 @@ func selectDevice(callResp xconn.CallResponse) (int, error) {
 		}
 
 		name, _ := dict.String("name")
-		id, _ := dict.String("authid")
+		id, _ := dict.String(idField)
+
 		if name == "" {
 			name = id
 		}
@@ -204,7 +227,7 @@ func selectDevice(callResp xconn.CallResponse) (int, error) {
 
 	fmt.Println()
 	fmt.Println(sep)
-	fmt.Println(" Available devices")
+	fmt.Println(" ", title)
 	fmt.Println(sep)
 
 	for _, r := range rows {
@@ -212,7 +235,7 @@ func selectDevice(callResp xconn.CallResponse) (int, error) {
 	}
 
 	fmt.Println(sep)
-	fmt.Printf(" Select device [1-%d] (default 1): ", count)
+	fmt.Printf(" %s [1-%d] (default 1): ", prompt, count)
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -235,6 +258,24 @@ func selectDevice(callResp xconn.CallResponse) (int, error) {
 
 		return idx - 1, nil
 	}
+}
+
+func selectDevice(callResp xconn.CallResponse) (int, error) {
+	return selectOption(
+		callResp,
+		"Available devices",
+		"authid",
+		"Select device",
+	)
+}
+
+func selectOrganization(callResp xconn.CallResponse) (int, error) {
+	return selectOption(
+		callResp,
+		"Available organizations",
+		"id",
+		"Select organization",
+	)
 }
 
 func usage() {

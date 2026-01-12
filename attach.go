@@ -1,7 +1,6 @@
 package deskconn
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,9 +11,10 @@ import (
 )
 
 const (
-	Realm                          = "io.xconn.deskconn"
-	ProcedureDeskconnAttachDesktop = "io.xconn.deskconn.desktop.attach"
-	MachineIDPath                  = "/etc/machine-id"
+	Realm                             = "io.xconn.deskconn"
+	ProcedureDeskconnAttachDesktop    = "io.xconn.deskconn.desktop.attach"
+	ProcedureDeskconnOrganizationList = "io.xconn.deskconn.organization.list"
+	MachineIDPath                     = "/etc/machine-id"
 )
 
 func CloudURI() string {
@@ -30,12 +30,7 @@ type Credentials struct {
 	PrivateKey string `json:"private_key"`
 }
 
-func Attach(ctx context.Context, username, password, desktopName string) error {
-	session, err := xconn.ConnectCRA(ctx, CloudURI(), Realm, username, password)
-	if err != nil {
-		return err
-	}
-
+func Attach(session *xconn.Session, desktopName, orgID string) error {
 	machineID, err := os.ReadFile(MachineIDPath)
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
@@ -47,7 +42,8 @@ func Attach(ctx context.Context, username, password, desktopName string) error {
 		return fmt.Errorf("failed to generate cryptosign keypair: %w", err)
 	}
 
-	callResp := session.Call(ProcedureDeskconnAttachDesktop).Args(machineIDStr, publicKey).Kwarg("name", desktopName).Do()
+	callResp := session.Call(ProcedureDeskconnAttachDesktop).Args(machineIDStr, publicKey, orgID).
+		Kwarg("name", desktopName).Do()
 	if callResp.Err != nil {
 		return fmt.Errorf("failed to attach desktop: %w", callResp.Err)
 	}
