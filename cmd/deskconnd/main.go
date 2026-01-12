@@ -97,13 +97,11 @@ func main() {
 				if retryDelay > maxDelay {
 					retryDelay = maxDelay
 				}
+				time.Sleep(retryDelay)
 				continue
 			}
 
 			log.Println("connected successfully to cloud")
-
-			// reset backoff after successful connection
-			retryDelay = 1 * time.Second
 
 			if err := deskconnApis.RegisterCloud(cloudSession, machineIDStr); err != nil {
 				// exponential backoff
@@ -113,7 +111,12 @@ func main() {
 				}
 				log.Printf("failed to register procedures on cloud, will retry in %v: %v", retryDelay, err)
 				_ = cloudSession.Leave()
+				time.Sleep(retryDelay)
+				continue
 			}
+
+			// reset backoff after successful connection
+			retryDelay = 1 * time.Second
 
 			// wait for session to disconnect
 			<-cloudSession.Done()
