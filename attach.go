@@ -25,9 +25,10 @@ func CloudURI() string {
 }
 
 type Credentials struct {
-	AuthID     string `json:"auth_id"`
-	PublicKey  string `json:"public_key"`
-	PrivateKey string `json:"private_key"`
+	AuthID         string `json:"auth_id"`
+	PublicKey      string `json:"public_key"`
+	PrivateKey     string `json:"private_key"`
+	OrganizationID string `json:"organization_id"`
 }
 
 func Attach(session *xconn.Session, desktopName, orgID string) error {
@@ -48,19 +49,20 @@ func Attach(session *xconn.Session, desktopName, orgID string) error {
 		return fmt.Errorf("failed to attach desktop: %w", callResp.Err)
 	}
 
-	return writeCredentialsFile(machineIDStr, publicKey, privateKey)
+	return writeCredentialsFile(machineIDStr, publicKey, privateKey, orgID)
 }
 
-func writeCredentialsFile(machineID, publicKey, privateKey string) error {
+func writeCredentialsFile(machineID, publicKey, privateKey, orgID string) error {
 	credFilePath, err := credentialsFilePath()
 	if err != nil {
 		return err
 	}
 
 	creds := Credentials{
-		AuthID:     machineID,
-		PublicKey:  publicKey,
-		PrivateKey: privateKey,
+		AuthID:         machineID,
+		PublicKey:      publicKey,
+		PrivateKey:     privateKey,
+		OrganizationID: orgID,
 	}
 
 	data, err := json.MarshalIndent(creds, "", "  ")
