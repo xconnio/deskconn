@@ -60,7 +60,7 @@ func credentialsFilePath() (string, error) {
 		return "", fmt.Errorf("failed to get user home dir: %w", err)
 	}
 
-	credFilePath := filepath.Join(homedir, ".deskconn/credentials.env")
+	credFilePath := filepath.Join(homedir, ".deskconn/credentials.json")
 
 	_ = os.MkdirAll(filepath.Dir(credFilePath), 0755)
 
