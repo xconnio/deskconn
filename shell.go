@@ -131,7 +131,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 	}
 }
 
-func StartInteractiveShell(session *xconn.Session, procedure string) error {
+func StartInteractiveShell(session *xconn.Session) error {
 	fd := int(os.Stdin.Fd())
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
@@ -176,7 +176,7 @@ func StartInteractiveShell(session *xconn.Session, procedure string) error {
 		}
 	}()
 
-	call := session.Call(procedure).
+	call := session.Call(ProcedureShell).
 		ProgressSender(func(ctx context.Context) *xconn.Progress {
 			p, ok := <-progressChan
 			if !ok {

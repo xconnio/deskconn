@@ -15,12 +15,6 @@ const (
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
 	ProcedureShell               = "io.xconn.deskconn.deskconnd.shell"
 
-	ProcedureScreenBrightnessGetCloud = "io.xconn.deskconn.deskconnd.%s.screen.brightness.get"
-	ProcedureScreenBrightnessSetCloud = "io.xconn.deskconn.deskconnd.%s.screen.brightness.set"
-	ProcedureScreenLockCloud          = "io.xconn.deskconn.deskconnd.%s.screen.lock"
-	ProcedureScreenIsLockedCloud      = "io.xconn.deskconn.deskconnd.%s.screen.islocked"
-	ProcedureShellCloud               = "io.xconn.deskconn.deskconnd.%s.shell"
-
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
 	ProcedureMPRISPlay      = "io.xconn.deskconn.deskconnd.mpris.play"
