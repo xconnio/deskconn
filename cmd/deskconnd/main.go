@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"strings"
@@ -74,7 +75,7 @@ func main() {
 	mpris := deskconn.NewMPRIS(sessionBus)
 	deskconnApis := deskconn.NewDeskconn(localSession, screen, mpris)
 
-	if err := deskconnApis.RegisterLocal(localSession); err != nil {
+	if err := deskconnApis.Register(localSession); err != nil {
 		log.Fatal(err)
 	}
 
@@ -88,7 +89,8 @@ func main() {
 		retryDelay := 1 * time.Second
 		maxDelay := 30 * time.Second
 		for {
-			cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm,
+			deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", cred.OrganizationID, machineIDStr)
+			cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deviceRealm,
 				cred.AuthID, cred.PrivateKey)
 			if err != nil {
 				log.Printf("failed to connect to cloud, will retry in %v: %v", retryDelay, err)
@@ -104,7 +106,7 @@ func main() {
 
 			log.Println("connected successfully to cloud")
 
-			if err := deskconnApis.RegisterCloud(cloudSession, machineIDStr); err != nil {
+			if err := deskconnApis.Register(cloudSession); err != nil {
 				// exponential backoff
 				retryDelay *= 2
 				if retryDelay > maxDelay {
