@@ -133,8 +133,17 @@ func shell(args []string) error {
 	if err != nil {
 		return err
 	}
+	organizationID, err := deviceDict.String("organization_id")
+	if err != nil {
+		return err
+	}
 
-	return deskconn.StartInteractiveShell(session, fmt.Sprintf(deskconn.ProcedureShellCloud, machineID))
+	deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", organizationID, machineID)
+	deviceSession, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deviceRealm, username, password)
+	if err != nil {
+		return err
+	}
+	return deskconn.StartInteractiveShell(deviceSession)
 }
 
 func extractPasswordStdin(args []string) (bool, []string) {
