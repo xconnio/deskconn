@@ -21,7 +21,7 @@ func CloudURI() string {
 	if v, ok := os.LookupEnv("DESKCONN_CLOUD_URI"); ok {
 		return v
 	}
-	return "ws://159.65.112.187:8080/ws"
+	return "wss://cloud.xconn.io/wss"
 }
 
 type Credentials struct {
