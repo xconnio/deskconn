@@ -31,6 +31,12 @@ func newInteractiveShellSession() *interactiveShellSession {
 
 func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation) (*os.File, error) {
 	cmd := exec.Command("bash")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home dir: %w", err)
+	}
+	cmd.Dir = homeDir
+
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start PTY: %w", err)
