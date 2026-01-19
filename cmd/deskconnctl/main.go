@@ -26,6 +26,10 @@ func main() {
 		if err := attach(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
+	case "detach":
+		if err := detach(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 	case "shell":
 		if err := shell(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -88,6 +92,30 @@ func attach(args []string) error {
 		return err
 	}
 	return deskconn.Attach(session, deviceName, organizationDict.StringOr("id", ""))
+}
+
+func detach(args []string) error {
+	useStdin, args := extractPasswordStdin(args)
+
+	fs := flag.NewFlagSet("detach", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	username, err := parseUsername(fs.Args())
+	if err != nil {
+		return err
+	}
+
+	password, err := readPassword(useStdin)
+	if err != nil {
+		return err
+	}
+
+	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
+	if err != nil {
+		return err
+	}
+
+	return deskconn.Detach(session)
 }
 
 func shell(args []string) error {
