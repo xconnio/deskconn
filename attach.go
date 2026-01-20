@@ -13,6 +13,7 @@ import (
 const (
 	Realm                             = "io.xconn.deskconn"
 	ProcedureDeskconnAttachDesktop    = "io.xconn.deskconn.desktop.attach"
+	ProcedureDeskconnDetachDesktop    = "io.xconn.deskconn.desktop.detach"
 	ProcedureDeskconnOrganizationList = "io.xconn.deskconn.organization.list"
 	MachineIDPath                     = "/etc/machine-id"
 )
@@ -50,6 +51,21 @@ func Attach(session *xconn.Session, desktopName, orgID string) error {
 	}
 
 	return writeCredentialsFile(machineIDStr, publicKey, privateKey, orgID)
+}
+
+func Detach(session *xconn.Session) error {
+	machineID, err := os.ReadFile(MachineIDPath)
+	if err != nil {
+		return fmt.Errorf("failed to read machine-id: %w", err)
+	}
+	machineIDStr := strings.TrimSpace(string(machineID))
+
+	callResp := session.Call(ProcedureDeskconnDetachDesktop).Args(machineIDStr).Do()
+	if callResp.Err != nil {
+		return fmt.Errorf("failed to detach desktop: %w", callResp.Err)
+	}
+
+	return nil
 }
 
 func writeCredentialsFile(machineID, publicKey, privateKey, orgID string) error {
