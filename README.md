@@ -3,6 +3,11 @@
 Deskconn is a desktop management suite.
 It consists of two main tools: a desktop daemon and a command-line client.
 
+## Installation
+```bash
+ curl -L https://raw.githubusercontent.com/xconnio/deskconn/main/install.sh | sh
+```
+
 ## deskconnd
 
 The desktop daemon responsible for registering and exposing desktop APIs to the Deskconn ecosystem. It runs in the
