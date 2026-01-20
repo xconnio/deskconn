@@ -59,24 +59,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	var screen *deskconn.Screen
-	var mpris *deskconn.MPRIS
-	if snapCommon := os.Getenv("SNAP_COMMON"); snapCommon == "" {
-		systemBus, err := dbus.ConnectSystemBus()
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer systemBus.Close()
-
-		sessionBus, err := dbus.ConnectSessionBus()
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer sessionBus.Close()
-
-		screen = deskconn.NewScreen(sessionBus, systemBus)
-		mpris = deskconn.NewMPRIS(sessionBus)
+	systemBus, err := dbus.ConnectSystemBus()
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer systemBus.Close()
+
+	sessionBus, err := dbus.ConnectSessionBus()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer sessionBus.Close()
+
+	screen := deskconn.NewScreen(sessionBus, systemBus)
+	mpris := deskconn.NewMPRIS(sessionBus)
 	deskconnApis := deskconn.NewDeskconn(screen, mpris)
 
 	if err := deskconnApis.Register(localSession); err != nil {
