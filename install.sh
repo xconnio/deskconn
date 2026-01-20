@@ -24,7 +24,6 @@ Description=DeskConn Daemon
 After=network.target
 
 [Service]
-Type=simple
 ExecStart=$BIN_DIR/deskconnd
 Restart=always
 RestartSec=5
