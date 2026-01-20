@@ -41,20 +41,12 @@ func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 }
 
 func (d *Deskconn) Register(session *xconn.Session) error {
-	registerResp := session.Register(ProcedureShell, d.shellSession.handleShell()).Do()
-	if registerResp.Err != nil {
-		return registerResp.Err
-	}
-	log.Printf("Registered procedure %s", ProcedureShell)
-
-	if d.screen == nil || d.mpris == nil {
-		return nil
-	}
 	for uri, handler := range map[string]xconn.InvocationHandler{
 		ProcedureScreenBrightnessGet: d.brightnessGetHandler,
 		ProcedureScreenBrightnessSet: d.brightnessSetHandler,
 		ProcedureScreenLock:          d.lockScreenLockHandler,
 		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
+		ProcedureShell:               d.shellSession.handleShell(),
 		ProcedureMPRISPlayers:        d.handleListPlayers,
 		ProcedureMPRISPlayPause:      d.handlePlayPause,
 		ProcedureMPRISPlay:           d.handlePlay,
