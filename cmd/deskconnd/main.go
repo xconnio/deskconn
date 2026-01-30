@@ -12,13 +12,12 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn"
+	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
+	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-const (
-	realm = "realm1"
-	port  = 8080
-)
+const port = 8080
 
 func main() {
 	cred, err := deskconn.EnsureCredentials()
@@ -28,11 +27,20 @@ func main() {
 
 	host, _ := os.Hostname()
 
+	machineID, err := os.ReadFile(deskconn.MachineIDPath)
+	if err != nil {
+		log.Fatalln("failed to read machine-id: ", err)
+	}
+	machineIDStr := strings.TrimSpace(string(machineID))
+
 	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
 	if err != nil {
 		log.Fatalln(err)
 	}
-	err = router.AddRealm(realm, &xconn.RealmConfig{
+
+	deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", cred.OrganizationID, machineIDStr)
+
+	err = router.AddRealm(deviceRealm, &xconn.RealmConfig{
 		Roles: []xconn.RealmRole{
 			{Name: "anonymous", Permissions: []xconn.Permission{
 				{
@@ -54,7 +62,7 @@ func main() {
 	}
 	defer listener.Close()
 
-	localSession, err := xconn.ConnectInMemory(router, realm)
+	localSession, err := xconn.ConnectInMemory(router, deviceRealm)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,16 +88,9 @@ func main() {
 	}
 
 	go func() {
-		machineID, err := os.ReadFile(deskconn.MachineIDPath)
-		if err != nil {
-			log.Fatalln("failed to read machine-id: ", err)
-		}
-		machineIDStr := strings.TrimSpace(string(machineID))
-
 		retryDelay := 1 * time.Second
 		maxDelay := 30 * time.Second
 		for {
-			deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", cred.OrganizationID, machineIDStr)
 			cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deviceRealm,
 				cred.AuthID, cred.PrivateKey)
 			if err != nil {
@@ -118,6 +119,20 @@ func main() {
 				continue
 			}
 
+			webRtcManager := xconnwebrtc.NewWebRTCHandler()
+			cfg := &xconnwebrtc.ProviderConfig{
+				Session:                     cloudSession,
+				ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
+				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
+				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
+				Serializer:                  &serializers.CBORSerializer{},
+				Authenticator:               nil,
+				Router:                      router,
+			}
+			if err := webRtcManager.Setup(cfg); err != nil {
+				log.Fatal("Failed to setup webRtc provider:", err)
+			}
+
 			// reset backoff after successful connection
 			retryDelay = 1 * time.Second
 
@@ -128,7 +143,7 @@ func main() {
 		}
 	}()
 
-	zeroconfServer, err := deskconn.AdvertiseService(host, port, realm)
+	zeroconfServer, err := deskconn.AdvertiseService(host, port, deviceRealm)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -9,10 +9,13 @@ import (
 	"strconv"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
 	"github.com/xconnio/deskconn"
 	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-go/auth"
+	"github.com/xconnio/xconn-webrtc-go"
 )
 
 func main() {
@@ -171,7 +174,24 @@ func shell(args []string) error {
 	if err != nil {
 		return err
 	}
-	return deskconn.StartInteractiveShell(deviceSession)
+
+	config := &xconnwebrtc.ClientConfig{
+		Realm:                    deviceRealm,
+		ProcedureWebRTCOffer:     deskconn.ProcedureWebRTCOffer,
+		TopicAnswererOnCandidate: deskconn.TopicAnswererOnCandidate,
+		TopicOffererOnCandidate:  deskconn.TopicOffererOnCandidate,
+		Serializer:               xconn.CBORSerializerSpec,
+		Authenticator:            auth.NewAnonymousAuthenticator("", map[string]any{}),
+		Session:                  deviceSession,
+	}
+
+	shellSession, err := xconnwebrtc.ConnectWAMP(config)
+	if err != nil {
+		log.Printf("failed to connect using webrtc: %v", err)
+		shellSession = deviceSession
+	}
+
+	return deskconn.StartInteractiveShell(shellSession)
 }
 
 func extractPasswordStdin(args []string) (bool, []string) {
