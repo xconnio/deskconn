@@ -12,7 +12,9 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn"
+	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
+	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
 const port = 8080
@@ -115,6 +117,20 @@ func main() {
 				_ = cloudSession.Leave()
 				time.Sleep(retryDelay)
 				continue
+			}
+
+			webRtcManager := xconnwebrtc.NewWebRTCHandler()
+			cfg := &xconnwebrtc.ProviderConfig{
+				Session:                     cloudSession,
+				ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
+				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
+				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
+				Serializer:                  &serializers.CBORSerializer{},
+				Authenticator:               nil,
+				Router:                      router,
+			}
+			if err := webRtcManager.Setup(cfg); err != nil {
+				log.Fatal("Failed to setup webRtc provider:", err)
 			}
 
 			// reset backoff after successful connection

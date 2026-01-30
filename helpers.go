@@ -10,6 +10,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	ProcedureWebRTCOffer     = "io.xconn.webrtc.offer"
+	TopicAnswererOnCandidate = "io.xconn.webrtc.answerer.on_candidate"
+	TopicOffererOnCandidate  = "io.xconn.webrtc.offerer.on_candidate"
+)
+
 func EnsureCredentials() (*Credentials, error) {
 	credFilePath, err := credentialsFilePath()
 	if err != nil {
