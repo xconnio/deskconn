@@ -17,6 +17,8 @@ const (
 	ProcedureWebRTCOffer     = "io.xconn.webrtc.offer"
 	TopicAnswererOnCandidate = "io.xconn.webrtc.answerer.on_candidate"
 	TopicOffererOnCandidate  = "io.xconn.webrtc.offerer.on_candidate"
+
+	ProcedurePrincipalCreate = "io.xconn.deskconn.account.principal.create"
 )
 
 func EnsureCredentials() (*Credentials, error) {
@@ -102,7 +104,7 @@ func Login(session *xconn.Session, username string) error {
 		return fmt.Errorf("failed to generate keypair: %w", err)
 	}
 
-	callResp := session.Call("io.xconn.deskconn.account.principal.create").Arg(pub).Do()
+	callResp := session.Call(ProcedurePrincipalCreate).Arg(pub).Do()
 	if callResp.Err != nil {
 		return fmt.Errorf("failed to create principal: %w", callResp.Err)
 	}
