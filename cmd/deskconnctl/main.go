@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -34,7 +35,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	case "shell":
-		if err := shell(os.Args[2:]); err != nil {
+		if err := shell(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	case "login":
+		if err := login(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	default:
@@ -121,7 +126,7 @@ func detach(args []string) error {
 	return deskconn.Detach(session)
 }
 
-func shell(args []string) error {
+func login(args []string) error {
 	useStdin, args := extractPasswordStdin(args)
 
 	fs := flag.NewFlagSet("shell", flag.ExitOnError)
@@ -138,6 +143,28 @@ func shell(args []string) error {
 	}
 
 	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
+	if err != nil {
+		return err
+	}
+
+	return deskconn.Login(session, username)
+}
+
+func shell() error {
+	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		return err
+	}
+
+	credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
+	if err != nil {
+		return fmt.Errorf("kindly login first: %w", err)
+	}
+	credentials := strings.Split(string(credentialsStr), " ")
+	authid := strings.TrimSpace(credentials[1])
+	privKey := strings.TrimSpace(credentials[0])
+
+	session, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm, authid, privKey)
 	if err != nil {
 		return err
 	}
@@ -170,7 +197,7 @@ func shell(args []string) error {
 	}
 
 	deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", organizationID, machineID)
-	deviceSession, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deviceRealm, username, password)
+	deviceSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deviceRealm, authid, privKey)
 	if err != nil {
 		return err
 	}
