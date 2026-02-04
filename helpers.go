@@ -8,6 +8,9 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/xconnio/wampproto-go/auth"
+	"github.com/xconnio/xconn-go"
 )
 
 const (
@@ -71,4 +74,46 @@ func credentialsFilePath() (string, error) {
 	_ = os.MkdirAll(filepath.Dir(credFilePath), 0755)
 
 	return credFilePath, nil
+}
+
+func CfgDirectory() (string, error) {
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
+	cfgDirectory := filepath.Join(homedir, ".deskconn")
+
+	_ = os.MkdirAll(filepath.Dir(cfgDirectory), 0755)
+	return cfgDirectory, nil
+}
+
+func Login(session *xconn.Session, username string) error {
+	cfgDirectory, err := CfgDirectory()
+	if err != nil {
+		return err
+	}
+
+	privPath := filepath.Join(cfgDirectory, "id_ed25519")
+	pubPath := filepath.Join(cfgDirectory, "id_ed25519.pub")
+
+	pub, priv, err := auth.GenerateCryptoSignKeyPair()
+	if err != nil {
+		return fmt.Errorf("failed to generate keypair: %w", err)
+	}
+
+	callResp := session.Call("io.xconn.deskconn.account.principal.create").Arg(pub).Do()
+	if callResp.Err != nil {
+		return fmt.Errorf("failed to create principal: %w", callResp.Err)
+	}
+
+	if err = os.WriteFile(privPath, []byte(priv+" "+username+"\n"), 0600); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	if err = os.WriteFile(pubPath, []byte(pub+" "+username+"\n"), 0600); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
 }

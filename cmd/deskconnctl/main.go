@@ -37,6 +37,10 @@ func main() {
 		if err := shell(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
+	case "login":
+		if err := login(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 	default:
 		usage()
 		os.Exit(1)
@@ -119,6 +123,30 @@ func detach(args []string) error {
 	}
 
 	return deskconn.Detach(session)
+}
+
+func login(args []string) error {
+	useStdin, args := extractPasswordStdin(args)
+
+	fs := flag.NewFlagSet("shell", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	username, err := parseUsername(fs.Args())
+	if err != nil {
+		return err
+	}
+
+	password, err := readPassword(useStdin)
+	if err != nil {
+		return err
+	}
+
+	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
+	if err != nil {
+		return err
+	}
+
+	return deskconn.Login(session, username)
 }
 
 func shell(args []string) error {
