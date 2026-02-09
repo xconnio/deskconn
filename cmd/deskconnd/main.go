@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,7 +20,11 @@ import (
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-const port = 8080
+const (
+	port = 8080
+
+	deskconnRealm = "io.xconn.deskconn"
+)
 
 func main() {
 	cred, err := deskconn.EnsureCredentials()
@@ -42,7 +49,21 @@ func main() {
 
 	err = router.AddRealm(deviceRealm, &xconn.RealmConfig{
 		Roles: []xconn.RealmRole{
-			{Name: "anonymous", Permissions: []xconn.Permission{
+			{Name: "owner", Permissions: []xconn.Permission{
+				{
+					URI:         "io.xconn.",
+					MatchPolicy: "prefix",
+					AllowCall:   true,
+				},
+			}},
+			{Name: "admin", Permissions: []xconn.Permission{
+				{
+					URI:         "io.xconn.",
+					MatchPolicy: "prefix",
+					AllowCall:   true,
+				},
+			}},
+			{Name: "member", Permissions: []xconn.Permission{
 				{
 					URI:         "io.xconn.",
 					MatchPolicy: "prefix",
@@ -55,7 +76,27 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	server := xconn.NewServer(router, nil, &xconn.ServerConfig{})
+	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	principalsFile := filepath.Join(cfgDirectory, "principals.json")
+
+	var principals []*deskconn.CryptosignPrincipal
+
+	data, err := os.ReadFile(principalsFile)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Fatal(err)
+		}
+	} else {
+		if err := json.Unmarshal(data, &principals); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	authenticator := deskconn.NewAuthenticator(principals)
+	server := xconn.NewServer(router, authenticator, &xconn.ServerConfig{})
 	listener, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:8080")
 	if err != nil {
 		log.Fatalln(err)
@@ -126,12 +167,76 @@ func main() {
 				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
 				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
 				Serializer:                  &serializers.CBORSerializer{},
-				Authenticator:               nil,
+				Authenticator:               authenticator,
 				Router:                      router,
 			}
 			if err := webRtcManager.Setup(cfg); err != nil {
 				log.Fatal("Failed to setup webRtc provider:", err)
 			}
+
+			// reset backoff after successful connection
+			retryDelay = 1 * time.Second
+
+			// wait for session to disconnect
+			<-cloudSession.Done()
+
+			log.Println("disconnected from cloud, retrying...")
+		}
+	}()
+
+	go func() {
+		retryDelay := 1 * time.Second
+		maxDelay := 30 * time.Second
+		for {
+			cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconnRealm,
+				cred.AuthID, cred.PrivateKey)
+			if err != nil {
+				log.Printf("failed to connect to cloud realm, will retry in %v: %v", retryDelay, err)
+
+				// exponential backoff
+				retryDelay *= 2
+				if retryDelay > maxDelay {
+					retryDelay = maxDelay
+				}
+				time.Sleep(retryDelay)
+				continue
+			}
+
+			callResp := cloudSession.Call(deskconn.ProcedureListKeys).Do()
+			if callResp.Err != nil {
+				// exponential backoff
+				retryDelay *= 2
+				if retryDelay > maxDelay {
+					retryDelay = maxDelay
+				}
+				log.Println("Failed to list keys:", callResp.Err)
+				_ = cloudSession.Leave()
+				time.Sleep(retryDelay)
+				continue
+			}
+
+			jsonData, err := json.MarshalIndent(callResp.Args()[0], "", "  ")
+			if err != nil {
+				log.Println(err)
+				_ = cloudSession.Leave()
+				time.Sleep(retryDelay)
+				continue
+			}
+
+			var cryptosignPrincipals []*deskconn.CryptosignPrincipal
+			if err = json.Unmarshal(jsonData, &cryptosignPrincipals); err != nil {
+				log.Println(err)
+				_ = cloudSession.Leave()
+				time.Sleep(retryDelay)
+				continue
+			}
+
+			jsonData = append(jsonData, '\n')
+			if err = os.WriteFile(principalsFile, jsonData, 0600); err != nil {
+				log.Println(err)
+			}
+
+			authenticator.SetPrincipals(cryptosignPrincipals)
 
 			// reset backoff after successful connection
 			retryDelay = 1 * time.Second
