@@ -95,7 +95,8 @@ func main() {
 		}
 	}
 
-	server := xconn.NewServer(router, nil, &xconn.ServerConfig{})
+	authenticator := deskconn.NewAuthenticator(principals)
+	server := xconn.NewServer(router, authenticator, &xconn.ServerConfig{})
 	listener, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:8080")
 	if err != nil {
 		log.Fatalln(err)
@@ -234,6 +235,8 @@ func main() {
 			if err = os.WriteFile(principalsFile, jsonData, 0600); err != nil {
 				log.Println(err)
 			}
+
+			authenticator.SetPrincipals(cryptosignPrincipals)
 
 			// reset backoff after successful connection
 			retryDelay = 1 * time.Second
