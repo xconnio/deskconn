@@ -167,7 +167,7 @@ func main() {
 				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
 				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
 				Serializer:                  &serializers.CBORSerializer{},
-				Authenticator:               nil,
+				Authenticator:               authenticator,
 				Router:                      router,
 			}
 			if err := webRtcManager.Setup(cfg); err != nil {

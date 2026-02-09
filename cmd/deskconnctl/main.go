@@ -202,13 +202,17 @@ func shell() error {
 		return err
 	}
 
+	authenticator, err := auth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
+	if err != nil {
+		return err
+	}
 	config := &xconnwebrtc.ClientConfig{
 		Realm:                    deviceRealm,
 		ProcedureWebRTCOffer:     deskconn.ProcedureWebRTCOffer,
 		TopicAnswererOnCandidate: deskconn.TopicAnswererOnCandidate,
 		TopicOffererOnCandidate:  deskconn.TopicOffererOnCandidate,
 		Serializer:               xconn.CBORSerializerSpec,
-		Authenticator:            auth.NewAnonymousAuthenticator("", map[string]any{}),
+		Authenticator:            authenticator,
 		Session:                  deviceSession,
 	}
 
