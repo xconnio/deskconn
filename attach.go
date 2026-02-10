@@ -26,7 +26,7 @@ func CloudURI() string {
 }
 
 type Credentials struct {
-	AuthID         string `json:"auth_id"`
+	AuthID         string `json:"authid"`
 	PublicKey      string `json:"public_key"`
 	PrivateKey     string `json:"private_key"`
 	OrganizationID string `json:"organization_id"`
@@ -86,5 +86,6 @@ func writeCredentialsFile(machineID, publicKey, privateKey, orgID string) error 
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
 
+	data = append(data, '\n')
 	return os.WriteFile(credFilePath, data, 0600)
 }
