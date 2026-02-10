@@ -48,6 +48,7 @@ func main() {
 	deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", cred.OrganizationID, machineIDStr)
 
 	err = router.AddRealm(deviceRealm, &xconn.RealmConfig{
+		AutoDiscloseCaller: true,
 		Roles: []xconn.RealmRole{
 			{Name: "owner", Permissions: []xconn.Permission{
 				{
