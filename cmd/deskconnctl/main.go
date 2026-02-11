@@ -3,13 +3,13 @@ package main
 import (
 	"bufio"
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/alecthomas/kingpin/v2"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
@@ -20,50 +20,49 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(1)
-	}
+	app := kingpin.New("deskconnctl", "Deskconn control CLI")
 
-	switch os.Args[1] {
-	case "attach":
-		if err := attach(os.Args[2:]); err != nil {
+	attachCmd := app.Command("attach", "Attach a device")
+	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
+	attachPasswordStdin := attachCmd.Flag("password-stdin", "Read password from stdin").Bool()
+	attachUsername := attachCmd.Arg("username", "Username").Required().String()
+
+	detachCmd := app.Command("detach", "Detach device")
+	detachPasswordStdin := detachCmd.Flag("password-stdin", "Read password from stdin").Bool()
+	detachUsername := detachCmd.Arg("username", "Username").Required().String()
+
+	loginCmd := app.Command("login", "Login and store credentials")
+	loginPasswordStdin := loginCmd.Flag("password-stdin", "Read password from stdin").Bool()
+	loginUsername := loginCmd.Arg("username", "Username").Required().String()
+
+	shellCmd := app.Command("shell", "Start interactive shell")
+
+	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
+	case attachCmd.FullCommand():
+		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
-	case "detach":
-		if err := detach(os.Args[2:]); err != nil {
+
+	case detachCmd.FullCommand():
+		if err := detach(*detachUsername, *detachPasswordStdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
-	case "shell":
+
+	case loginCmd.FullCommand():
+		if err := login(*loginUsername, *loginPasswordStdin); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case shellCmd.FullCommand():
 		if err := shell(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
-	case "login":
-		if err := login(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-	default:
-		usage()
-		os.Exit(1)
 	}
 }
 
-func attach(args []string) error {
-	useStdin, args := extractPasswordStdin(args)
+func attach(username, name string, useStdin bool) error {
+	deviceName := name
 
-	fs := flag.NewFlagSet("attach", flag.ExitOnError)
-
-	name := fs.String("name", "", "")
-	fs.StringVar(name, "n", "", "")
-
-	_ = fs.Parse(args)
-
-	username, err := parseUsername(fs.Args())
-	if err != nil {
-		return err
-	}
-
-	deviceName := *name
 	if deviceName == "" {
 		host, err := os.Hostname()
 		if err != nil {
@@ -102,17 +101,7 @@ func attach(args []string) error {
 	return deskconn.Attach(session, deviceName, organizationDict.StringOr("id", ""))
 }
 
-func detach(args []string) error {
-	useStdin, args := extractPasswordStdin(args)
-
-	fs := flag.NewFlagSet("detach", flag.ExitOnError)
-	_ = fs.Parse(args)
-
-	username, err := parseUsername(fs.Args())
-	if err != nil {
-		return err
-	}
-
+func detach(username string, useStdin bool) error {
 	password, err := readPassword(useStdin)
 	if err != nil {
 		return err
@@ -126,17 +115,7 @@ func detach(args []string) error {
 	return deskconn.Detach(session)
 }
 
-func login(args []string) error {
-	useStdin, args := extractPasswordStdin(args)
-
-	fs := flag.NewFlagSet("shell", flag.ExitOnError)
-	_ = fs.Parse(args)
-
-	username, err := parseUsername(fs.Args())
-	if err != nil {
-		return err
-	}
-
+func login(username string, useStdin bool) error {
 	password, err := readPassword(useStdin)
 	if err != nil {
 		return err
@@ -223,31 +202,6 @@ func shell() error {
 	}
 
 	return deskconn.StartInteractiveShell(shellSession)
-}
-
-func extractPasswordStdin(args []string) (bool, []string) {
-	out := make([]string, 0, len(args))
-	useStdin := false
-
-	for _, a := range args {
-		if a == "--password-stdin" {
-			useStdin = true
-			continue
-		}
-		out = append(out, a)
-	}
-
-	return useStdin, out
-}
-
-func parseUsername(args []string) (string, error) {
-	if len(args) != 1 {
-		return "", fmt.Errorf("requires <username>")
-	}
-	if strings.HasPrefix(args[0], "-") {
-		return "", fmt.Errorf("invalid username: %s", args[0])
-	}
-	return args[0], nil
 }
 
 func readPassword(fromStdin bool) (string, error) {
@@ -364,17 +318,4 @@ func selectOrganization(callResp xconn.CallResponse) (int, error) {
 		"id",
 		"Select organization",
 	)
-}
-
-func usage() {
-	fmt.Println(`Usage:
-  deskconnctl attach [--name|-n <name>] [--password-stdin] <username>
-  deskconnctl shell  [--password-stdin] <username>
-
-Examples:
-  deskconnctl attach admin
-  deskconnctl attach -n laptop admin
-  deskconnctl shell admin
-  echo secret | deskconnctl attach --password-stdin admin
-  echo secret | deskconnctl shell admin --password-stdin`)
 }
