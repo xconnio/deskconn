@@ -85,18 +85,49 @@ func attach(username, name string, useStdin bool) error {
 	if callResp.Err != nil {
 		return callResp.Err
 	}
+	var organizationDict xconn.Dict
 	if len(callResp.Args()) == 0 {
-		return fmt.Errorf("no organization found")
-	}
+		fmt.Println("No organization found.")
 
-	idx, err := selectOrganization(callResp)
-	if err != nil {
-		return err
-	}
+		reader := bufio.NewReader(os.Stdin)
 
-	organizationDict, err := callResp.ArgDict(idx)
-	if err != nil {
-		return err
+		var orgName string
+		for {
+			fmt.Print("Enter organization name to create: ")
+
+			input, err := reader.ReadString('\n')
+			if err != nil {
+				return err
+			}
+
+			orgName = strings.TrimSpace(input)
+			if orgName == "" {
+				fmt.Println("Organization name cannot be empty.")
+				continue
+			}
+
+			break
+		}
+
+		createResp := session.Call(deskconn.ProcedureOrganizationCreate).Arg(orgName).Do()
+		if createResp.Err != nil {
+			return createResp.Err
+		}
+
+		organizationDict, err = createResp.ArgDict(0)
+		if err != nil {
+			return err
+		}
+	} else {
+		idx, err := selectOrganization(callResp)
+		if err != nil {
+			return err
+		}
+
+		organizationDict, err = callResp.ArgDict(idx)
+		if err != nil {
+			return err
+		}
 	}
 	return deskconn.Attach(session, deviceName, organizationDict.StringOr("id", ""))
 }
