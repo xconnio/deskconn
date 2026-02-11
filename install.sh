@@ -2,16 +2,22 @@
 set -e
 
 VERSION="v0.1.0-alpha"
-BIN_DIR="/usr/local/bin"
+BIN_DIR="$HOME/.local/bin"
+HIDDEN_DAEMON="$BIN_DIR/.deskconnd"
 SERVICE_NAME="deskconnd"
 SERVICE_FILE="$HOME/.config/systemd/user/$SERVICE_NAME.service"
+
+mkdir -p "$BIN_DIR"
 
 echo "Downloading binaries..."
 curl -L -o deskconnctl https://github.com/xconnio/deskconn/releases/download/$VERSION/deskconnctl
 curl -L -o deskconnd https://github.com/xconnio/deskconn/releases/download/$VERSION/deskconnd
 
-sudo mv deskconnctl deskconnd $BIN_DIR/
-sudo chmod +x $BIN_DIR/deskconnctl $BIN_DIR/deskconnd
+mv deskconnctl "$BIN_DIR/deskconnctl"
+mv deskconnd "$HIDDEN_DAEMON"
+
+chmod 755 "$BIN_DIR/deskconnctl"
+chmod 700 "$HIDDEN_DAEMON"
 
 echo "Binaries installed!"
 
@@ -24,7 +30,7 @@ Description=DeskConn Daemon
 After=network.target
 
 [Service]
-ExecStart=$BIN_DIR/deskconnd
+ExecStart=$HIDDEN_DAEMON
 Restart=always
 RestartSec=5
 
