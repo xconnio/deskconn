@@ -27,6 +27,7 @@ const (
 )
 
 func main() {
+start:
 	cred, err := deskconn.EnsureCredentials()
 	if err != nil {
 		log.Fatal(err)
@@ -129,13 +130,30 @@ func main() {
 		log.Fatal(err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	detachChan := make(chan struct{}, 1)
+
 	go func() {
 		retryDelay := 1 * time.Second
 		maxDelay := 30 * time.Second
 		for {
-			cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deviceRealm,
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			cloudSession, err := xconn.ConnectCryptosign(ctx, deskconn.CloudURI(), deviceRealm,
 				cred.AuthID, cred.PrivateKey)
 			if err != nil {
+				if err.Error() == "wamp.error.no_such_realm" {
+					select {
+					case detachChan <- struct{}{}:
+					default:
+					}
+				}
 				log.Printf("failed to connect to cloud, will retry in %v: %v", retryDelay, err)
 
 				// exponential backoff
@@ -189,7 +207,13 @@ func main() {
 		retryDelay := 1 * time.Second
 		maxDelay := 30 * time.Second
 		for {
-			cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconnRealm,
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			cloudSession, err := xconn.ConnectCryptosign(ctx, deskconn.CloudURI(), deskconnRealm,
 				cred.AuthID, cred.PrivateKey)
 			if err != nil {
 				log.Printf("failed to connect to cloud realm, will retry in %v: %v", retryDelay, err)
@@ -239,6 +263,16 @@ func main() {
 
 			authenticator.SetPrincipals(cryptosignPrincipals)
 
+			subResp := cloudSession.Subscribe(fmt.Sprintf(deskconn.TopicDeskconnDesktopDetachFormat, machineIDStr),
+				func(event *xconn.Event) {
+					select {
+					case detachChan <- struct{}{}:
+					default:
+					}
+				}).Do()
+			if subResp.Err != nil {
+				log.Println(subResp.Err)
+			}
 			// reset backoff after successful connection
 			retryDelay = 1 * time.Second
 
@@ -257,5 +291,15 @@ func main() {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
-	<-sigChan
+
+	select {
+	case <-sigChan:
+	case <-detachChan:
+		cancel()
+		_ = os.Remove(filepath.Join(cfgDirectory, "credentials.json"))
+		_ = listener.Close()
+		router.Close()
+		signal.Stop(sigChan)
+		goto start
+	}
 }
