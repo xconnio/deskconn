@@ -53,14 +53,8 @@ func Attach(session *xconn.Session, desktopName, orgID string) error {
 	return writeCredentialsFile(machineIDStr, publicKey, privateKey, orgID)
 }
 
-func Detach(session *xconn.Session) error {
-	machineID, err := os.ReadFile(MachineIDPath)
-	if err != nil {
-		return fmt.Errorf("failed to read machine-id: %w", err)
-	}
-	machineIDStr := strings.TrimSpace(string(machineID))
-
-	callResp := session.Call(ProcedureDeskconnDetachDesktop).Args(machineIDStr).Do()
+func Detach(session *xconn.Session, authID string) error {
+	callResp := session.Call(ProcedureDeskconnDetachDesktop).Args(authID).Do()
 	if callResp.Err != nil {
 		return fmt.Errorf("failed to detach desktop: %w", callResp.Err)
 	}

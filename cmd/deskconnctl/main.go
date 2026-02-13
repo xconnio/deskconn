@@ -112,7 +112,25 @@ func detach(username string, useStdin bool) error {
 		return err
 	}
 
-	return deskconn.Detach(session)
+	authID, orgID, err := selectDevice(session)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Are you sure you want to detach desktop with ID %s from organization %s? (y/N): ", authID, orgID)
+
+	var confirm string
+	_, err = fmt.Scanln(&confirm)
+	if err != nil {
+		return err
+	}
+
+	if strings.ToLower(confirm) != "y" && strings.ToLower(confirm) != "yes" {
+		fmt.Println("Detach cancelled.")
+		return nil
+	}
+
+	return deskconn.Detach(session, authID)
 }
 
 func login(username string, useStdin bool) error {
@@ -156,21 +174,7 @@ func shell() error {
 		return fmt.Errorf("no desktop attached to the account")
 	}
 
-	idx, err := selectDevice(callResp)
-	if err != nil {
-		return err
-	}
-
-	deviceDict, err := callResp.ArgDict(idx)
-	if err != nil {
-		return err
-	}
-
-	machineID, err := deviceDict.String("authid")
-	if err != nil {
-		return err
-	}
-	organizationID, err := deviceDict.String("organization_id")
+	machineID, organizationID, err := selectDevice(session)
 	if err != nil {
 		return err
 	}
@@ -302,13 +306,34 @@ func selectOption(callResp xconn.CallResponse, title string, idField string, pro
 	}
 }
 
-func selectDevice(callResp xconn.CallResponse) (int, error) {
-	return selectOption(
-		callResp,
-		"Available devices",
-		"authid",
-		"Select device",
-	)
+func selectDevice(session *xconn.Session) (authid string, organizationID string, err error) {
+	callResp := session.Call("io.xconn.deskconn.desktop.list").Do()
+	if callResp.Err != nil {
+		return "", "", callResp.Err
+	}
+	if len(callResp.Args()) == 0 {
+		return "", "", fmt.Errorf("no desktop attached to the account")
+	}
+
+	idx, err := selectOption(callResp, "Available devices", "authid", "Select device")
+	if err != nil {
+		return "", "", err
+	}
+
+	deviceDict, err := callResp.ArgDict(idx)
+	if err != nil {
+		return "", "", err
+	}
+	authid, err = deviceDict.String("authid")
+	if err != nil {
+		return "", "", err
+	}
+	organizationID, err = deviceDict.String("organization_id")
+	if err != nil {
+		return "", "", err
+	}
+
+	return
 }
 
 func selectOrganization(callResp xconn.CallResponse) (int, error) {
