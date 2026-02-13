@@ -15,6 +15,7 @@ const (
 	ProcedureDeskconnAttachDesktop    = "io.xconn.deskconn.desktop.attach"
 	ProcedureDeskconnDetachDesktop    = "io.xconn.deskconn.desktop.detach"
 	ProcedureDeskconnOrganizationList = "io.xconn.deskconn.organization.list"
+	ProcedureOrganizationCreate       = "io.xconn.deskconn.organization.create"
 	MachineIDPath                     = "/etc/machine-id"
 )
 
