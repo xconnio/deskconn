@@ -82,17 +82,10 @@ start:
 	if err != nil {
 		log.Fatal(err)
 	}
-	principalsFile := filepath.Join(cfgDirectory, "principals.json")
 
-	var principals []*deskconn.CryptosignPrincipal
-
-	data, err := os.ReadFile(principalsFile)
+	principals, err := deskconn.ReadPrincipalsFromFile()
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			log.Fatal(err)
-		}
-	} else {
-		if err := json.Unmarshal(data, &principals); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -257,11 +250,14 @@ start:
 			}
 
 			jsonData = append(jsonData, '\n')
-			if err = os.WriteFile(principalsFile, jsonData, 0600); err != nil {
+			if err = os.WriteFile(filepath.Join(cfgDirectory, "principals.json"), jsonData, 0600); err != nil {
 				log.Println(err)
 			}
 
 			authenticator.SetPrincipals(cryptosignPrincipals)
+			if err := authenticator.SubscribeEvents(cloudSession, machineIDStr); err != nil {
+				log.Println(err)
+			}
 
 			subResp := cloudSession.Subscribe(fmt.Sprintf(deskconn.TopicDeskconnDesktopDetachFormat, machineIDStr),
 				func(event *xconn.Event) {

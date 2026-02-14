@@ -119,3 +119,39 @@ func Login(session *xconn.Session, username string) error {
 
 	return nil
 }
+
+func ReadPrincipalsFromFile() ([]*CryptosignPrincipal, error) {
+	cfgDirectory, err := CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	principalsFile := filepath.Join(cfgDirectory, "principals.json")
+
+	data, err := os.ReadFile(principalsFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var principals []*CryptosignPrincipal
+	if err := json.Unmarshal(data, &principals); err != nil {
+		return nil, err
+	}
+
+	return principals, nil
+}
+
+func WritePrincipalsToFile(principals []*CryptosignPrincipal) error {
+	cfgDirectory, err := CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	jsonData, err := json.MarshalIndent(principals, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	jsonData = append(jsonData, '\n')
+
+	return os.WriteFile(filepath.Join(cfgDirectory, "principals.json"), jsonData, 0600)
+}
