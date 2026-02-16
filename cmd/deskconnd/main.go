@@ -283,7 +283,7 @@ start:
 		}
 	}()
 
-	zeroconfServer, err := deskconn.AdvertiseService(host, port, deviceRealm)
+	zeroconfServer, err := deskconn.AdvertiseService(host, port, deviceRealm, cred.OrganizationID)
 	if err != nil {
 		log.Fatal(err)
 	}
