@@ -8,7 +8,7 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-func AdvertiseService(hostname string, port int, realm string) (*zeroconf.Server, error) {
+func AdvertiseService(hostname string, port int, realm, orgID string) (*zeroconf.Server, error) {
 	mid, err := os.ReadFile("/etc/machine-id")
 	if err != nil {
 		return nil, err
