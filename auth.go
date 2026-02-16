@@ -1,6 +1,7 @@
 package deskconn
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -11,7 +12,11 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-const ProcedureListKeys = "io.xconn.deskconn.desktop.access.key.list"
+const (
+	ProcedureListKeys     = "io.xconn.deskconn.desktop.access.key.list"
+	TopicKeyAddedFormat   = "io.xconn.deskconn.desktop.%s.key.add"
+	TopicKeyRemovedFormat = "io.xconn.deskconn.desktop.%s.key.remove"
+)
 
 type CryptosignPrincipal struct {
 	AuthID         string   `json:"authid"`
@@ -105,6 +110,7 @@ func (a *Authenticator) handleAddKey(event *xconn.Event) {
 	principals, err := ReadPrincipalsFromFile()
 	if err != nil {
 		log.Println("error reading principals from file:", err)
+		return
 	}
 
 	principalUpdated := false
@@ -127,11 +133,74 @@ func (a *Authenticator) handleAddKey(event *xconn.Event) {
 	}
 }
 
+func (a *Authenticator) handleRemoveKey(event *xconn.Event) {
+	b, err := json.Marshal(event.Args()[0])
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	var keysByAuthID map[string][]string
+	if err := json.Unmarshal(b, &keysByAuthID); err != nil {
+		log.Println(err)
+		return
+	}
+
+	principals, err := ReadPrincipalsFromFile()
+	if err != nil {
+		log.Println("error reading principals from file:", err)
+		return
+	}
+
+	for authid, keysToRemove := range keysByAuthID {
+		crytosignPrincipal, exists := a.RetrievePrincipal(authid)
+		if !exists {
+			fmt.Println("no principal found for authid:", authid)
+			continue
+		}
+
+		removeSet := make(map[string]struct{}, len(keysToRemove))
+		for _, k := range keysToRemove {
+			removeSet[k] = struct{}{}
+		}
+
+		filtered := crytosignPrincipal.AuthorizedKeys[:0]
+		for _, key := range crytosignPrincipal.AuthorizedKeys {
+			if _, shouldRemove := removeSet[key]; !shouldRemove {
+				filtered = append(filtered, key)
+			}
+		}
+
+		if len(filtered) == 0 {
+			a.Lock()
+			delete(a.principalByAuthID, authid)
+			a.Unlock()
+			continue
+		}
+
+		crytosignPrincipal.AuthorizedKeys = filtered
+		a.SetPrincipal(authid, crytosignPrincipal)
+
+		for i := range principals {
+			if principals[i].AuthID == authid {
+				principals[i].AuthorizedKeys = filtered
+				break
+			}
+		}
+	}
+
+	if err := WritePrincipalsToFile(principals); err != nil {
+		log.Println("error writing principals to file:", err)
+	}
+}
+
 func (a *Authenticator) SubscribeEvents(session *xconn.Session, machineID string) error {
-	addSubResp := session.Subscribe(fmt.Sprintf("io.xconn.deskconn.desktop.%s.key.add", machineID), a.handleAddKey).Do()
+	addSubResp := session.Subscribe(fmt.Sprintf(TopicKeyAddedFormat, machineID), a.handleAddKey).Do()
 	if addSubResp.Err != nil {
 		return addSubResp.Err
 	}
 
-	return nil
+	removeSubResp := session.Subscribe(fmt.Sprintf(TopicKeyRemovedFormat, machineID), a.handleRemoveKey).Do()
+
+	return removeSubResp.Err
 }
