@@ -261,8 +261,7 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 			if len(result.Args()) > 0 {
 				_, err = os.Stdout.Write(result.Args()[0].([]byte))
 			} else {
-				_ = term.Restore(fd, oldState)
-				os.Exit(0)
+				progressChan <- xconn.NewFinalProgress()
 			}
 		}).Do()
 
