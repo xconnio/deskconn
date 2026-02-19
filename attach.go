@@ -30,7 +30,7 @@ func CloudURI() string {
 type Credentials struct {
 	AuthID         string `json:"authid"`
 	PublicKey      string `json:"public_key"`
-	PrivateKey     string `json:"private_key"`
+	PrivateKey     string `json:"private_key"` // #nosec
 	OrganizationID string `json:"organization_id"`
 }
 

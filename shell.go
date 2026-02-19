@@ -29,8 +29,9 @@ func newInteractiveShellSession() *interactiveShellSession {
 	}
 }
 
-func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation) (*os.File, error) {
-	cmd := exec.Command("bash")
+func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation,
+	command string, args ...string) (*os.File, error) {
+	cmd := exec.Command(command, args...)
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home dir: %w", err)
@@ -96,7 +97,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 						return xconn.NewInvocationError("wamp.error.invalid_argument", "invalid size")
 					}
 					if !exists {
-						newPt, err := p.startPtySession(inv)
+						newPt, err := p.startPtySession(inv, "bash")
 						if err != nil {
 							return xconn.NewInvocationError("io.xconn.error", err.Error())
 						}
@@ -112,7 +113,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 			}
 
 			if !exists {
-				newPt, err := p.startPtySession(inv)
+				newPt, err := p.startPtySession(inv, "bash")
 				if err != nil {
 					return xconn.NewInvocationError("io.xconn.error", err.Error())
 				}
@@ -137,8 +138,74 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 	}
 }
 
-func StartInteractiveShell(session *xconn.Session) error {
-	fd := int(os.Stdin.Fd())
+func (p *interactiveShellSession) handleExec() func(_ context.Context,
+	inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		caller := inv.Caller()
+
+		p.Lock()
+		ptmx, exists := p.ptmx[caller]
+		p.Unlock()
+
+		if inv.Progress() {
+			payload, err := inv.ArgBytes(0)
+			if err != nil {
+				return xconn.NewInvocationError("wamp.error.invalid_argument", err.Error())
+			}
+
+			if bytes.HasPrefix(payload, []byte("SIZE:")) {
+				commandWithArgs, err := inv.ArgList(1)
+				if err != nil {
+					return xconn.NewInvocationError("wamp.error.invalid_argument", err.Error())
+				}
+				command, _ := commandWithArgs.String(0)
+				var args []string
+				for _, arg := range commandWithArgs[1:] {
+					args = append(args, arg.StringOr(""))
+				}
+
+				var cols, rows int
+				n, _ := fmt.Sscanf(string(payload), "SIZE:%d:%d", &cols, &rows)
+				if n == 2 {
+					if cols < 0 || cols > math.MaxUint16 || rows < 0 || rows > math.MaxUint16 {
+						return xconn.NewInvocationError("wamp.error.invalid_argument", "invalid size")
+					}
+					if !exists {
+						newPt, err := p.startPtySession(inv, command, args...)
+						if err != nil {
+							return xconn.NewInvocationError("io.xconn.error", err.Error())
+						}
+						ptmx = newPt
+					}
+					winsize := &pty.Winsize{
+						Cols: uint16(cols), // #nosec G115
+						Rows: uint16(rows), // #nosec G115
+					}
+					_ = pty.Setsize(ptmx, winsize)
+				}
+				return xconn.NewInvocationError(xconn.ErrNoResult)
+			}
+
+			_, err = ptmx.Write(payload)
+			if err != nil {
+				return xconn.NewInvocationError("io.xconn.error", err.Error())
+			}
+			return xconn.NewInvocationError(xconn.ErrNoResult)
+		}
+
+		p.Lock()
+		if stored, ok := p.ptmx[caller]; ok {
+			_ = stored.Close()
+			delete(p.ptmx, caller)
+		}
+		p.Unlock()
+
+		return xconn.NewInvocationResult()
+	}
+}
+
+func StartInteractiveCommand(session *xconn.Session, procedureName string, args ...string) error {
+	fd := int(os.Stdin.Fd()) // #nosec
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return fmt.Errorf("failed to set raw mode: %w", err)
@@ -153,7 +220,7 @@ func StartInteractiveShell(session *xconn.Session) error {
 			return nil
 		}
 		msg := fmt.Sprintf("SIZE:%d:%d", width, height)
-		return xconn.NewProgress(msg)
+		return xconn.NewProgress(msg, args)
 	}
 
 	if p := sendSize(); p != nil {
@@ -182,7 +249,7 @@ func StartInteractiveShell(session *xconn.Session) error {
 		}
 	}()
 
-	call := session.Call(ProcedureShell).
+	callResp := session.Call(procedureName).
 		ProgressSender(func(ctx context.Context) *xconn.Progress {
 			p, ok := <-progressChan
 			if !ok {
@@ -194,13 +261,9 @@ func StartInteractiveShell(session *xconn.Session) error {
 			if len(result.Args()) > 0 {
 				_, err = os.Stdout.Write(result.Args()[0].([]byte))
 			} else {
-				_ = term.Restore(fd, oldState)
-				os.Exit(0)
+				progressChan <- xconn.NewFinalProgress()
 			}
 		}).Do()
 
-	if call.Err != nil {
-		return fmt.Errorf("shell error: %w", call.Err)
-	}
-	return nil
+	return callResp.Err
 }

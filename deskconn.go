@@ -14,6 +14,7 @@ const (
 	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
 	ProcedureShell               = "io.xconn.deskconn.deskconnd.shell"
+	ProcedureExec                = "io.xconn.deskconn.deskconnd.exec"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
@@ -47,6 +48,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureScreenLock:          d.lockScreenLockHandler,
 		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
 		ProcedureShell:               d.shellSession.handleShell(),
+		ProcedureExec:                d.shellSession.handleExec(),
 		ProcedureMPRISPlayers:        d.handleListPlayers,
 		ProcedureMPRISPlayPause:      d.handlePlayPause,
 		ProcedureMPRISPlay:           d.handlePlay,

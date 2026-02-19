@@ -37,6 +37,9 @@ func main() {
 
 	shellCmd := app.Command("shell", "Start interactive shell")
 
+	execCmd := app.Command("exec", "Run a command")
+	command := execCmd.Arg("command", "Command to run").Required().Strings()
+
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
 		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
@@ -54,7 +57,22 @@ func main() {
 		}
 
 	case shellCmd.FullCommand():
-		if err := shell(); err != nil {
+		session, err := connect()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureShell); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case execCmd.FullCommand():
+		session, err := connect()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureExec, *command...); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}
@@ -178,15 +196,15 @@ func login(username string, useStdin bool) error {
 	return deskconn.Login(session, username)
 }
 
-func shell() error {
+func connect() (*xconn.Session, error) {
 	cfgDirectory, err := deskconn.CfgDirectory()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
 	if err != nil {
-		return fmt.Errorf("kindly login first: %w", err)
+		return nil, fmt.Errorf("kindly login first: %w", err)
 	}
 	credentials := strings.Split(string(credentialsStr), " ")
 	authid := strings.TrimSpace(credentials[1])
@@ -194,31 +212,31 @@ func shell() error {
 
 	session, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm, authid, privKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	callResp := session.Call("io.xconn.deskconn.desktop.list").Do()
 	if callResp.Err != nil {
-		return callResp.Err
+		return nil, callResp.Err
 	}
 	if len(callResp.Args()) == 0 {
-		return fmt.Errorf("no desktop attached to the account")
+		return nil, fmt.Errorf("no desktop attached to the account")
 	}
 
 	machineID, organizationID, err := selectDevice(session)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", organizationID, machineID)
 	deviceSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deviceRealm, authid, privKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	authenticator, err := auth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	config := &xconnwebrtc.ClientConfig{
 		Realm:                    deviceRealm,
@@ -236,7 +254,7 @@ func shell() error {
 		shellSession = deviceSession
 	}
 
-	return deskconn.StartInteractiveShell(shellSession)
+	return shellSession, nil
 }
 
 func readPassword(fromStdin bool) (string, error) {
@@ -249,12 +267,12 @@ func readPassword(fromStdin bool) (string, error) {
 		return strings.TrimRight(pwd, "\r\n"), nil
 	}
 
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
 		return "", fmt.Errorf("password required from TTY or use --password-stdin")
 	}
 
 	fmt.Fprint(os.Stderr, "Password: ")
-	pwd, err := term.ReadPassword(int(os.Stdin.Fd()))
+	pwd, err := term.ReadPassword(int(os.Stdin.Fd())) // #nosec
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return "", err
