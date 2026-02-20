@@ -34,6 +34,7 @@ After=network.target
 ExecStart=$EXEC_DIR/deskconnd
 Restart=always
 RestartSec=5
+Environment="TERM=xterm"
 
 [Install]
 WantedBy=default.target
