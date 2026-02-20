@@ -27,7 +27,7 @@ administrative tasks.
 ### Build
 
 ```bash
-make build-deskconnctl
+make build-deskconn
 ```
 
 ### Run
@@ -35,5 +35,5 @@ make build-deskconnctl
 Run the resulting binary to see available commands and help:
 
 ```bash
-./deskconnctl
+./deskconn
 ```

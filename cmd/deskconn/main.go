@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	app := kingpin.New("deskconnctl", "Deskconn control CLI")
+	app := kingpin.New("deskconn", "Deskconn control CLI")
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()

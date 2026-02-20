@@ -11,13 +11,13 @@ mkdir -p "$BIN_DIR"
 mkdir -p "$EXEC_DIR"
 
 echo "Downloading binaries..."
-curl -L -o deskconnctl https://github.com/xconnio/deskconn/releases/download/$VERSION/deskconnctl
+curl -L -o deskconn https://github.com/xconnio/deskconn/releases/download/$VERSION/deskconn
 curl -L -o deskconnd https://github.com/xconnio/deskconn/releases/download/$VERSION/deskconnd
 
-mv deskconnctl "$BIN_DIR/deskconnctl"
+mv deskconn "$BIN_DIR/deskconn"
 mv deskconnd "$EXEC_DIR/deskconnd"
 
-chmod 755 "$BIN_DIR/deskconnctl"
+chmod 755 "$BIN_DIR/deskconn"
 chmod 700 "$EXEC_DIR/deskconnd"
 
 echo "Binaries installed!"
