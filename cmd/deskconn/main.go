@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	app := kingpin.New("deskconnctl", "Deskconn control CLI")
+	app := kingpin.New("deskconn", "Deskconn control CLI")
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
@@ -79,6 +79,11 @@ func main() {
 }
 
 func attach(username, name string, useStdin bool) error {
+	password, err := readPassword(useStdin)
+	if err != nil {
+		return err
+	}
+
 	deviceName := name
 
 	if deviceName == "" {
@@ -86,12 +91,21 @@ func attach(username, name string, useStdin bool) error {
 		if err != nil {
 			return fmt.Errorf("failed to get hostname: %w", err)
 		}
-		deviceName = host
-	}
 
-	password, err := readPassword(useStdin)
-	if err != nil {
-		return err
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Printf("Name of the new device [default=%s]: ", host)
+
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return err
+		}
+
+		input = strings.TrimSpace(input)
+		if input == "" {
+			deviceName = host
+		} else {
+			deviceName = input
+		}
 	}
 
 	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)

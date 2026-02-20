@@ -10,8 +10,8 @@ build-deskconnd:
 run-deskconnd:
 	go run github.com/xconnio/deskconn/cmd/deskconnd
 
-build-deskconnctl:
-	go build github.com/xconnio/deskconn/cmd/deskconnctl
+build-deskconn:
+	go build github.com/xconnio/deskconn/cmd/deskconn
 
 run-deskconnctl:
-	go run github.com/xconnio/deskconn/cmd/deskconnctl
+	go run github.com/xconnio/deskconn/cmd/deskconn

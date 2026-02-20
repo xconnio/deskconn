@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
@@ -130,6 +131,10 @@ func ReadPrincipalsFromFile() ([]*CryptosignPrincipal, error) {
 	data, err := os.ReadFile(principalsFile)
 	if err != nil {
 		return nil, err
+	}
+
+	if strings.TrimSpace(string(data)) == "" {
+		return []*CryptosignPrincipal{}, nil
 	}
 
 	var principals []*CryptosignPrincipal

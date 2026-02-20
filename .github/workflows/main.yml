@@ -1,4 +1,4 @@
-name: deskconnd CI
+name: deskconn CI
 
 on:
   push:
