@@ -87,7 +87,7 @@ func CfgDirectory() (string, error) {
 
 	cfgDirectory := filepath.Join(homedir, ".deskconn")
 
-	_ = os.MkdirAll(filepath.Dir(cfgDirectory), 0755)
+	_ = os.MkdirAll(cfgDirectory, 0755)
 	return cfgDirectory, nil
 }
 
