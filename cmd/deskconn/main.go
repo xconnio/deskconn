@@ -36,9 +36,11 @@ func main() {
 	loginUsername := loginCmd.Arg("username", "Username").Required().String()
 
 	shellCmd := app.Command("shell", "Start interactive shell")
+	shellDeviceName := shellCmd.Flag("name", "Name of device to shell").Short('n').String()
 
 	execCmd := app.Command("exec", "Run a command")
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
+	execDeviceName := execCmd.Flag("name", "Name of device to run command").Short('n').String()
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
@@ -57,7 +59,7 @@ func main() {
 		}
 
 	case shellCmd.FullCommand():
-		session, err := connect()
+		session, err := connect(*shellDeviceName)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -67,7 +69,7 @@ func main() {
 		}
 
 	case execCmd.FullCommand():
-		session, err := connect()
+		session, err := connect(*execDeviceName)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -175,7 +177,7 @@ func detach(username string, useStdin bool) error {
 		return err
 	}
 
-	authID, orgID, err := selectDevice(session)
+	authID, orgID, err := selectDevice(session, "")
 	if err != nil {
 		return err
 	}
@@ -210,7 +212,7 @@ func login(username string, useStdin bool) error {
 	return deskconn.Login(session, username)
 }
 
-func connect() (*xconn.Session, error) {
+func connect(deviceName string) (*xconn.Session, error) {
 	cfgDirectory, err := deskconn.CfgDirectory()
 	if err != nil {
 		return nil, err
@@ -237,7 +239,7 @@ func connect() (*xconn.Session, error) {
 		return nil, fmt.Errorf("no desktop attached to the account")
 	}
 
-	machineID, organizationID, err := selectDevice(session)
+	machineID, organizationID, err := selectDevice(session, deviceName)
 	if err != nil {
 		return nil, err
 	}
@@ -369,12 +371,20 @@ func selectOption(callResp xconn.CallResponse, title string, idField string, pro
 	}
 }
 
-func selectDevice(session *xconn.Session) (authid string, organizationID string, err error) {
-	callResp := session.Call("io.xconn.deskconn.desktop.list").Do()
+func selectDevice(session *xconn.Session, deviceName string) (authid string, organizationID string, err error) {
+	call := session.Call("io.xconn.deskconn.desktop.list")
+	if deviceName != "" {
+		call.Kwarg("name", deviceName)
+	}
+	callResp := call.Do()
+
 	if callResp.Err != nil {
 		return "", "", callResp.Err
 	}
 	if len(callResp.Args()) == 0 {
+		if deviceName != "" {
+			return "", "", fmt.Errorf("no desktop with name %s attached to the account", deviceName)
+		}
 		return "", "", fmt.Errorf("no desktop attached to the account")
 	}
 
@@ -396,7 +406,7 @@ func selectDevice(session *xconn.Session) (authid string, organizationID string,
 		return "", "", err
 	}
 
-	return
+	return authid, organizationID, nil
 }
 
 func selectOrganization(callResp xconn.CallResponse) (int, error) {

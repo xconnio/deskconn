@@ -46,8 +46,7 @@ func Attach(session *xconn.Session, desktopName, orgID string) error {
 		return fmt.Errorf("failed to generate cryptosign keypair: %w", err)
 	}
 
-	callResp := session.Call(ProcedureDeskconnAttachDesktop).Args(machineIDStr, publicKey, orgID).
-		Kwarg("name", desktopName).Do()
+	callResp := session.Call(ProcedureDeskconnAttachDesktop).Args(machineIDStr, publicKey, orgID, desktopName).Do()
 	if callResp.Err != nil {
 		return fmt.Errorf("failed to attach desktop: %w", callResp.Err)
 	}
