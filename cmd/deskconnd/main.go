@@ -27,6 +27,57 @@ const (
 )
 
 func main() {
+	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	localRouter, err := xconn.NewRouter(xconn.DefaultRouterConfig())
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	if err := localRouter.AddRealm(deskconn.LocalRealm, &xconn.RealmConfig{
+		AutoDiscloseCaller: true,
+		Roles: []xconn.RealmRole{{
+			Name: "anonymous",
+			Permissions: []xconn.Permission{{
+				URI:         "",
+				MatchPolicy: "prefix",
+				AllowCall:   true,
+			}},
+		}},
+	}); err != nil {
+		log.Fatalln(err)
+	}
+
+	localserver := xconn.NewServer(localRouter, nil, &xconn.ServerConfig{})
+	localListener, err := localserver.ListenAndServeRawSocket(xconn.NetworkUnix,
+		filepath.Join(cfgDirectory, "deskconn.sock"))
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer localListener.Close()
+
+	sess, err := xconn.ConnectInMemory(localRouter, deskconn.LocalRealm)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	proxyCalls := deskconn.NewProxyCalls()
+	clientSession := deskconn.NewClientSessions()
+
+	regRespShell := sess.Register(deskconn.ProcedureProxyShell, deskconn.ProxyProgressiveInvocationHandler(proxyCalls,
+		clientSession, cfgDirectory, deskconn.ProcedureShell)).Do()
+	if regRespShell.Err != nil {
+		log.Fatal(regRespShell.Err)
+	}
+
+	regRespExec := sess.Register(deskconn.ProcedureProxyExec, deskconn.ProxyProgressiveInvocationHandler(proxyCalls,
+		clientSession, cfgDirectory, deskconn.ProcedureExec)).Do()
+	if regRespExec.Err != nil {
+		log.Fatal(regRespShell.Err)
+	}
+
 start:
 	cred, err := deskconn.EnsureCredentials()
 	if err != nil {
@@ -76,11 +127,6 @@ start:
 	})
 	if err != nil {
 		log.Fatalln(err)
-	}
-
-	cfgDirectory, err := deskconn.CfgDirectory()
-	if err != nil {
-		log.Fatal(err)
 	}
 
 	principals, err := deskconn.ReadPrincipalsFromFile()

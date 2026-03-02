@@ -15,11 +15,19 @@ import (
 
 	"github.com/xconnio/deskconn"
 	"github.com/xconnio/xconn-go"
-	"github.com/xconnio/xconn-go/auth"
-	"github.com/xconnio/xconn-webrtc-go"
 )
 
 func main() {
+	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
+	session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	app := kingpin.New("deskconn", "Deskconn control CLI")
 
 	attachCmd := app.Command("attach", "Attach a device")
@@ -59,22 +67,22 @@ func main() {
 		}
 
 	case shellCmd.FullCommand():
-		session, err := connect(*shellDeviceName)
+		realm, err := deviceRealm(*shellDeviceName)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureShell); err != nil {
+		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureProxyShell, realm); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case execCmd.FullCommand():
-		session, err := connect(*execDeviceName)
+		realm, err := deviceRealm(*execDeviceName)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureExec, *command...); err != nil {
+		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureProxyExec, realm, *command...); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}
@@ -212,15 +220,15 @@ func login(username string, useStdin bool) error {
 	return deskconn.Login(session, username)
 }
 
-func connect(deviceName string) (*xconn.Session, error) {
+func deviceRealm(deviceName string) (string, error) {
 	cfgDirectory, err := deskconn.CfgDirectory()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
 	if err != nil {
-		return nil, fmt.Errorf("kindly login first: %w", err)
+		return "", fmt.Errorf("kindly login first: %w", err)
 	}
 	credentials := strings.Split(string(credentialsStr), " ")
 	authid := strings.TrimSpace(credentials[1])
@@ -228,49 +236,23 @@ func connect(deviceName string) (*xconn.Session, error) {
 
 	session, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm, authid, privKey)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	callResp := session.Call("io.xconn.deskconn.desktop.list").Do()
 	if callResp.Err != nil {
-		return nil, callResp.Err
+		return "", callResp.Err
 	}
 	if len(callResp.Args()) == 0 {
-		return nil, fmt.Errorf("no desktop attached to the account")
+		return "", fmt.Errorf("no desktop attached to the account")
 	}
 
 	machineID, organizationID, err := selectDevice(session, deviceName)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", organizationID, machineID)
-	deviceSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deviceRealm, authid, privKey)
-	if err != nil {
-		return nil, err
-	}
-
-	authenticator, err := auth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
-	if err != nil {
-		return nil, err
-	}
-	config := &xconnwebrtc.ClientConfig{
-		Realm:                    deviceRealm,
-		ProcedureWebRTCOffer:     deskconn.ProcedureWebRTCOffer,
-		TopicAnswererOnCandidate: deskconn.TopicAnswererOnCandidate,
-		TopicOffererOnCandidate:  deskconn.TopicOffererOnCandidate,
-		Serializer:               xconn.CBORSerializerSpec,
-		Authenticator:            authenticator,
-		Session:                  deviceSession,
-	}
-
-	shellSession, err := xconnwebrtc.ConnectWAMP(config)
-	if err != nil {
-		log.Printf("failed to connect using webrtc: %v", err)
-		shellSession = deviceSession
-	}
-
-	return shellSession, nil
+	return fmt.Sprintf("io.xconn.deskconn.%s.%s", organizationID, machineID), nil
 }
 
 func readPassword(fromStdin bool) (string, error) {

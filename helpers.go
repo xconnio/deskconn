@@ -1,6 +1,7 @@
 package deskconn
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,6 +21,11 @@ const (
 	TopicOffererOnCandidate  = "io.xconn.webrtc.offerer.on_candidate"
 
 	ProcedurePrincipalCreate = "io.xconn.deskconn.account.principal.create"
+
+	ProcedureProxyShell = "io.xconn.deskconn.deskconnd.proxy.shell"
+	ProcedureProxyExec  = "io.xconn.deskconn.deskconnd.proxy.exec"
+
+	LocalRealm = "io.xconn.deskconn.local"
 )
 
 func EnsureCredentials() (*Credentials, error) {
@@ -159,4 +165,74 @@ func WritePrincipalsToFile(principals []*CryptosignPrincipal) error {
 	jsonData = append(jsonData, '\n')
 
 	return os.WriteFile(filepath.Join(cfgDirectory, "principals.json"), jsonData, 0600)
+}
+
+func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
+	cfgDirectory, procedure string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		caller := inv.Caller()
+		if !inv.Progress() {
+			if pc, exists := proxyCalls.Get(caller); exists {
+				close(pc.ProgressChan)
+				proxyCalls.Delete(caller)
+			}
+
+			return xconn.NewInvocationResult()
+		}
+
+		payload, err := inv.ArgBytes(1)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		pc, exists := proxyCalls.Get(caller)
+		if !exists {
+			progressChan := make(chan *xconn.Progress, 32)
+
+			pc = &ProxyCall{
+				ProgressChan: progressChan,
+			}
+			proxyCalls.Store(caller, pc)
+
+			realm, err := inv.ArgString(0)
+			if err != nil {
+				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+			}
+
+			deviceSession, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+			if err != nil {
+				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+			}
+
+			go func() {
+				callResp := deviceSession.Call(procedure).
+					ProgressSender(func(ctx context.Context) *xconn.Progress {
+						p, ok := <-progressChan
+						if !ok {
+							return xconn.NewFinalProgress()
+						}
+						return p
+					}).
+					ProgressReceiver(func(pr *xconn.ProgressResult) {
+						if len(pr.Args()) > 0 {
+							_ = inv.SendProgress(pr.Args(), nil)
+						} else {
+							progressChan <- xconn.NewFinalProgress()
+						}
+					}).Do()
+				if callResp.Err != nil {
+					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
+				} else {
+					_ = inv.SendProgress(nil, nil)
+				}
+			}()
+		}
+
+		if len(inv.Args()) > 2 {
+			pc.ProgressChan <- xconn.NewProgress(inv.Args()[1:]...)
+		} else {
+			pc.ProgressChan <- xconn.NewProgress(payload)
+		}
+		return xconn.NewInvocationError(xconn.ErrNoResult)
+	}
 }
