@@ -13,5 +13,5 @@ run-deskconnd:
 build-deskconn:
 	go build github.com/xconnio/deskconn/cmd/deskconn
 
-run-deskconnctl:
+run-deskconn:
 	go run github.com/xconnio/deskconn/cmd/deskconn
