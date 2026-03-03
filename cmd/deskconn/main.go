@@ -239,14 +239,6 @@ func deviceRealm(deviceName string) (string, error) {
 		return "", err
 	}
 
-	callResp := session.Call("io.xconn.deskconn.desktop.list").Do()
-	if callResp.Err != nil {
-		return "", callResp.Err
-	}
-	if len(callResp.Args()) == 0 {
-		return "", fmt.Errorf("no desktop attached to the account")
-	}
-
 	machineID, organizationID, err := selectDevice(session, deviceName)
 	if err != nil {
 		return "", err
