@@ -41,7 +41,13 @@ WantedBy=default.target
 EOL
 
 systemctl --user daemon-reload
-systemctl --user enable $SERVICE_NAME
-systemctl --user start $SERVICE_NAME
 
+if systemctl --user is-enabled --quiet "$SERVICE_NAME"; then
+    echo "Service exists. Restarting..."
+    systemctl --user restart "$SERVICE_NAME"
+else
+    echo "Enabling and starting service..."
+    systemctl --user enable "$SERVICE_NAME"
+    systemctl --user start "$SERVICE_NAME"
+fi
 echo "Systemd service $SERVICE_NAME installed and started!"
