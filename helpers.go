@@ -25,6 +25,8 @@ const (
 	ProcedureProxyShell = "io.xconn.deskconn.deskconnd.proxy.shell"
 	ProcedureProxyExec  = "io.xconn.deskconn.deskconnd.proxy.exec"
 
+	ProcedureListDesktop = "io.xconn.deskconn.desktop.list"
+
 	LocalRealm = "io.xconn.deskconn.local"
 )
 

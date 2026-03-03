@@ -78,6 +78,24 @@ func main() {
 		log.Fatal(regRespShell.Err)
 	}
 
+	regRespList := sess.Register(deskconn.ProcedureListDesktop,
+		func(ctx context.Context, invocation *xconn.Invocation) *xconn.InvocationResult {
+			session, err := clientSession.EnsureCloudSession(ctx, cfgDirectory)
+			if err != nil {
+				return xconn.NewInvocationError(deskconn.ErrOperationFailed, err.Error())
+			}
+
+			callResp := session.Call(deskconn.ProcedureListDesktop).Kwargs(invocation.Kwargs()).Do()
+			if callResp.Err != nil {
+				return xconn.NewInvocationError(deskconn.ErrOperationFailed, callResp.Err.Error())
+			}
+
+			return xconn.NewInvocationResult(callResp.Args()...)
+		}).Do()
+	if regRespList.Err != nil {
+		log.Fatal(regRespList.Err)
+	}
+
 start:
 	cred, err := deskconn.EnsureCredentials()
 	if err != nil {

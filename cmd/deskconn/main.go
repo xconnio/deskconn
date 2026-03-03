@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -67,7 +66,7 @@ func main() {
 		}
 
 	case shellCmd.FullCommand():
-		realm, err := deviceRealm(*shellDeviceName)
+		realm, err := deviceRealm(session, *shellDeviceName)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -77,7 +76,7 @@ func main() {
 		}
 
 	case execCmd.FullCommand():
-		realm, err := deviceRealm(*execDeviceName)
+		realm, err := deviceRealm(session, *execDeviceName)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -220,25 +219,7 @@ func login(username string, useStdin bool) error {
 	return deskconn.Login(session, username)
 }
 
-func deviceRealm(deviceName string) (string, error) {
-	cfgDirectory, err := deskconn.CfgDirectory()
-	if err != nil {
-		return "", err
-	}
-
-	credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
-	if err != nil {
-		return "", fmt.Errorf("kindly login first: %w", err)
-	}
-	credentials := strings.Split(string(credentialsStr), " ")
-	authid := strings.TrimSpace(credentials[1])
-	privKey := strings.TrimSpace(credentials[0])
-
-	session, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm, authid, privKey)
-	if err != nil {
-		return "", err
-	}
-
+func deviceRealm(session *xconn.Session, deviceName string) (string, error) {
 	machineID, organizationID, err := selectDevice(session, deviceName)
 	if err != nil {
 		return "", err
@@ -346,7 +327,7 @@ func selectOption(callResp xconn.CallResponse, title string, idField string, pro
 }
 
 func selectDevice(session *xconn.Session, deviceName string) (authid string, organizationID string, err error) {
-	call := session.Call("io.xconn.deskconn.desktop.list")
+	call := session.Call(deskconn.ProcedureListDesktop)
 	if deviceName != "" {
 		call.Kwarg("name", deviceName)
 	}
