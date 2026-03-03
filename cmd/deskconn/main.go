@@ -44,7 +44,7 @@ func main() {
 	loginUsername := loginCmd.Arg("username", "Username").Required().String()
 
 	shellCmd := app.Command("shell", "Start interactive shell")
-	shellDeviceName := shellCmd.Flag("name", "Name of device to shell").Short('n').String()
+	shellDeviceName := shellCmd.Arg("name", "Name of device to shell").String()
 
 	execCmd := app.Command("exec", "Run a command")
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
