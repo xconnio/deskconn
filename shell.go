@@ -204,7 +204,7 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 	}
 }
 
-func StartInteractiveCommand(session *xconn.Session, procedureName string, args ...string) error {
+func StartInteractiveCommand(session *xconn.Session, procedureName, realm string, args ...string) error {
 	fd := int(os.Stdin.Fd()) // #nosec
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
@@ -220,7 +220,7 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 			return nil
 		}
 		msg := fmt.Sprintf("SIZE:%d:%d", width, height)
-		return xconn.NewProgress(msg, args)
+		return xconn.NewProgress(realm, msg, args)
 	}
 
 	if p := sendSize(); p != nil {
@@ -245,7 +245,7 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 				close(progressChan)
 				return
 			}
-			progressChan <- xconn.NewProgress(buf[:n])
+			progressChan <- xconn.NewProgress(realm, buf[:n])
 		}
 	}()
 
