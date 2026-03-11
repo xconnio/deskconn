@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -19,6 +20,10 @@ import (
 
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cacheFile, err := deskconn.CacheFile()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -95,23 +100,42 @@ func main() {
 			return
 		}
 
-		table := tablewriter.NewWriter(os.Stdout)
+		var devices []deskconn.Device
+		jsonData, err := json.Marshal(callResp.Args())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if err := json.Unmarshal(jsonData, &devices); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
 
+		table := tablewriter.NewWriter(os.Stdout)
 		table.Header([]string{"NAME", "ORGANIZATION", "DEVICE ID"})
 
-		for _, d := range callResp.Args() {
-			device, ok := d.(map[string]any)
-			if !ok {
-				continue
+		deviceMap := make(map[string]deskconn.Device)
+		for _, d := range devices {
+			key := d.Name
+			if _, exists := deviceMap[key]; exists {
+				key = key + "-" + d.Authid[:6]
 			}
-
-			name, _ := device["name"].(string)
-			organization, _ := device["organization"].(map[string]any)
-
-			_ = table.Append([]string{name, organization["name"].(string), device["id"].(string)})
+			deviceMap[key] = d
+			_ = table.Append([]string{key, d.Organization.Name, d.ID})
 		}
 
 		if err = table.Render(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		b, err := json.MarshalIndent(deviceMap, "", "  ")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		if err := os.WriteFile(cacheFile, b, 0600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}

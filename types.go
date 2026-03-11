@@ -49,6 +49,19 @@ func (p *ProxyCalls) Delete(id uint64) {
 	delete(p.calls, id)
 }
 
+type Organization struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type Device struct {
+	Authid       string       `json:"authid"`
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	Organization Organization `json:"organization"`
+	Realm        string       `json:"realm"`
+}
+
 type ClientSessions struct {
 	deviceSessionByRealm map[string]*xconn.Session
 	cloudSessionByAuthID map[string]*xconn.Session
