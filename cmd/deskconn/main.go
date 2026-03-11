@@ -52,8 +52,8 @@ func main() {
 	shellDeviceName := shellCmd.Arg("name", "Name of device to shell").Required().String()
 
 	execCmd := app.Command("exec", "Run a command")
+	execDeviceName := execCmd.Arg("name", "Name of device to run command").Required().String()
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
-	execDeviceName := execCmd.Flag("name", "Name of device to run command").Required().Short('n').String()
 
 	lsCmd := app.Command("ls", "List devices")
 
