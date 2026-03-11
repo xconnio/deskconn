@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/alecthomas/kingpin/v2"
+	"github.com/olekukonko/tablewriter"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
@@ -49,6 +50,8 @@ func main() {
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 	execDeviceName := execCmd.Flag("name", "Name of device to run command").Short('n').String()
 
+	lsCmd := app.Command("ls", "List devices")
+
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
 		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
@@ -82,6 +85,33 @@ func main() {
 			return
 		}
 		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureProxyExec, realm, *command...); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case lsCmd.FullCommand():
+		callResp := session.Call(deskconn.ProcedureListDesktop).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+			return
+		}
+
+		table := tablewriter.NewWriter(os.Stdout)
+
+		table.Header([]string{"NAME", "ORGANIZATION", "DEVICE ID"})
+
+		for _, d := range callResp.Args() {
+			device, ok := d.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			name, _ := device["name"].(string)
+			organization, _ := device["organization"].(map[string]any)
+
+			_ = table.Append([]string{name, organization["name"].(string), device["id"].(string)})
+		}
+
+		if err = table.Render(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}
