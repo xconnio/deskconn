@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/alecthomas/kingpin/v2"
+	"github.com/olekukonko/tablewriter"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
@@ -18,6 +20,10 @@ import (
 
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cacheFile, err := deskconn.CacheFile()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -43,11 +49,13 @@ func main() {
 	loginUsername := loginCmd.Arg("username", "Username").Required().String()
 
 	shellCmd := app.Command("shell", "Start interactive shell")
-	shellDeviceName := shellCmd.Arg("name", "Name of device to shell").String()
+	shellDeviceName := shellCmd.Arg("name", "Name of device to shell").Required().String()
 
 	execCmd := app.Command("exec", "Run a command")
+	execDeviceName := execCmd.Arg("name", "Name of device to run command").Required().String()
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
-	execDeviceName := execCmd.Flag("name", "Name of device to run command").Short('n').String()
+
+	lsCmd := app.Command("ls", "List devices")
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
@@ -66,7 +74,7 @@ func main() {
 		}
 
 	case shellCmd.FullCommand():
-		realm, err := deviceRealm(session, *shellDeviceName)
+		realm, err := deviceRealm(cacheFile, *shellDeviceName)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -76,12 +84,58 @@ func main() {
 		}
 
 	case execCmd.FullCommand():
-		realm, err := deviceRealm(session, *execDeviceName)
+		realm, err := deviceRealm(cacheFile, *execDeviceName)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureProxyExec, realm, *command...); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case lsCmd.FullCommand():
+		callResp := session.Call(deskconn.ProcedureListDesktop).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+			return
+		}
+
+		var devices []deskconn.Device
+		jsonData, err := json.Marshal(callResp.Args())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if err := json.Unmarshal(jsonData, &devices); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		table := tablewriter.NewWriter(os.Stdout)
+		table.Header([]string{"NAME", "ORGANIZATION", "DEVICE ID"})
+
+		deviceMap := make(map[string]deskconn.Device)
+		for _, d := range devices {
+			key := d.Name
+			if _, exists := deviceMap[key]; exists {
+				key = key + "-" + d.Authid[:6]
+			}
+			deviceMap[key] = d
+			_ = table.Append([]string{key, d.Organization.Name, d.ID})
+		}
+
+		if err = table.Render(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		b, err := json.MarshalIndent(deviceMap, "", "  ")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		if err := os.WriteFile(cacheFile, b, 0600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}
@@ -184,7 +238,7 @@ func detach(username string, useStdin bool) error {
 		return err
 	}
 
-	authID, orgID, err := selectDevice(session, "")
+	authID, orgID, err := selectDevice(session)
 	if err != nil {
 		return err
 	}
@@ -219,13 +273,23 @@ func login(username string, useStdin bool) error {
 	return deskconn.Login(session, username)
 }
 
-func deviceRealm(session *xconn.Session, deviceName string) (string, error) {
-	machineID, organizationID, err := selectDevice(session, deviceName)
+func deviceRealm(cacheFile, deviceName string) (string, error) {
+	data, err := os.ReadFile(cacheFile)
 	if err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("io.xconn.deskconn.%s.%s", organizationID, machineID), nil
+	var deviceMap map[string]deskconn.Device
+	if err := json.Unmarshal(data, &deviceMap); err != nil {
+		return "", err
+	}
+
+	device, ok := deviceMap[deviceName]
+	if !ok {
+		return "", fmt.Errorf("device not found: %s", deviceName)
+	}
+
+	return fmt.Sprintf("io.xconn.deskconn.%s.%s", device.Organization.ID, device.Authid), nil
 }
 
 func readPassword(fromStdin bool) (string, error) {
@@ -326,20 +390,13 @@ func selectOption(callResp xconn.CallResponse, title string, idField string, pro
 	}
 }
 
-func selectDevice(session *xconn.Session, deviceName string) (authid string, organizationID string, err error) {
-	call := session.Call(deskconn.ProcedureListDesktop)
-	if deviceName != "" {
-		call.Kwarg("name", deviceName)
-	}
-	callResp := call.Do()
+func selectDevice(session *xconn.Session) (authid string, organizationID string, err error) {
+	callResp := session.Call(deskconn.ProcedureListDesktop).Do()
 
 	if callResp.Err != nil {
 		return "", "", callResp.Err
 	}
 	if len(callResp.Args()) == 0 {
-		if deviceName != "" {
-			return "", "", fmt.Errorf("no desktop with name %s attached to the account", deviceName)
-		}
 		return "", "", fmt.Errorf("no desktop attached to the account")
 	}
 

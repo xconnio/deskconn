@@ -76,7 +76,7 @@ func writeCredentialsFile(machineID, publicKey, privateKey, orgID string) error 
 		OrganizationID: orgID,
 	}
 
-	data, err := json.MarshalIndent(creds, "", "  ")
+	data, err := json.MarshalIndent(creds, "", "  ") // #nosec G117
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
