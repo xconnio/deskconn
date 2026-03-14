@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -86,9 +87,19 @@ func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session
 	c.deviceSessionByRealm[realm] = session
 }
 
+func (c *ClientSessions) DeleteDeviceSession(realm string) {
+	c.Lock()
+	defer c.Unlock()
+	delete(c.deviceSessionByRealm, realm)
+}
+
 func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm, cfgDirectory string) (*xconn.Session, error) {
 	if session, ok := c.SessionByRealm(realm); ok {
-		return session, nil
+		if session.Connected() {
+			return session, nil
+		}
+
+		c.DeleteDeviceSession(realm)
 	}
 
 	credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
@@ -125,7 +136,70 @@ func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm, cfgDire
 		return session, nil
 	}
 
+	_ = session.Leave()
 	c.StoreDeviceSession(realm, finalSession)
 
+	go c.reconnectLoop(finalSession, authid, privKey, realm) //nolint
 	return finalSession, nil
+}
+
+func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKey, realm string) {
+	<-session.Done()
+	retryDelay := 1 * time.Second
+	maxDelay := 30 * time.Second
+	for {
+		c.DeleteDeviceSession(realm)
+		cloudSession, err := xconn.ConnectCryptosign(context.Background(), CloudURI(), realm, authid, privateKey)
+		if err != nil {
+			log.Printf("failed to connect cloud: %v", err)
+			retryDelay *= 2
+			if retryDelay > maxDelay {
+				retryDelay = maxDelay
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		authenticator, err := auth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
+		if err != nil {
+			log.Printf("failed to create authenticator: %v", err)
+			retryDelay *= 2
+			if retryDelay > maxDelay {
+				retryDelay = maxDelay
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+		config := &xconnwebrtc.ClientConfig{
+			Realm:                    realm,
+			ProcedureWebRTCOffer:     ProcedureWebRTCOffer,
+			TopicAnswererOnCandidate: TopicAnswererOnCandidate,
+			TopicOffererOnCandidate:  TopicOffererOnCandidate,
+			Serializer:               xconn.CBORSerializerSpec,
+			Authenticator:            authenticator,
+			Session:                  cloudSession,
+		}
+
+		finalSession, err := xconnwebrtc.ConnectWAMP(config)
+		if err != nil {
+			log.Printf("failed to connect using webrtc: %v", err)
+			retryDelay *= 2
+			if retryDelay > maxDelay {
+				retryDelay = maxDelay
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+		_ = cloudSession.Leave()
+		if sess, ok := c.SessionByRealm(realm); ok {
+			if sess.Connected() {
+				_ = finalSession.Leave()
+				break
+			}
+
+			c.DeleteDeviceSession(realm)
+		}
+		c.StoreDeviceSession(realm, finalSession)
+		<-finalSession.Done()
+	}
 }
