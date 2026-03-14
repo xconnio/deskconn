@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -94,7 +95,23 @@ func main() {
 		}
 
 	case lsCmd.FullCommand():
-		callResp := session.Call(deskconn.ProcedureListDesktop).Do()
+		credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		credentials := strings.Split(string(credentialsStr), " ")
+		authid := strings.TrimSpace(credentials[1])
+		privKey := strings.TrimSpace(credentials[0])
+
+		cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm,
+			authid, privKey)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		callResp := cloudSession.Call(deskconn.ProcedureListDesktop).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 			return

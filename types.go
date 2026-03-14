@@ -64,14 +64,12 @@ type Device struct {
 
 type ClientSessions struct {
 	deviceSessionByRealm map[string]*xconn.Session
-	cloudSessionByAuthID map[string]*xconn.Session
 	sync.Mutex
 }
 
 func NewClientSessions() *ClientSessions {
 	return &ClientSessions{
 		deviceSessionByRealm: make(map[string]*xconn.Session),
-		cloudSessionByAuthID: make(map[string]*xconn.Session),
 	}
 }
 
@@ -86,19 +84,6 @@ func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session
 	c.Lock()
 	defer c.Unlock()
 	c.deviceSessionByRealm[realm] = session
-}
-
-func (c *ClientSessions) SessionByAuthID(authid string) (*xconn.Session, bool) {
-	c.Lock()
-	defer c.Unlock()
-	session, ok := c.cloudSessionByAuthID[authid]
-	return session, ok
-}
-
-func (c *ClientSessions) StoreCloudSession(authid string, session *xconn.Session) {
-	c.Lock()
-	defer c.Unlock()
-	c.cloudSessionByAuthID[authid] = session
 }
 
 func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm, cfgDirectory string) (*xconn.Session, error) {
@@ -137,33 +122,10 @@ func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm, cfgDire
 	finalSession, err := xconnwebrtc.ConnectWAMP(config)
 	if err != nil {
 		log.Printf("failed to connect using webrtc: %v", err)
-		finalSession = session
+		return session, nil
 	}
 
 	c.StoreDeviceSession(realm, finalSession)
 
 	return finalSession, nil
-}
-
-func (c *ClientSessions) EnsureCloudSession(ctx context.Context, cfgDirectory string) (*xconn.Session, error) {
-	credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
-	if err != nil {
-		return nil, fmt.Errorf("kindly login first: %w", err)
-	}
-
-	credentials := strings.Split(string(credentialsStr), " ")
-	authid := strings.TrimSpace(credentials[1])
-	privKey := strings.TrimSpace(credentials[0])
-
-	session, ok := c.SessionByAuthID(authid)
-	if ok {
-		return session, nil
-	}
-
-	session, err = xconn.ConnectCryptosign(ctx, CloudURI(), Realm, authid, privKey)
-	if err != nil {
-		return nil, err
-	}
-	c.StoreCloudSession(authid, session)
-	return session, nil
 }
