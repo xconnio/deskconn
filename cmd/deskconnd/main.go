@@ -78,6 +78,24 @@ func main() {
 		log.Fatal(regRespShell.Err)
 	}
 
+	regRespLogin := sess.Register(deskconn.ProcedureLogin,
+		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			clientSession.Login()
+			return xconn.NewInvocationResult()
+		}).Do()
+	if regRespLogin.Err != nil {
+		log.Fatal(regRespLogin.Err)
+	}
+
+	regRespLogout := sess.Register(deskconn.ProcedureLogout,
+		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			clientSession.Logout()
+			return xconn.NewInvocationResult()
+		}).Do()
+	if regRespLogout.Err != nil {
+		log.Fatal(regRespLogout.Err)
+	}
+
 start:
 	cred, err := deskconn.EnsureCredentials()
 	if err != nil {

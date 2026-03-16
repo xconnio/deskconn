@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -59,6 +60,8 @@ func main() {
 
 	whoamiCMD := app.Command("whoami", "Whoami")
 
+	logoutCmd := app.Command("logout", "Logout")
+
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
 		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
@@ -73,6 +76,12 @@ func main() {
 	case loginCmd.FullCommand():
 		if err := login(*loginUsername, *loginPasswordStdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		callResp := session.Call(deskconn.ProcedureLogin).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
 
 	case shellCmd.FullCommand():
@@ -162,6 +171,17 @@ func main() {
 		}
 
 		fmt.Println(authid)
+
+	case logoutCmd.FullCommand():
+		if err := logout(cfgDirectory); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		callResp := session.Call(deskconn.ProcedureLogout).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+		}
 	}
 }
 
@@ -295,6 +315,27 @@ func login(username string, useStdin bool) error {
 	}
 
 	return deskconn.Login(session, username)
+}
+
+func logout(cfgDirectory string) error {
+	files := []string{
+		filepath.Join(cfgDirectory, "id_ed25519"),
+		filepath.Join(cfgDirectory, "id_ed25519.pub"),
+	}
+
+	cacheFile, err := deskconn.CacheFile()
+	if err != nil {
+		return err
+	}
+	files = append(files, cacheFile)
+
+	for _, f := range files {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func deviceRealm(cacheFile, deviceName string) (string, error) {
