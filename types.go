@@ -61,6 +61,7 @@ type Device struct {
 
 type ClientSessions struct {
 	deviceSessionByRealm map[string]*xconn.Session
+	loggedIn             bool
 	sync.Mutex
 }
 
@@ -139,7 +140,7 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKe
 	<-session.Done()
 	retryDelay := 1 * time.Second
 	maxDelay := 30 * time.Second
-	for {
+	for c.LoggedIn() {
 		c.DeleteDeviceSession(realm)
 		cloudSession, err := xconn.ConnectCryptosign(context.Background(), CloudURI(), realm, authid, privateKey)
 		if err != nil {
@@ -193,5 +194,29 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKe
 		}
 		c.StoreDeviceSession(realm, finalSession)
 		<-finalSession.Done()
+	}
+}
+
+func (c *ClientSessions) LoggedIn() bool {
+	c.Lock()
+	defer c.Unlock()
+	return c.loggedIn
+}
+
+func (c *ClientSessions) Login() {
+	c.Lock()
+	defer c.Unlock()
+	c.loggedIn = true
+}
+
+func (c *ClientSessions) Logout() {
+	c.Lock()
+	c.loggedIn = false
+	deviceSessions := c.deviceSessionByRealm
+	c.deviceSessionByRealm = make(map[string]*xconn.Session)
+	c.Unlock()
+
+	for _, session := range deviceSessions {
+		_ = session.Leave()
 	}
 }

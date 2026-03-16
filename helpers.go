@@ -24,6 +24,8 @@ const (
 
 	ProcedureProxyShell = "io.xconn.deskconn.deskconnd.proxy.shell"
 	ProcedureProxyExec  = "io.xconn.deskconn.deskconnd.proxy.exec"
+	ProcedureLogin      = "io.xconn.deskconn.login"
+	ProcedureLogout     = "io.xconn.deskconn.logout"
 
 	ProcedureListDesktop = "io.xconn.deskconn.desktop.list"
 
