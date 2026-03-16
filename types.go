@@ -2,10 +2,6 @@ package deskconn
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -91,14 +87,10 @@ func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm, cfgDire
 		return session, nil
 	}
 
-	credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
+	authid, privKey, err := ReadCredentials(cfgDirectory)
 	if err != nil {
-		return nil, fmt.Errorf("kindly login first: %w", err)
+		return nil, err
 	}
-
-	credentials := strings.Split(string(credentialsStr), " ")
-	authid := strings.TrimSpace(credentials[1])
-	privKey := strings.TrimSpace(credentials[0])
 
 	session, err := xconn.ConnectCryptosign(ctx, CloudURI(), realm, authid, privKey)
 	if err != nil {
