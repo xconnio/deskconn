@@ -143,6 +143,24 @@ func Login(session *xconn.Session, username string) error {
 	return nil
 }
 
+func ReadCredentials(cfgDirectory string) (string, string, error) {
+	path := filepath.Join(cfgDirectory, "id_ed25519")
+
+	credentialsStr, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", fmt.Errorf("user not logged in")
+		}
+		return "", "", err
+	}
+
+	credentials := strings.Split(string(credentialsStr), " ")
+	authid := strings.TrimSpace(credentials[1])
+	privKey := strings.TrimSpace(credentials[0])
+
+	return authid, privKey, nil
+}
+
 func ReadPrincipalsFromFile() ([]*CryptosignPrincipal, error) {
 	cfgDirectory, err := CfgDirectory()
 	if err != nil {

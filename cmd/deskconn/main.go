@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -58,6 +57,8 @@ func main() {
 
 	lsCmd := app.Command("ls", "List devices")
 
+	whoamiCMD := app.Command("whoami", "Whoami")
+
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
 		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
@@ -95,14 +96,11 @@ func main() {
 		}
 
 	case lsCmd.FullCommand():
-		credentialsStr, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519"))
+		authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		credentials := strings.Split(string(credentialsStr), " ")
-		authid := strings.TrimSpace(credentials[1])
-		privKey := strings.TrimSpace(credentials[0])
 
 		cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm,
 			authid, privKey)
@@ -155,6 +153,15 @@ func main() {
 		if err := os.WriteFile(cacheFile, b, 0600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
+
+	case whoamiCMD.FullCommand():
+		authid, _, err := deskconn.ReadCredentials(cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		fmt.Println(authid)
 	}
 }
 
