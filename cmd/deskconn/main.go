@@ -66,9 +66,11 @@ func main() {
 	configShow := configCmd.Command("show", "Show config")
 	configSet := configCmd.Command("set", "Set device alias")
 	configSetDevice := configSet.Arg("device", "ID, name or alias of device").Required().String()
-	configSetAlias := configSet.Arg("alias", "Alias to set").Required().String()
+	configSetKey := configSet.Arg("key", "Config key to set").Required().String()
+	configSetValue := configSet.Arg("value", "Config value").Required().String()
 	configUnset := configCmd.Command("unset", "Unset device alias")
 	configUnsetDevice := configUnset.Arg("device", "ID, name or alias of device").Required().String()
+	configUnsetKey := configUnset.Arg("key", "Config key").Required().String()
 	configEdit := configCmd.Command("edit", "Edit full config")
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
@@ -235,11 +237,17 @@ func main() {
 		fmt.Print(string(data))
 
 	case configSet.FullCommand():
-		if err := updateDeviceAlias(cfgDirectory, *configSetDevice, *configSetAlias); err != nil {
+		if *configSetKey != "alias" {
+			fmt.Fprintln(os.Stderr, "unsupported key to set")
+		}
+		if err := updateDeviceAlias(cfgDirectory, *configSetDevice, *configSetValue); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case configUnset.FullCommand():
+		if *configUnsetKey != "alias" {
+			fmt.Fprintln(os.Stderr, "unsupported key to unset")
+		}
 		if err := updateDeviceAlias(cfgDirectory, *configUnsetDevice, ""); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
