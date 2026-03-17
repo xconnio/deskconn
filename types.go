@@ -2,10 +2,14 @@ package deskconn
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/xconn-go"
 	"github.com/xconnio/xconn-go/auth"
@@ -82,14 +86,16 @@ func (c *ClientSessions) SessionByRealm(authid string) (*xconn.Session, bool) {
 
 func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session) {
 	c.Lock()
-	defer c.Unlock()
 	c.deviceSessionByRealm[realm] = session
+	c.Unlock()
+	_ = updateDeviceConnected(realm, true)
 }
 
 func (c *ClientSessions) DeleteDeviceSession(realm string) {
 	c.Lock()
-	defer c.Unlock()
 	delete(c.deviceSessionByRealm, realm)
+	c.Unlock()
+	_ = updateDeviceConnected(realm, false)
 }
 
 func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm, cfgDirectory string) (*xconn.Session, error) {
@@ -221,4 +227,42 @@ func (c *ClientSessions) Logout() {
 	for _, session := range deviceSessions {
 		_ = session.Leave()
 	}
+}
+
+func updateDeviceConnected(realm string, connected bool) error {
+	cfgDirectory, err := CfgDirectory()
+	if err != nil {
+		return err
+	}
+	configFile := filepath.Join(cfgDirectory, "config.yml")
+
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+
+	var devices []Device
+	if err := yaml.Unmarshal(data, &devices); err != nil {
+		return fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	updated := false
+	for i, d := range devices {
+		if d.Realm == realm {
+			devices[i].Connected = connected
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		return fmt.Errorf("device with realm %s not found", realm)
+	}
+
+	out, err := yaml.Marshal(devices)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	return os.WriteFile(configFile, out, 0600)
 }
