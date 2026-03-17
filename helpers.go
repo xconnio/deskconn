@@ -23,6 +23,7 @@ const (
 
 	ProcedurePrincipalCreate = "io.xconn.deskconn.account.principal.create"
 	ProcedurePrincipalDelete = "io.xconn.deskconn.account.principal.delete"
+	ProcedureAccountGet      = "io.xconn.deskconn.account.get"
 
 	ProcedureProxyShell = "io.xconn.deskconn.deskconnd.proxy.shell"
 	ProcedureProxyExec  = "io.xconn.deskconn.deskconnd.proxy.exec"
@@ -136,11 +137,16 @@ func Login(session *xconn.Session, username string) error {
 		return fmt.Errorf("failed to create principal: %w", callResp.Err)
 	}
 
+	accountGetResp := session.Call(ProcedureAccountGet).Do()
+	if accountGetResp.Err != nil {
+		return fmt.Errorf("failed to create principal: %w", callResp.Err)
+	}
+	name := accountGetResp.Args()[0].(map[string]any)["name"].(string)
 	if err = os.WriteFile(privPath, []byte(priv+" "+username+"\n"), 0600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	if err = os.WriteFile(pubPath, []byte(pub+" "+username+"\n"), 0600); err != nil {
+	if err = os.WriteFile(pubPath, []byte(pub+" "+username+" "+name+"\n"), 0600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
