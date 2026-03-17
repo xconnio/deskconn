@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -68,6 +69,7 @@ func main() {
 	configSetAlias := configSet.Arg("alias", "Alias to set").Required().String()
 	configUnset := configCmd.Command("unset", "Unset device alias")
 	configUnsetDevice := configUnset.Arg("device", "ID, name or alias of device").Required().String()
+	configEdit := configCmd.Command("edit", "Edit full config")
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
@@ -248,6 +250,18 @@ func main() {
 		if err := updateDeviceAlias(cfgDirectory, *configUnsetDevice, ""); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
+
+	case configEdit.FullCommand():
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+
+		cmd := exec.Command(editor, filepath.Join(cfgDirectory, "config.yml")) // nolint: gosec
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
 	}
 }
 
