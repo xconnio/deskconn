@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -116,16 +117,21 @@ func main() {
 		}
 
 	case lsCmd.FullCommand():
+		fileExists := true
 		devicesFromCfg, err := deskconn.DevicesFromCfg(cfgDirectory)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
+			if errors.Is(err, os.ErrNotExist) {
+				fileExists = false
+			} else {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
 		}
 		tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED"}
 		if *lsDetailedFlag {
 			tableHeader = append(tableHeader, "ORGANIZATION", "REALM")
 		}
-		if !*lsRefreshFlag {
+		if !*lsRefreshFlag && fileExists {
 			table := tablewriter.NewWriter(os.Stdout)
 			table.Header(tableHeader)
 			for _, d := range devicesFromCfg {
