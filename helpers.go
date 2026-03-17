@@ -101,20 +101,6 @@ func CfgDirectory() (string, error) {
 	return cfgDirectory, nil
 }
 
-func CacheFile() (string, error) {
-	dir, err := os.UserCacheDir()
-	if err != nil {
-		return "", err
-	}
-
-	path := filepath.Join(dir, "deskconn")
-	if err := os.MkdirAll(path, 0755); err != nil {
-		return "", err
-	}
-
-	return filepath.Join(path, "devices.json"), nil
-}
-
 func Login(session *xconn.Session, username string) error {
 	cfgDirectory, err := CfgDirectory()
 	if err != nil {

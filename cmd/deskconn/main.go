@@ -14,6 +14,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/deskconn"
 	"github.com/xconnio/xconn-go"
@@ -21,10 +22,6 @@ import (
 
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
-	if err != nil {
-		log.Fatal(err)
-	}
-	cacheFile, err := deskconn.CacheFile()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -85,7 +82,7 @@ func main() {
 		}
 
 	case shellCmd.FullCommand():
-		realm, err := deviceRealm(cacheFile, *shellDeviceName)
+		realm, err := deviceRealm(*shellDeviceName, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -95,7 +92,7 @@ func main() {
 		}
 
 	case execCmd.FullCommand():
-		realm, err := deviceRealm(cacheFile, *execDeviceName)
+		realm, err := deviceRealm(*execDeviceName, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -138,14 +135,15 @@ func main() {
 		table := tablewriter.NewWriter(os.Stdout)
 		table.Header([]string{"NAME", "ORGANIZATION", "DEVICE ID"})
 
-		deviceMap := make(map[string]deskconn.Device)
-		for _, d := range devices {
-			key := d.Name
-			if _, exists := deviceMap[key]; exists {
-				key = key + "-" + d.Authid[:6]
+		nameCount := make(map[string]int)
+		for i, d := range devices {
+			count := nameCount[d.Name]
+			if count > 0 {
+				newName := fmt.Sprintf("%s-%s", d.Name, d.Authid[:6])
+				devices[i].Name = newName
 			}
-			deviceMap[key] = d
-			_ = table.Append([]string{key, d.Organization.Name, d.ID})
+			nameCount[d.Name]++
+			_ = table.Append([]string{devices[i].Name, d.Organization.Name, d.ID})
 		}
 
 		if err = table.Render(); err != nil {
@@ -153,13 +151,13 @@ func main() {
 			return
 		}
 
-		b, err := json.MarshalIndent(deviceMap, "", "  ")
+		b, err := yaml.Marshal(devices)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 
-		if err := os.WriteFile(cacheFile, b, 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), b, 0600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
@@ -321,13 +319,8 @@ func logout(cfgDirectory string) error {
 	files := []string{
 		filepath.Join(cfgDirectory, "id_ed25519"),
 		filepath.Join(cfgDirectory, "id_ed25519.pub"),
+		filepath.Join(cfgDirectory, "config.yml"),
 	}
-
-	cacheFile, err := deskconn.CacheFile()
-	if err != nil {
-		return err
-	}
-	files = append(files, cacheFile)
 
 	for _, f := range files {
 		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
@@ -338,23 +331,24 @@ func logout(cfgDirectory string) error {
 	return nil
 }
 
-func deviceRealm(cacheFile, deviceName string) (string, error) {
-	data, err := os.ReadFile(cacheFile)
+func deviceRealm(deviceName, cfgDirectory string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 	if err != nil {
 		return "", err
 	}
 
-	var deviceMap map[string]deskconn.Device
-	if err := json.Unmarshal(data, &deviceMap); err != nil {
+	var devices []deskconn.Device
+	if err := yaml.Unmarshal(data, &devices); err != nil {
 		return "", err
 	}
 
-	device, ok := deviceMap[deviceName]
-	if !ok {
-		return "", fmt.Errorf("device not found: %s", deviceName)
+	for _, d := range devices {
+		if d.Name == deviceName {
+			return d.Realm, nil
+		}
 	}
 
-	return fmt.Sprintf("io.xconn.deskconn.%s.%s", device.Organization.ID, device.Authid), nil
+	return "", fmt.Errorf("device not found: %s", deviceName)
 }
 
 func readPassword(fromStdin bool) (string, error) {
