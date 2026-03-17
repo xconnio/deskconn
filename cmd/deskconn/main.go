@@ -61,6 +61,8 @@ func main() {
 
 	logoutCmd := app.Command("logout", "Logout")
 
+	configCmd := app.Command("config", "Manage deskconn configuration")
+	configShow := configCmd.Command("show", "Show config")
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
 		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
@@ -222,6 +224,14 @@ func main() {
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
+
+	case configShow.FullCommand():
+		data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		fmt.Print(string(data))
 	}
 }
 
