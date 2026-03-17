@@ -47,10 +47,10 @@ func main() {
 	loginUsername := loginCmd.Arg("username", "Username").Required().String()
 
 	shellCmd := app.Command("shell", "Start interactive shell")
-	shellDeviceName := shellCmd.Arg("name", "Name of device to shell").Required().String()
+	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().String()
 
 	execCmd := app.Command("exec", "Run a command")
-	execDeviceName := execCmd.Arg("name", "Name of device to run command").Required().String()
+	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().String()
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 
 	lsCmd := app.Command("ls", "List devices")
@@ -133,7 +133,7 @@ func main() {
 		}
 
 		table := tablewriter.NewWriter(os.Stdout)
-		table.Header([]string{"NAME", "ORGANIZATION", "DEVICE ID"})
+		table.Header([]string{"ID", "NAME", "ALIAS", "CONNECTED"})
 
 		nameCount := make(map[string]int)
 		for i, d := range devices {
@@ -143,7 +143,7 @@ func main() {
 				devices[i].Name = newName
 			}
 			nameCount[d.Name]++
-			_ = table.Append([]string{devices[i].Name, d.Organization.Name, d.ID})
+			_ = table.Append([]any{d.Authid, devices[i].Name, d.Alias, d.Connected})
 		}
 
 		if err = table.Render(); err != nil {
@@ -344,6 +344,12 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 
 	for _, d := range devices {
 		if d.Name == deviceName {
+			return d.Realm, nil
+		}
+		if d.Authid == deviceName {
+			return d.Realm, nil
+		}
+		if d.Alias == deviceName {
 			return d.Realm, nil
 		}
 	}
