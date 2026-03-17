@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -60,6 +61,15 @@ func main() {
 	whoamiCMD := app.Command("whoami", "Whoami")
 
 	logoutCmd := app.Command("logout", "Logout")
+
+	configCmd := app.Command("config", "Manage deskconn configuration")
+	configShow := configCmd.Command("show", "Show config")
+	configSet := configCmd.Command("set", "Set device alias")
+	configSetDevice := configSet.Arg("device", "ID, name or alias of device").Required().String()
+	configSetAlias := configSet.Arg("alias", "Alias to set").Required().String()
+	configUnset := configCmd.Command("unset", "Unset device alias")
+	configUnsetDevice := configUnset.Arg("device", "ID, name or alias of device").Required().String()
+	configEdit := configCmd.Command("edit", "Edit full config")
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
@@ -222,6 +232,36 @@ func main() {
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
+
+	case configShow.FullCommand():
+		data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		fmt.Print(string(data))
+
+	case configSet.FullCommand():
+		if err := updateDeviceAlias(cfgDirectory, *configSetDevice, *configSetAlias); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case configUnset.FullCommand():
+		if err := updateDeviceAlias(cfgDirectory, *configUnsetDevice, ""); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case configEdit.FullCommand():
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+
+		cmd := exec.Command(editor, filepath.Join(cfgDirectory, "config.yml")) // nolint: gosec
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
 	}
 }
 
@@ -530,4 +570,38 @@ func selectOrganization(callResp xconn.CallResponse) (int, error) {
 		"id",
 		"Select organization",
 	)
+}
+
+func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
+	configFile := filepath.Join(cfgDirectory, "config.yml")
+
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read config: %w", err)
+	}
+
+	var devices []deskconn.Device
+	if err := yaml.Unmarshal(data, &devices); err != nil {
+		return fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	updated := false
+	for i, d := range devices {
+		if d.Authid == deviceKey || d.Name == deviceKey || d.Alias == deviceKey {
+			devices[i].Alias = alias
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		return fmt.Errorf("device %s not found", deviceKey)
+	}
+
+	out, err := yaml.Marshal(devices)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	return os.WriteFile(configFile, out, 0600)
 }
