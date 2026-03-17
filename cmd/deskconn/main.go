@@ -63,6 +63,10 @@ func main() {
 
 	configCmd := app.Command("config", "Manage deskconn configuration")
 	configShow := configCmd.Command("show", "Show config")
+	configSet := configCmd.Command("set", "Set device alias")
+	configSetDevice := configSet.Arg("device", "ID, name or alias of device").Required().String()
+	configSetAlias := configSet.Arg("alias", "Alias to set").Required().String()
+
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
 		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
@@ -232,6 +236,11 @@ func main() {
 			return
 		}
 		fmt.Print(string(data))
+
+	case configSet.FullCommand():
+		if err := updateDeviceAlias(cfgDirectory, *configSetDevice, *configSetAlias); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 	}
 }
 
@@ -540,4 +549,38 @@ func selectOrganization(callResp xconn.CallResponse) (int, error) {
 		"id",
 		"Select organization",
 	)
+}
+
+func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
+	configFile := filepath.Join(cfgDirectory, "config.yml")
+
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read config: %w", err)
+	}
+
+	var devices []deskconn.Device
+	if err := yaml.Unmarshal(data, &devices); err != nil {
+		return fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	updated := false
+	for i, d := range devices {
+		if d.Authid == deviceKey || d.Name == deviceKey || d.Alias == deviceKey {
+			devices[i].Alias = alias
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		return fmt.Errorf("device %s not found", deviceKey)
+	}
+
+	out, err := yaml.Marshal(devices)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	return os.WriteFile(configFile, out, 0600)
 }
