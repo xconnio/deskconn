@@ -140,14 +140,7 @@ func main() {
 			return
 		}
 
-		authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		cloudSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm,
-			authid, privKey)
+		cloudSession, err := connectCloudRealm(cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -398,6 +391,21 @@ func login(username string, useStdin bool) error {
 }
 
 func logout(cfgDirectory string) error {
+	cloudSession, err := connectCloudRealm(cfgDirectory)
+	if err != nil {
+		return err
+	}
+
+	pubKey, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519.pub"))
+	if err != nil {
+		return err
+	}
+	pubKeyString := strings.Split(string(pubKey), " ")[0]
+	callResp := cloudSession.Call(deskconn.ProcedurePrincipalDelete).Arg(pubKeyString).Do()
+	if callResp.Err != nil {
+		return callResp.Err
+	}
+
 	files := []string{
 		filepath.Join(cfgDirectory, "id_ed25519"),
 		filepath.Join(cfgDirectory, "id_ed25519.pub"),
@@ -604,4 +612,13 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 	}
 
 	return os.WriteFile(configFile, out, 0600)
+}
+
+func connectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
+	authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	return xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm, authid, privKey)
 }
