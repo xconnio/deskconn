@@ -15,6 +15,7 @@ require (
 	github.com/xconnio/xconn-go v0.0.0-20251108143232-364781a4f29a
 	github.com/xconnio/xconn-webrtc-go v0.0.0-20260129135523-38834188956e
 	golang.org/x/term v0.36.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -76,5 +77,4 @@ require (
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

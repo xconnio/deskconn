@@ -10,6 +10,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
@@ -101,18 +102,18 @@ func CfgDirectory() (string, error) {
 	return cfgDirectory, nil
 }
 
-func CacheFile() (string, error) {
-	dir, err := os.UserCacheDir()
+func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
+	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 	if err != nil {
-		return "", err
+		return []Device{}, err
 	}
 
-	path := filepath.Join(dir, "deskconn")
-	if err := os.MkdirAll(path, 0755); err != nil {
-		return "", err
+	var devices []Device
+	if err := yaml.Unmarshal(data, &devices); err != nil {
+		return []Device{}, err
 	}
 
-	return filepath.Join(path, "devices.json"), nil
+	return devices, nil
 }
 
 func Login(session *xconn.Session, username string) error {
