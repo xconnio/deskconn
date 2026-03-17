@@ -86,6 +86,11 @@ func main() {
 		}
 
 	case loginCmd.FullCommand():
+		if _, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519")); err == nil {
+			fmt.Fprintln(os.Stderr, "You are already logged in.")
+			return
+		}
+
 		if err := login(*loginUsername, *loginPasswordStdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
