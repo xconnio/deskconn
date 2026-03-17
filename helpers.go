@@ -22,6 +22,7 @@ const (
 	TopicOffererOnCandidate  = "io.xconn.webrtc.offerer.on_candidate"
 
 	ProcedurePrincipalCreate = "io.xconn.deskconn.account.principal.create"
+	ProcedurePrincipalDelete = "io.xconn.deskconn.account.principal.delete"
 
 	ProcedureProxyShell = "io.xconn.deskconn.deskconnd.proxy.shell"
 	ProcedureProxyExec  = "io.xconn.deskconn.deskconnd.proxy.exec"
