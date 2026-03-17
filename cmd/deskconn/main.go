@@ -66,6 +66,8 @@ func main() {
 	configSet := configCmd.Command("set", "Set device alias")
 	configSetDevice := configSet.Arg("device", "ID, name or alias of device").Required().String()
 	configSetAlias := configSet.Arg("alias", "Alias to set").Required().String()
+	configUnset := configCmd.Command("unset", "Unset device alias")
+	configUnsetDevice := configUnset.Arg("device", "ID, name or alias of device").Required().String()
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case attachCmd.FullCommand():
@@ -239,6 +241,11 @@ func main() {
 
 	case configSet.FullCommand():
 		if err := updateDeviceAlias(cfgDirectory, *configSetDevice, *configSetAlias); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case configUnset.FullCommand():
+		if err := updateDeviceAlias(cfgDirectory, *configUnsetDevice, ""); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}
