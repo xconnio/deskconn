@@ -59,7 +59,7 @@ func main() {
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
 	lsDetailedFlag := lsCmd.Flag("detailed", "Show detailed output").Bool()
 
-	whoamiCMD := app.Command("whoami", "Whoami")
+	whoamiCMD := app.Command("whoami", "Show current user")
 
 	logoutCmd := app.Command("logout", "Logout")
 
@@ -215,13 +215,16 @@ func main() {
 		}
 
 	case whoamiCMD.FullCommand():
-		authid, _, err := deskconn.ReadCredentials(cfgDirectory)
+		path := filepath.Join(cfgDirectory, "id_ed25519.pub")
+
+		credentialsStr, err := os.ReadFile(path)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
+		credentials := strings.Split(strings.TrimSpace(string(credentialsStr)), " ")
 
-		fmt.Println(authid)
+		fmt.Printf("Logged in as %s (%s).\n", credentials[2], credentials[1])
 
 	case logoutCmd.FullCommand():
 		if err := logout(cfgDirectory); err != nil {
