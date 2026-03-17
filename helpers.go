@@ -10,6 +10,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
@@ -99,6 +100,20 @@ func CfgDirectory() (string, error) {
 
 	_ = os.MkdirAll(cfgDirectory, 0755)
 	return cfgDirectory, nil
+}
+
+func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
+	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+	if err != nil {
+		return []Device{}, err
+	}
+
+	var devices []Device
+	if err := yaml.Unmarshal(data, &devices); err != nil {
+		return []Device{}, err
+	}
+
+	return devices, nil
 }
 
 func Login(session *xconn.Session, username string) error {

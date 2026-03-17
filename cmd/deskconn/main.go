@@ -54,6 +54,7 @@ func main() {
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 
 	lsCmd := app.Command("ls", "List devices")
+	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
 
 	whoamiCMD := app.Command("whoami", "Whoami")
 
@@ -102,6 +103,24 @@ func main() {
 		}
 
 	case lsCmd.FullCommand():
+		devicesFromCfg, err := deskconn.DevicesFromCfg(cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if !*lsRefreshFlag {
+			table := tablewriter.NewWriter(os.Stdout)
+			table.Header([]string{"ID", "NAME", "ALIAS", "CONNECTED"})
+			for _, d := range devicesFromCfg {
+				_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+			}
+
+			if err = table.Render(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			return
+		}
+
 		authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -135,6 +154,11 @@ func main() {
 		table := tablewriter.NewWriter(os.Stdout)
 		table.Header([]string{"ID", "NAME", "ALIAS", "CONNECTED"})
 
+		cfgMap := make(map[string]deskconn.Device, len(devicesFromCfg))
+		for _, d := range devicesFromCfg {
+			cfgMap[d.Authid] = d
+		}
+
 		nameCount := make(map[string]int)
 		for i, d := range devices {
 			count := nameCount[d.Name]
@@ -142,8 +166,13 @@ func main() {
 				newName := fmt.Sprintf("%s-%s", d.Name, d.Authid[:6])
 				devices[i].Name = newName
 			}
+			if localDevice, ok := cfgMap[d.Authid]; ok {
+				devices[i].Alias = localDevice.Alias
+				devices[i].Connected = localDevice.Connected
+			}
+			d = devices[i]
 			nameCount[d.Name]++
-			_ = table.Append([]any{d.Authid, devices[i].Name, d.Alias, d.Connected})
+			_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
 		}
 
 		if err = table.Render(); err != nil {
@@ -332,13 +361,8 @@ func logout(cfgDirectory string) error {
 }
 
 func deviceRealm(deviceName, cfgDirectory string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+	devices, err := deskconn.DevicesFromCfg(cfgDirectory)
 	if err != nil {
-		return "", err
-	}
-
-	var devices []deskconn.Device
-	if err := yaml.Unmarshal(data, &devices); err != nil {
 		return "", err
 	}
 
