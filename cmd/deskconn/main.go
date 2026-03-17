@@ -55,6 +55,7 @@ func main() {
 
 	lsCmd := app.Command("ls", "List devices")
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
+	lsDetailedFlag := lsCmd.Flag("detailed", "Show detailed output").Bool()
 
 	whoamiCMD := app.Command("whoami", "Whoami")
 
@@ -108,11 +109,19 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
+		tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED"}
+		if *lsDetailedFlag {
+			tableHeader = append(tableHeader, "ORGANIZATION", "REALM")
+		}
 		if !*lsRefreshFlag {
 			table := tablewriter.NewWriter(os.Stdout)
-			table.Header([]string{"ID", "NAME", "ALIAS", "CONNECTED"})
+			table.Header(tableHeader)
 			for _, d := range devicesFromCfg {
-				_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+				if *lsDetailedFlag {
+					_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
+				} else {
+					_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+				}
 			}
 
 			if err = table.Render(); err != nil {
@@ -152,7 +161,7 @@ func main() {
 		}
 
 		table := tablewriter.NewWriter(os.Stdout)
-		table.Header([]string{"ID", "NAME", "ALIAS", "CONNECTED"})
+		table.Header(tableHeader)
 
 		cfgMap := make(map[string]deskconn.Device, len(devicesFromCfg))
 		for _, d := range devicesFromCfg {
@@ -172,7 +181,11 @@ func main() {
 			}
 			d = devices[i]
 			nameCount[d.Name]++
-			_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+			if *lsDetailedFlag {
+				_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
+			} else {
+				_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+			}
 		}
 
 		if err = table.Render(); err != nil {
