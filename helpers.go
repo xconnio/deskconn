@@ -25,10 +25,11 @@ const (
 	ProcedurePrincipalDelete = "io.xconn.deskconn.account.principal.delete"
 	ProcedureAccountGet      = "io.xconn.deskconn.account.get"
 
-	ProcedureProxyShell = "io.xconn.deskconn.deskconnd.proxy.shell"
-	ProcedureProxyExec  = "io.xconn.deskconn.deskconnd.proxy.exec"
-	ProcedureLogin      = "io.xconn.deskconn.login"
-	ProcedureLogout     = "io.xconn.deskconn.logout"
+	ProcedureProxyShell       = "io.xconn.deskconn.deskconnd.proxy.shell"
+	ProcedureProxyExec        = "io.xconn.deskconn.deskconnd.proxy.exec"
+	ProcedureLogin            = "io.xconn.deskconn.login"
+	ProcedureLogout           = "io.xconn.deskconn.logout"
+	ProcedureConnectedDevices = "io.xconn.deskconn.connected_devices"
 
 	ProcedureListDesktop = "io.xconn.deskconn.desktop.list"
 
