@@ -87,7 +87,7 @@ func main() {
 
 	case loginCmd.FullCommand():
 		if _, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519")); err == nil {
-			fmt.Fprintln(os.Stderr, "You are already logged in. Please logout first.")
+			fmt.Fprintln(os.Stderr, "you are already logged in, please logout first.")
 			return
 		}
 
@@ -129,7 +129,7 @@ func main() {
 		}
 		connectedDevices, ok := devicesCallResp.Args()[0].(map[string]any)
 		if !ok {
-			fmt.Fprintln(os.Stderr, "Expected a map of strings")
+			fmt.Fprintln(os.Stderr, "expected a map of strings")
 			return
 		}
 		fileExists := true
@@ -142,7 +142,7 @@ func main() {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				fmt.Println("Your config is invalid, refreshing from cloud.")
+				fmt.Println("your config is invalid, refreshing from cloud.")
 			}
 		}
 		tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED"}
@@ -157,7 +157,7 @@ func main() {
 				if connected {
 					d.Connected = true
 				}
-				if d.Name == "" && d.ID == "" && d.Alias == "" {
+				if d.Name == "" && d.Authid == "" && d.Alias == "" {
 					continue
 				}
 
@@ -246,7 +246,7 @@ func main() {
 		credentialsStr, err := os.ReadFile(path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(os.Stderr, "No user logged in.")
+				fmt.Fprintln(os.Stderr, "user not logged in.")
 				return
 			}
 			fmt.Fprintln(os.Stderr, err)
@@ -275,7 +275,7 @@ func main() {
 		data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(os.Stderr, "No config found. User not logged in.")
+				fmt.Fprintln(os.Stderr, "no config found, user not logged in.")
 				return
 			}
 			fmt.Fprintln(os.Stderr, err)
@@ -303,7 +303,7 @@ func main() {
 		_, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(os.Stderr, "No config found. User not logged in.")
+				fmt.Fprintln(os.Stderr, "no config found, user not logged in.")
 				return
 			}
 			fmt.Fprintln(os.Stderr, err)
@@ -323,6 +323,13 @@ func main() {
 }
 
 func attach(username, name string, useStdin bool) error {
+	file, err := deskconn.CredentialsFilePath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(file); err == nil {
+		return fmt.Errorf("device already attached")
+	}
 	password, err := readPassword(useStdin)
 	if err != nil {
 		return err
@@ -463,7 +470,7 @@ func logout(cfgDirectory string) error {
 	pubKey, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519.pub"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(os.Stderr, "Cannot logout. No user logged in")
+			fmt.Fprintln(os.Stderr, "cannot logout. user not logged in")
 		}
 		return err
 	}

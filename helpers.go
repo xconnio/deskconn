@@ -37,7 +37,7 @@ const (
 )
 
 func EnsureCredentials() (*Credentials, error) {
-	credFilePath, err := credentialsFilePath()
+	credFilePath, err := CredentialsFilePath()
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func EnsureCredentials() (*Credentials, error) {
 	return &creds, nil
 }
 
-func credentialsFilePath() (string, error) {
+func CredentialsFilePath() (string, error) {
 	homedir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home dir: %w", err)
