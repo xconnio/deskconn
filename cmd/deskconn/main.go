@@ -656,6 +656,12 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
+	for _, d := range devices {
+		if (d.Alias == alias && d.Alias != "") || d.Authid == alias || d.Name == alias {
+			return fmt.Errorf("alias '%s' already in use", alias)
+		}
+	}
+
 	updated := false
 	for i, d := range devices {
 		if d.Authid == deviceKey || d.Name == deviceKey || d.Alias == deviceKey {
