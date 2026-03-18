@@ -87,7 +87,7 @@ func main() {
 
 	case loginCmd.FullCommand():
 		if _, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519")); err == nil {
-			fmt.Fprintln(os.Stderr, "You are already logged in.")
+			fmt.Fprintln(os.Stderr, "You are already logged in. Please logout first.")
 			return
 		}
 
@@ -238,12 +238,20 @@ func main() {
 
 		credentialsStr, err := os.ReadFile(path)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintln(os.Stderr, "No user logged in.")
+				return
+			}
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 		credentials := strings.Split(strings.TrimSpace(string(credentialsStr)), " ")
 
-		fmt.Printf("Logged in as %s (%s).\n", credentials[2], credentials[1])
+		if len(credentials) > 2 {
+			fmt.Printf("Logged in as %s (%s).\n", credentials[2], credentials[1])
+		} else {
+			fmt.Printf("Logged in as %s.\n", credentials[1])
+		}
 
 	case logoutCmd.FullCommand():
 		if err := logout(cfgDirectory); err != nil {
@@ -259,6 +267,10 @@ func main() {
 	case configShow.FullCommand():
 		data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintln(os.Stderr, "No config found. User not logged in.")
+				return
+			}
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
@@ -281,6 +293,15 @@ func main() {
 		}
 
 	case configEdit.FullCommand():
+		_, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintln(os.Stderr, "No config found. User not logged in.")
+				return
+			}
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
 		editor := os.Getenv("EDITOR")
 		if editor == "" {
 			editor = "vi"
@@ -434,6 +455,9 @@ func logout(cfgDirectory string) error {
 
 	pubKey, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519.pub"))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(os.Stderr, "Cannot logout. No user logged in")
+		}
 		return err
 	}
 	pubKeyString := strings.Split(string(pubKey), " ")[0]
@@ -621,6 +645,9 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 
 	data, err := os.ReadFile(configFile)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no config found. User not logged in")
+		}
 		return fmt.Errorf("failed to read config: %w", err)
 	}
 
