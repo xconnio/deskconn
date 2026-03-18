@@ -37,7 +37,7 @@ const (
 )
 
 func EnsureCredentials() (*Credentials, error) {
-	credFilePath, err := credentialsFilePath()
+	credFilePath, err := CredentialsFilePath()
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func EnsureCredentials() (*Credentials, error) {
 	return &creds, nil
 }
 
-func credentialsFilePath() (string, error) {
+func CredentialsFilePath() (string, error) {
 	homedir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home dir: %w", err)
@@ -151,6 +151,9 @@ func Login(session *xconn.Session, username string) error {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
+	if err = os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), []byte(""), 0600); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
 	return nil
 }
 
@@ -267,6 +270,7 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 					}).Do()
 				if callResp.Err != nil {
 					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
+					_ = inv.SendProgress(nil, nil)
 				} else {
 					_ = inv.SendProgress(nil, nil)
 				}

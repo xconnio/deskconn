@@ -64,7 +64,7 @@ func Detach(session *xconn.Session, authID string) error {
 }
 
 func writeCredentialsFile(machineID, publicKey, privateKey, orgID string) error {
-	credFilePath, err := credentialsFilePath()
+	credFilePath, err := CredentialsFilePath()
 	if err != nil {
 		return err
 	}
