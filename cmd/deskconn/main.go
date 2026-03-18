@@ -469,9 +469,6 @@ func logout(cfgDirectory string) error {
 
 	pubKey, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519.pub"))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(os.Stderr, "cannot logout. user not logged in")
-		}
 		return err
 	}
 	pubKeyString := strings.Split(string(pubKey), " ")[0]

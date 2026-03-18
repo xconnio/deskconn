@@ -151,6 +151,9 @@ func Login(session *xconn.Session, username string) error {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
+	if err = os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), []byte(""), 0600); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
 	return nil
 }
 
