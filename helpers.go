@@ -267,6 +267,7 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 					}).Do()
 				if callResp.Err != nil {
 					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
+					_ = inv.SendProgress(nil, nil)
 				} else {
 					_ = inv.SendProgress(nil, nil)
 				}
