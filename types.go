@@ -62,7 +62,7 @@ type Device struct {
 	Organization Organization `json:"organization" yaml:"organization"`
 	Realm        string       `json:"realm" yaml:"realm"`
 	Alias        string       `yaml:"alias"`
-	Connected    bool         `yaml:"connected"`
+	Connected    bool         `yaml:"-" json:"-"`
 }
 
 type ClientSessions struct {
@@ -89,6 +89,12 @@ func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session
 	c.deviceSessionByRealm[realm] = session
 	c.Unlock()
 	_ = updateDeviceConnected(realm, true)
+}
+
+func (c *ClientSessions) DeviceSessions() map[string]*xconn.Session {
+	c.Lock()
+	defer c.Unlock()
+	return c.deviceSessionByRealm
 }
 
 func (c *ClientSessions) DeleteDeviceSession(realm string) {

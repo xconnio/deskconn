@@ -122,6 +122,16 @@ func main() {
 		}
 
 	case lsCmd.FullCommand():
+		devicesCallResp := session.Call(deskconn.ProcedureConnectedDevices).Do()
+		if devicesCallResp.Err != nil {
+			fmt.Fprintln(os.Stderr, devicesCallResp.Err)
+			return
+		}
+		connectedDevices, ok := devicesCallResp.Args()[0].(map[string]any)
+		if !ok {
+			fmt.Fprintln(os.Stderr, "Expected a map of strings")
+			return
+		}
 		fileExists := true
 		devicesFromCfg, err := deskconn.DevicesFromCfg(cfgDirectory)
 		if err != nil {
@@ -140,6 +150,10 @@ func main() {
 			table := tablewriter.NewWriter(os.Stdout)
 			table.Header(tableHeader)
 			for _, d := range devicesFromCfg {
+				_, connected := connectedDevices[d.Realm]
+				if connected {
+					d.Connected = true
+				}
 				if *lsDetailedFlag {
 					_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
 				} else {

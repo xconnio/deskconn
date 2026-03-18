@@ -96,6 +96,14 @@ func main() {
 		log.Fatal(regRespLogout.Err)
 	}
 
+	regRespConnectedDevices := sess.Register(deskconn.ProcedureConnectedDevices,
+		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			return xconn.NewInvocationResult(clientSession.DeviceSessions())
+		}).Do()
+	if regRespConnectedDevices.Err != nil {
+		log.Fatal(regRespConnectedDevices.Err)
+	}
+
 start:
 	cred, err := deskconn.EnsureCredentials()
 	if err != nil {
