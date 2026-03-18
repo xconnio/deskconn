@@ -138,8 +138,11 @@ func main() {
 			if errors.Is(err, os.ErrNotExist) {
 				fileExists = false
 			} else {
-				fmt.Fprintln(os.Stderr, err)
-				return
+				if !*lsRefreshFlag {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				fmt.Println("Your config is invalid, refreshing from cloud.")
 			}
 		}
 		tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED"}
