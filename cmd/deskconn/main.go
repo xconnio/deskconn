@@ -157,6 +157,10 @@ func main() {
 				if connected {
 					d.Connected = true
 				}
+				if d.Name == "" && d.ID == "" && d.Alias == "" {
+					continue
+				}
+
 				if *lsDetailedFlag {
 					_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
 				} else {
