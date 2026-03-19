@@ -115,12 +115,12 @@ func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
 		return []Device{}, err
 	}
 
-	var devices []Device
-	if err := yaml.Unmarshal(data, &devices); err != nil {
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
 		return []Device{}, err
 	}
 
-	return devices, nil
+	return config.Devices, nil
 }
 
 func Login(session *xconn.Session, username string) error {
