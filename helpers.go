@@ -3,6 +3,7 @@ package deskconn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +109,9 @@ func CfgDirectory() (string, error) {
 func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
 	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []Device{}, fmt.Errorf("user not logged in")
+		}
 		return []Device{}, err
 	}
 
@@ -270,10 +274,10 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 					}).Do()
 				if callResp.Err != nil {
 					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
-					_ = inv.SendProgress(nil, nil)
-				} else {
-					_ = inv.SendProgress(nil, nil)
+					_ = deviceSession.Leave()
+					clientSessions.DeleteDeviceSession(realm)
 				}
+				_ = inv.SendProgress(nil, nil)
 			}()
 		}
 
