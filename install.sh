@@ -34,7 +34,7 @@ After=network.target
 ExecStart=$EXEC_DIR/deskconnd
 Restart=always
 RestartSec=5
-Environment="TERM=xterm"
+Environment=TERM=xterm-256color
 
 [Install]
 WantedBy=default.target
