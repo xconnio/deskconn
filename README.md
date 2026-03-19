@@ -5,7 +5,7 @@ It consists of two main tools: a desktop daemon and a command-line client.
 
 ## Installation
 ```bash
- curl -fsSL https://get.deskconn.com | sh
+curl -fsSL https://get.deskconn.com | sh
 ```
 
 ## deskconnd
