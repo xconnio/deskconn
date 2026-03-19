@@ -87,7 +87,7 @@ func main() {
 
 	case loginCmd.FullCommand():
 		if _, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519")); err == nil {
-			fmt.Fprintln(os.Stderr, "you are already logged in, please logout first.")
+			fmt.Fprintln(os.Stderr, "you are already logged in, please logout first")
 			return
 		}
 
@@ -142,7 +142,7 @@ func main() {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				fmt.Println("your config is invalid, refreshing from cloud.")
+				fmt.Println("your config is invalid, refreshing from cloud")
 			}
 		}
 		tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED"}
@@ -246,7 +246,7 @@ func main() {
 		credentialsStr, err := os.ReadFile(path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(os.Stderr, "user not logged in.")
+				fmt.Fprintln(os.Stderr, "user not logged in")
 				return
 			}
 			fmt.Fprintln(os.Stderr, err)
@@ -275,7 +275,7 @@ func main() {
 		data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(os.Stderr, "no config found, user not logged in.")
+				fmt.Fprintln(os.Stderr, "no config found, user not logged in")
 				return
 			}
 			fmt.Fprintln(os.Stderr, err)
@@ -303,7 +303,7 @@ func main() {
 		_, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(os.Stderr, "no config found, user not logged in.")
+				fmt.Fprintln(os.Stderr, "no config found, user not logged in")
 				return
 			}
 			fmt.Fprintln(os.Stderr, err)
@@ -431,16 +431,17 @@ func detach(username string, useStdin bool) error {
 		return err
 	}
 
-	fmt.Printf("Are you sure you want to detach desktop with ID %s from organization %s? (y/N): ", authID, orgID)
+	fmt.Printf("Are you sure you want to detach desktop with ID %s from organization %s?\n(Y/n): ", authID, orgID)
 
 	var confirm string
 	_, err = fmt.Scanln(&confirm)
-	if err != nil {
+	if err != nil && err.Error() != "unexpected newline" {
 		return err
 	}
 
-	if strings.ToLower(confirm) != "y" && strings.ToLower(confirm) != "yes" {
-		fmt.Println("Detach cancelled.")
+	confirm = strings.TrimSpace(strings.ToLower(confirm))
+	if confirm != "" && confirm != "y" && confirm != "yes" {
+		fmt.Println("detach cancelled")
 		return nil
 	}
 
