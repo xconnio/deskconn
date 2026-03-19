@@ -230,7 +230,7 @@ func main() {
 			return
 		}
 
-		b, err := yaml.Marshal(devices)
+		b, err := yaml.Marshal(deskconn.Config{Devices: devices})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -663,11 +663,12 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
 
-	var devices []deskconn.Device
-	if err := yaml.Unmarshal(data, &devices); err != nil {
+	var config deskconn.Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
+	devices := config.Devices
 	for _, d := range devices {
 		if (d.Alias == alias && d.Alias != "") || d.Authid == alias || d.Name == alias {
 			return fmt.Errorf("alias '%s' already in use", alias)
@@ -687,7 +688,7 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 		return fmt.Errorf("device %s not found", deviceKey)
 	}
 
-	out, err := yaml.Marshal(devices)
+	out, err := yaml.Marshal(deskconn.Config{Devices: devices})
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}

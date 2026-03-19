@@ -65,6 +65,10 @@ type Device struct {
 	Connected    bool         `yaml:"-" json:"-"`
 }
 
+type Config struct {
+	Devices []Device `yaml:"devices"`
+}
+
 type ClientSessions struct {
 	deviceSessionByRealm map[string]*xconn.Session
 	loggedIn             bool
