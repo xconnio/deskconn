@@ -3,7 +3,6 @@ package deskconn
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,9 +108,6 @@ func CfgDirectory() (string, error) {
 func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
 	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []Device{}, fmt.Errorf("user not logged in")
-		}
 		return []Device{}, err
 	}
 
@@ -155,9 +151,6 @@ func Login(session *xconn.Session, username string) error {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	if err = os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), []byte(""), 0600); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
-	}
 	return nil
 }
 
@@ -217,6 +210,47 @@ func WritePrincipalsToFile(principals []*CryptosignPrincipal) error {
 	jsonData = append(jsonData, '\n')
 
 	return os.WriteFile(filepath.Join(cfgDirectory, "principals.json"), jsonData, 0600)
+}
+
+func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
+	authid, privKey, err := ReadCredentials(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	return xconn.ConnectCryptosign(context.Background(), CloudURI(), Realm, authid, privKey)
+}
+
+func RefreshDevicesFromCloud(cfgDirectory string) ([]Device, error) {
+	cloudSession, err := ConnectCloudRealm(cfgDirectory)
+	if err != nil {
+		return []Device{}, err
+	}
+
+	callResp := cloudSession.Call(ProcedureListDesktop).Do()
+	if callResp.Err != nil {
+		return []Device{}, err
+	}
+
+	var devices []Device
+	jsonData, err := json.Marshal(callResp.Args())
+	if err != nil {
+		return []Device{}, err
+	}
+	if err := json.Unmarshal(jsonData, &devices); err != nil {
+		return []Device{}, err
+	}
+
+	b, err := yaml.Marshal(Config{Devices: devices})
+	if err != nil {
+		return []Device{}, err
+	}
+
+	if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), b, 0600); err != nil {
+		return []Device{}, err
+	}
+
+	return devices, nil
 }
 
 func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,

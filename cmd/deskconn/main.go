@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -174,25 +173,8 @@ func main() {
 			return
 		}
 
-		cloudSession, err := connectCloudRealm(cfgDirectory)
+		devices, err := deskconn.RefreshDevicesFromCloud(cfgDirectory)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		callResp := cloudSession.Call(deskconn.ProcedureListDesktop).Do()
-		if callResp.Err != nil {
-			fmt.Fprintln(os.Stderr, callResp.Err)
-			return
-		}
-
-		var devices []deskconn.Device
-		jsonData, err := json.Marshal(callResp.Args())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		if err := json.Unmarshal(jsonData, &devices); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
@@ -228,16 +210,6 @@ func main() {
 		if err = table.Render(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
-		}
-
-		b, err := yaml.Marshal(deskconn.Config{Devices: devices})
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), b, 0600); err != nil {
-			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case whoamiCMD.FullCommand():
@@ -463,7 +435,7 @@ func login(username string, useStdin bool) error {
 }
 
 func logout(cfgDirectory string) error {
-	cloudSession, err := connectCloudRealm(cfgDirectory)
+	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -496,6 +468,14 @@ func logout(cfgDirectory string) error {
 func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 	devices, err := deskconn.DevicesFromCfg(cfgDirectory)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			_, err := deskconn.RefreshDevicesFromCloud(cfgDirectory)
+			if err != nil {
+				return "", err
+			}
+
+			return deviceRealm(deviceName, cfgDirectory)
+		}
 		return "", err
 	}
 
@@ -694,13 +674,4 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 	}
 
 	return os.WriteFile(configFile, out, 0600)
-}
-
-func connectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
-	authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
-	if err != nil {
-		return nil, err
-	}
-
-	return xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), deskconn.Realm, authid, privKey)
 }
