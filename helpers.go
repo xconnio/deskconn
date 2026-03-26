@@ -221,7 +221,7 @@ func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
 	return xconn.ConnectCryptosign(context.Background(), CloudURI(), Realm, authid, privKey)
 }
 
-func RefreshDevicesFromCloud(cfgDirectory string) ([]Device, error) {
+func FetchDevicesFromCloud(cfgDirectory string) ([]Device, error) {
 	cloudSession, err := ConnectCloudRealm(cfgDirectory)
 	if err != nil {
 		return []Device{}, err
@@ -238,15 +238,6 @@ func RefreshDevicesFromCloud(cfgDirectory string) ([]Device, error) {
 		return []Device{}, err
 	}
 	if err := json.Unmarshal(jsonData, &devices); err != nil {
-		return []Device{}, err
-	}
-
-	b, err := yaml.Marshal(Config{Devices: devices})
-	if err != nil {
-		return []Device{}, err
-	}
-
-	if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), b, 0600); err != nil {
 		return []Device{}, err
 	}
 

@@ -173,7 +173,7 @@ func main() {
 			return
 		}
 
-		devices, err := deskconn.RefreshDevicesFromCloud(cfgDirectory)
+		devices, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -210,6 +210,16 @@ func main() {
 		if err = table.Render(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
+		}
+
+		b, err := yaml.Marshal(deskconn.Config{Devices: devices})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), b, 0600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case whoamiCMD.FullCommand():
@@ -469,8 +479,17 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 	devices, err := deskconn.DevicesFromCfg(cfgDirectory)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			_, err := deskconn.RefreshDevicesFromCloud(cfgDirectory)
+			_, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
 			if err != nil {
+				return "", err
+			}
+
+			b, err := yaml.Marshal(deskconn.Config{Devices: devices})
+			if err != nil {
+				return "", err
+			}
+
+			if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), b, 0600); err != nil {
 				return "", err
 			}
 
