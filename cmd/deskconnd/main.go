@@ -255,7 +255,14 @@ start:
 				Router:                      router,
 			}
 			if err := webRtcManager.Setup(cfg); err != nil {
-				log.Fatal("Failed to setup webRtc provider:", err)
+				retryDelay *= 2
+				if retryDelay > maxDelay {
+					retryDelay = maxDelay
+				}
+				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
+				_ = cloudSession.Leave()
+				time.Sleep(retryDelay)
+				continue
 			}
 
 			// reset backoff after successful connection
