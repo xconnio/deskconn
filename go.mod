@@ -12,8 +12,8 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/xconnio/wampproto-go v0.0.0-20251205113711-968e34250b9a
-	github.com/xconnio/xconn-go v0.0.0-20251108143232-364781a4f29a
-	github.com/xconnio/xconn-webrtc-go v0.0.0-20260129135523-38834188956e
+	github.com/xconnio/xconn-go v0.0.0-20260213131645-e9582c5daeb5
+	github.com/xconnio/xconn-webrtc-go v0.0.0-20260330091048-e30e2d28f08e
 	golang.org/x/term v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 )
