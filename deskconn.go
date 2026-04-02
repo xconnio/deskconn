@@ -5,6 +5,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/xconnio/wampproto-go"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -56,7 +57,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureMPRISNext:           d.handleNext,
 		ProcedureMPRISPrevious:       d.handlePrevious,
 	} {
-		response := session.Register(uri, handler).Do()
+		response := session.Register(uri, handler).Invoke(wampproto.InvokeLast).Do()
 		if response.Err != nil {
 			return response.Err
 		}

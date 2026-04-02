@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn"
+	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
@@ -210,8 +211,25 @@ start:
 			default:
 			}
 
-			cloudSession, err := xconn.ConnectCryptosign(ctx, deskconn.CloudURI(), deviceRealm,
-				cred.AuthID, cred.PrivateKey)
+			crytosignAuthenticator, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
+			if err != nil {
+				log.Printf("failed to initialize cryptosign authenticator: %v", err)
+
+				// exponential backoff
+				retryDelay *= 2
+				if retryDelay > maxDelay {
+					retryDelay = maxDelay
+				}
+				time.Sleep(retryDelay)
+				continue
+			}
+			xconnClient := xconn.Client{
+				KeepAliveInterval: 30 * time.Second,
+				KeepAliveTimeout:  10 * time.Second,
+				Authenticator:     crytosignAuthenticator,
+			}
+
+			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deviceRealm)
 			if err != nil {
 				if err.Error() == "wamp.error.no_such_realm" {
 					select {
@@ -285,8 +303,24 @@ start:
 			default:
 			}
 
-			cloudSession, err := xconn.ConnectCryptosign(ctx, deskconn.CloudURI(), deskconnRealm,
-				cred.AuthID, cred.PrivateKey)
+			crytosignAuthenticator, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
+			if err != nil {
+				log.Printf("failed to initialize cryptosign authenticator: %v", err)
+
+				// exponential backoff
+				retryDelay *= 2
+				if retryDelay > maxDelay {
+					retryDelay = maxDelay
+				}
+				time.Sleep(retryDelay)
+				continue
+			}
+			xconnClient := xconn.Client{
+				KeepAliveInterval: 30 * time.Second,
+				KeepAliveTimeout:  10 * time.Second,
+				Authenticator:     crytosignAuthenticator,
+			}
+			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconnRealm)
 			if err != nil {
 				log.Printf("failed to connect to cloud realm, will retry in %v: %v", retryDelay, err)
 
