@@ -21,18 +21,18 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
+var version = "v0.1.0-alpha"
+
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
 	if err != nil {
 		log.Fatal(err)
 	}
-	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-	session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
-	if err != nil {
-		log.Fatal(err)
-	}
 
+	versionString := fmt.Sprintf("deskconn %s", version)
 	app := kingpin.New("deskconn", "Deskconn control CLI")
+	app.Version(versionString)
+	app.Command("version", "Show version")
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
@@ -73,7 +73,21 @@ func main() {
 	configUnsetKey := configUnset.Arg("key", "Config key").Required().String()
 	configEdit := configCmd.Command("edit", "Edit full config")
 
-	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
+	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
+
+	var session *xconn.Session
+	if parsedCmd != "version" {
+		uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
+		session, err = xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	switch parsedCmd {
+	case "version":
+		fmt.Println(versionString)
+
 	case attachCmd.FullCommand():
 		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
