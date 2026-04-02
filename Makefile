@@ -4,6 +4,12 @@ test:
 lint:
 	golangci-lint run
 
+release-snapshot:
+	goreleaser release --snapshot --clean
+
+release-check:
+	goreleaser check
+
 build-deskconnd:
 	go build github.com/xconnio/deskconn/cmd/deskconnd
 
