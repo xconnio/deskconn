@@ -83,12 +83,12 @@ jobs:
             exit 1
           fi
 
-          DESKCONN_BINARY_REL="${DESKCONN_BINARY#dist/}"
-          CHECKSUM="$(awk -v target="${DESKCONN_BINARY_REL}" '$2 == target { print $1 }' dist/checksums.txt)"
-          if [ -z "${CHECKSUM}" ]; then
-            echo "checksum for ${DESKCONN_BINARY_REL} not found in dist/checksums.txt"
+          if [ ! -f dist/checksums.txt ]; then
+            echo "dist/checksums.txt not found"
             exit 1
           fi
+
+          CHECKSUMS="$(cat dist/checksums.txt)"
 
           VERSION="$("${DESKCONN_BINARY}" version | awk '{print $2}')"
           if [ -z "${VERSION}" ]; then
@@ -101,4 +101,4 @@ jobs:
             --authid "${WICK_AUTHID}" \
             --private-key "${WICK_PRIVATE_KEY}" \
             --realm io.xconn.deskconn \
-            deskconn "${VERSION}" "${CHECKSUM}"
+            deskconn "${VERSION}" "${CHECKSUMS}"
