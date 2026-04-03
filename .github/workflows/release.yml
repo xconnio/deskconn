@@ -53,3 +53,49 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install wick
+        run: sudo snap install wick --classic
+
+      - name: Notify deskconn app update
+        env:
+          WICK_AUTHID: ${{ secrets.WICK_AUTHID }}
+          WICK_PRIVATE_KEY: ${{ secrets.WICK_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${WICK_AUTHID:-}" ]; then
+            echo "WICK_AUTHID is not set"
+            exit 1
+          fi
+
+          if [ -z "${WICK_PRIVATE_KEY:-}" ]; then
+            echo "WICK_PRIVATE_KEY is not set"
+            exit 1
+          fi
+
+          DESKCONN_BINARY="$(find dist -type f -path '*/deskconn' | grep '/deskconn_linux_amd64' | head -n 1)"
+          if [ -z "${DESKCONN_BINARY}" ]; then
+            echo "deskconn release binary not found in dist/"
+            exit 1
+          fi
+
+          DESKCONN_BINARY_REL="${DESKCONN_BINARY#dist/}"
+          CHECKSUM="$(awk -v target="${DESKCONN_BINARY_REL}" '$2 == target { print $1 }' dist/checksums.txt)"
+          if [ -z "${CHECKSUM}" ]; then
+            echo "checksum for ${DESKCONN_BINARY_REL} not found in dist/checksums.txt"
+            exit 1
+          fi
+
+          VERSION="$("${DESKCONN_BINARY}" version | awk '{print $2}')"
+          if [ -z "${VERSION}" ]; then
+            echo "failed to read deskconn version from ${DESKCONN_BINARY}"
+            exit 1
+          fi
+
+          wick call io.xconn.deskconn.app.update \
+            --url wss://api.deskconn.com/ws \
+            --authid "${WICK_AUTHID}" \
+            --private-key "${WICK_PRIVATE_KEY}" \
+            --realm io.xconn.deskconn \
+            deskconn "${VERSION}" "${CHECKSUM}"
