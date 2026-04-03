@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="v0.1.0-alpha"
+REPO="xconnio/deskconn"
 BIN_DIR="$HOME/.local/bin"
 EXEC_DIR="$HOME/.local/lib/exec"
 SERVICE_NAME="deskconnd"
@@ -10,17 +10,52 @@ SERVICE_FILE="$HOME/.config/systemd/user/$SERVICE_NAME.service"
 mkdir -p "$BIN_DIR"
 mkdir -p "$EXEC_DIR"
 
-echo "Downloading binaries..."
-curl -L -o deskconn https://github.com/xconnio/deskconn/releases/download/$VERSION/deskconn
-curl -L -o deskconnd https://github.com/xconnio/deskconn/releases/download/$VERSION/deskconnd
+ARCH="$(uname -m)"
+case "$ARCH" in
+    x86_64)
+        GO_ARCH="amd64"
+        ;;
+    aarch64|arm64)
+        GO_ARCH="arm64"
+        ;;
+    *)
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+        ;;
+esac
 
-mv deskconn "$BIN_DIR/deskconn"
-mv deskconnd "$EXEC_DIR/deskconnd"
+echo "Resolving latest release..."
+VERSION="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')"
+if [ -z "$VERSION" ]; then
+    echo "Failed to determine latest release version."
+    exit 1
+fi
+
+VERSION_NO_V="${VERSION#v}"
+ARCHIVE="deskconn_${VERSION_NO_V}_linux_${GO_ARCH}.tar.gz"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/$ARCHIVE"
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+echo "Downloading $ARCHIVE from $DOWNLOAD_URL..."
+curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE"
+
+echo "Extracting archive..."
+tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
+
+if [ ! -f "$TMP_DIR/deskconn" ] || [ ! -f "$TMP_DIR/deskconnd" ]; then
+    echo "Release archive does not contain deskconn and deskconnd binaries."
+    exit 1
+fi
+
+mv "$TMP_DIR/deskconn" "$BIN_DIR/deskconn"
+mv "$TMP_DIR/deskconnd" "$EXEC_DIR/deskconnd"
 
 chmod 755 "$BIN_DIR/deskconn"
 chmod 700 "$EXEC_DIR/deskconnd"
 
-echo "Binaries installed!"
+echo "Installed deskconn $VERSION"
 
 echo "Setting up systemd user service for $SERVICE_NAME..."
 mkdir -p "$(dirname "$SERVICE_FILE")"
