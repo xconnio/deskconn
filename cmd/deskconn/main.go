@@ -38,8 +38,6 @@ func main() {
 
 	versionString := fmt.Sprintf("deskconn %s", version)
 	app := kingpin.New("deskconn", "Deskconn control CLI")
-	app.Version(versionString)
-	app.Command("version", "Show version")
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
@@ -79,12 +77,14 @@ func main() {
 	configUnsetDevice := configUnset.Arg("device", "ID, name or alias of device").Required().String()
 	configUnsetKey := configUnset.Arg("key", "Config key").Required().String()
 	configEdit := configCmd.Command("edit", "Edit full config")
-	updateCmd := app.Command("update", "Check for and install app updates")
+	selfCmd := app.Command("self", "Manage the installed deskconn CLI.")
+	selfVersionCmd := selfCmd.Command("version", "Show the installed deskconn version")
+	selfUpdateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
 
 	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	var session *xconn.Session
-	if parsedCmd != "version" && parsedCmd != updateCmd.FullCommand() {
+	if parsedCmd != selfVersionCmd.FullCommand() && parsedCmd != selfUpdateCmd.FullCommand() {
 		uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
 		session, err = xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 		if err != nil {
@@ -93,7 +93,7 @@ func main() {
 	}
 
 	switch parsedCmd {
-	case "version":
+	case selfVersionCmd.FullCommand():
 		fmt.Println(versionString)
 
 	case attachCmd.FullCommand():
@@ -324,7 +324,7 @@ func main() {
 		cmd.Stderr = os.Stderr
 		_ = cmd.Run()
 
-	case updateCmd.FullCommand():
+	case selfUpdateCmd.FullCommand():
 		if err := updateApp(cfgDirectory); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -333,10 +333,13 @@ func main() {
 }
 
 type appUpdateResponse struct {
-	DownloadURL string `json:"download_url"`
+	DownloadURL   string `json:"download_url"`
+	LatestVersion string `json:"latest_version"`
 }
 
 func updateApp(cfgDirectory string) error {
+	fmt.Printf("Checking for updates for %s on %s-%s...", version, runtime.GOOS, runtime.GOARCH)
+
 	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
 		return err
@@ -349,7 +352,7 @@ func updateApp(cfgDirectory string) error {
 	}
 
 	if len(callResp.Args()) == 0 {
-		fmt.Println("No updates available.")
+		fmt.Printf("You're already on version %s of deskconn (the latest version).", version)
 		return nil
 	}
 
@@ -367,10 +370,13 @@ func updateApp(cfgDirectory string) error {
 		return fmt.Errorf("update response missing download_url")
 	}
 
+	fmt.Printf("Found update at %s.", updateResp.DownloadURL)
+
 	if err := downloadAndInstallUpdate(updateResp.DownloadURL); err != nil {
 		return err
 	}
 
+	fmt.Printf("Restarting deskconnd service...")
 	cmd := exec.Command("systemctl", "--user", "restart", "deskconnd")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -378,7 +384,7 @@ func updateApp(cfgDirectory string) error {
 		return fmt.Errorf("failed to restart deskconnd: %w", err)
 	}
 
-	fmt.Println("Update installed successfully.")
+	fmt.Printf("Updated deskconn from version %s to %s.", version, updateResp.LatestVersion)
 	return nil
 }
 
@@ -387,6 +393,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		Timeout: 5 * time.Minute,
 	}
 
+	fmt.Printf("Downloading update from %s...", downloadURL)
 	resp, err := client.Get(downloadURL)
 	if err != nil {
 		return fmt.Errorf("failed to download update: %w", err)
@@ -404,6 +411,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 	defer gzipReader.Close()
 
 	tarReader := tar.NewReader(gzipReader)
+	fmt.Printf("Extracting update archive...")
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -438,11 +446,13 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		name := filepath.Base(header.Name)
 		switch name {
 		case "deskconn":
+			fmt.Printf("Installing deskconn...")
 			if err := installBinaryFromReader(tarReader, filepath.Join(binDir, "deskconn"), 0755); err != nil {
 				return err
 			}
 			foundDeskconn = true
 		case "deskconnd":
+			fmt.Printf("Installing deskconnd...")
 			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "deskconnd"), 0700); err != nil {
 				return err
 			}
