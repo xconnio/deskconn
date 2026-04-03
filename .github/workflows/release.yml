@@ -77,7 +77,7 @@ jobs:
 
           CHECKSUMS="$(cat dist/checksums.txt)"
 
-          VERSION="$("${DESKCONN_BINARY}" version | awk '{print $2}')"
+          VERSION="$("${DESKCONN_BINARY}" self version | awk '{print $2}')"
           if [ -z "${VERSION}" ]; then
             echo "failed to read deskconn version from ${DESKCONN_BINARY}"
             exit 1
