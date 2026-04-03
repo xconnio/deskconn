@@ -81,6 +81,11 @@ func main() {
 	selfVersionCmd := selfCmd.Command("version", "Show the installed deskconn version")
 	selfUpdateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
 
+	if len(os.Args) == 2 && os.Args[1] == "self" {
+		app.Usage([]string{"self"})
+		return
+	}
+
 	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	var session *xconn.Session
@@ -338,7 +343,7 @@ type appUpdateResponse struct {
 }
 
 func updateApp(cfgDirectory string) error {
-	fmt.Printf("Checking for updates for %s on %s-%s...", version, runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("Checking for updates for %s on %s-%s...\n", version, runtime.GOOS, runtime.GOARCH)
 
 	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
@@ -352,7 +357,7 @@ func updateApp(cfgDirectory string) error {
 	}
 
 	if len(callResp.Args()) == 0 {
-		fmt.Printf("You're already on version %s of deskconn (the latest version).", version)
+		fmt.Printf("You're already on version %s of deskconn (the latest version).\n", version)
 		return nil
 	}
 
@@ -370,13 +375,13 @@ func updateApp(cfgDirectory string) error {
 		return fmt.Errorf("update response missing download_url")
 	}
 
-	fmt.Printf("Found update at %s.", updateResp.DownloadURL)
+	fmt.Printf("Found update at %s.\n", updateResp.DownloadURL)
 
 	if err := downloadAndInstallUpdate(updateResp.DownloadURL); err != nil {
 		return err
 	}
 
-	fmt.Printf("Restarting deskconnd service...")
+	fmt.Printf("Restarting deskconnd service...\n")
 	cmd := exec.Command("systemctl", "--user", "restart", "deskconnd")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -384,7 +389,7 @@ func updateApp(cfgDirectory string) error {
 		return fmt.Errorf("failed to restart deskconnd: %w", err)
 	}
 
-	fmt.Printf("Updated deskconn from version %s to %s.", version, updateResp.LatestVersion)
+	fmt.Printf("Updated deskconn from version %s to %s.\n", version, updateResp.LatestVersion)
 	return nil
 }
 
@@ -393,7 +398,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		Timeout: 5 * time.Minute,
 	}
 
-	fmt.Printf("Downloading update from %s...", downloadURL)
+	fmt.Printf("Downloading update from %s...\n", downloadURL)
 	resp, err := client.Get(downloadURL)
 	if err != nil {
 		return fmt.Errorf("failed to download update: %w", err)
@@ -411,7 +416,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 	defer gzipReader.Close()
 
 	tarReader := tar.NewReader(gzipReader)
-	fmt.Printf("Extracting update archive...")
+	fmt.Println("Extracting update archive...")
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -446,13 +451,13 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		name := filepath.Base(header.Name)
 		switch name {
 		case "deskconn":
-			fmt.Printf("Installing deskconn...")
+			fmt.Println("Installing deskconn...")
 			if err := installBinaryFromReader(tarReader, filepath.Join(binDir, "deskconn"), 0755); err != nil {
 				return err
 			}
 			foundDeskconn = true
 		case "deskconnd":
-			fmt.Printf("Installing deskconnd...")
+			fmt.Println("Installing deskconnd...")
 			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "deskconnd"), 0700); err != nil {
 				return err
 			}
