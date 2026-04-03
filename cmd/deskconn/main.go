@@ -1,15 +1,22 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/olekukonko/tablewriter"
@@ -72,11 +79,12 @@ func main() {
 	configUnsetDevice := configUnset.Arg("device", "ID, name or alias of device").Required().String()
 	configUnsetKey := configUnset.Arg("key", "Config key").Required().String()
 	configEdit := configCmd.Command("edit", "Edit full config")
+	updateCmd := app.Command("update", "Check for and install app updates")
 
 	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	var session *xconn.Session
-	if parsedCmd != "version" {
+	if parsedCmd != "version" && parsedCmd != updateCmd.FullCommand() {
 		uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
 		session, err = xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 		if err != nil {
@@ -315,7 +323,173 @@ func main() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		_ = cmd.Run()
+
+	case updateCmd.FullCommand():
+		if err := updateApp(cfgDirectory); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
 	}
+}
+
+type appUpdateResponse struct {
+	DownloadURL string `json:"download_url"`
+}
+
+func updateApp(cfgDirectory string) error {
+	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
+	if err != nil {
+		return err
+	}
+
+	callResp := cloudSession.Call(deskconn.ProcedureAppUpdateCheck).Args("deskconn", version, runtime.GOOS,
+		runtime.GOARCH).Do()
+	if callResp.Err != nil {
+		return callResp.Err
+	}
+
+	if len(callResp.Args()) == 0 {
+		fmt.Println("No updates available.")
+		return nil
+	}
+
+	var updateResp appUpdateResponse
+	jsonData, err := json.Marshal(callResp.Args()[0])
+	if err != nil {
+		return fmt.Errorf("failed to marshal update response: %w", err)
+	}
+
+	if err := json.Unmarshal(jsonData, &updateResp); err != nil {
+		return fmt.Errorf("failed to parse update response: %w", err)
+	}
+
+	if updateResp.DownloadURL == "" {
+		return fmt.Errorf("update response missing download_url")
+	}
+
+	if err := downloadAndInstallUpdate(updateResp.DownloadURL); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("systemctl", "--user", "restart", "deskconnd")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to restart deskconnd: %w", err)
+	}
+
+	fmt.Println("Update installed successfully.")
+	return nil
+}
+
+func downloadAndInstallUpdate(downloadURL string) error {
+	client := &http.Client{
+		Timeout: 5 * time.Minute,
+	}
+
+	resp, err := client.Get(downloadURL)
+	if err != nil {
+		return fmt.Errorf("failed to download update: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download update: unexpected status %s", resp.Status)
+	}
+
+	gzipReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to open update archive: %w", err)
+	}
+	defer gzipReader.Close()
+
+	tarReader := tar.NewReader(gzipReader)
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
+	binDir := filepath.Join(homeDir, ".local", "bin")
+	execDir := filepath.Join(homeDir, ".local", "lib", "exec")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return fmt.Errorf("failed to create bin dir: %w", err)
+	}
+	if err := os.MkdirAll(execDir, 0755); err != nil {
+		return fmt.Errorf("failed to create exec dir: %w", err)
+	}
+
+	foundDeskconn := false
+	foundDeskconnd := false
+
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read update archive: %w", err)
+		}
+
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		name := filepath.Base(header.Name)
+		switch name {
+		case "deskconn":
+			if err := installBinaryFromReader(tarReader, filepath.Join(binDir, "deskconn"), 0755); err != nil {
+				return err
+			}
+			foundDeskconn = true
+		case "deskconnd":
+			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "deskconnd"), 0700); err != nil {
+				return err
+			}
+			foundDeskconnd = true
+		}
+	}
+
+	if !foundDeskconn || !foundDeskconnd {
+		return fmt.Errorf("update archive missing required binaries")
+	}
+
+	return nil
+}
+
+func installBinaryFromReader(src io.Reader, dst string, mode os.FileMode) error {
+	tmpFile, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file for %s: %w", dst, err)
+	}
+
+	tmpPath := tmpFile.Name()
+	cleanup := true
+	defer func() {
+		_ = tmpFile.Close()
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := io.Copy(tmpFile, src); err != nil {
+		return fmt.Errorf("failed to write %s: %w", dst, err)
+	}
+
+	if err := tmpFile.Chmod(mode); err != nil {
+		return fmt.Errorf("failed to chmod %s: %w", dst, err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close %s: %w", dst, err)
+	}
+
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return fmt.Errorf("failed to install %s: %w", dst, err)
+	}
+
+	cleanup = false
+	return nil
 }
 
 func attach(username, name string, useStdin bool) error {

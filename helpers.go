@@ -33,6 +33,8 @@ const (
 
 	ProcedureListDesktop = "io.xconn.deskconn.desktop.list"
 
+	ProcedureAppUpdateCheck = "io.xconn.deskconn.app.update.check"
+
 	LocalRealm = "io.xconn.deskconn.local"
 )
 
