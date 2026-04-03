@@ -11,11 +11,12 @@ on:
   push:
     tags:
       - 'v*'
+  pull_request:
 
 jobs:
   release-main:
     name: Tag and release main build
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    if: (github.event_name == 'workflow_run' || github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -36,6 +37,8 @@ jobs:
         env:
           GIT_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          GIT_SHA="${GIT_SHA:-$GITHUB_SHA}"
+
           TAG_NAME="v0.1.0-alpha.${GIT_SHA:0:7}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
