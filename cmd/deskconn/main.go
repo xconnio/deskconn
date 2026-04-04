@@ -133,7 +133,20 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureProxyShell, realm); err != nil {
+
+		authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		deviceSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), realm, authid, privKey)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		if err := deskconn.StartInteractiveCommand(deviceSession, deskconn.ProcedureShell); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
@@ -143,7 +156,21 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		if err := deskconn.StartInteractiveCommand(session, deskconn.ProcedureProxyExec, realm, *command...); err != nil {
+
+		authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		deviceSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), realm, authid, privKey)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		err = deskconn.StartInteractiveCommand(deviceSession, deskconn.ProcedureExec, *command...)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
