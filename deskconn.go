@@ -2,6 +2,8 @@ package deskconn
 
 import (
 	"context"
+	"errors"
+	"os"
 
 	log "github.com/sirupsen/logrus"
 
@@ -16,6 +18,7 @@ const (
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
 	ProcedureShell               = "io.xconn.deskconn.deskconnd.shell"
 	ProcedureExec                = "io.xconn.deskconn.deskconnd.exec"
+	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
@@ -30,6 +33,7 @@ const (
 
 type Deskconn struct {
 	shellSession *interactiveShellSession
+	files        *FileBrowser
 	screen       *Screen
 	mpris        *MPRIS
 }
@@ -37,6 +41,7 @@ type Deskconn struct {
 func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 	return &Deskconn{
 		shellSession: newInteractiveShellSession(),
+		files:        NewFileBrowser(),
 		screen:       screen,
 		mpris:        mpris,
 	}
@@ -50,6 +55,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
 		ProcedureShell:               d.shellSession.handleShell(),
 		ProcedureExec:                d.shellSession.handleExec(),
+		ProcedureFileBrowse:          d.handleFileBrowse,
 		ProcedureMPRISPlayers:        d.handleListPlayers,
 		ProcedureMPRISPlayPause:      d.handlePlayPause,
 		ProcedureMPRISPlay:           d.handlePlay,
@@ -197,4 +203,22 @@ func (d *Deskconn) handlePrevious(_ context.Context, inv *xconn.Invocation) *xco
 	}
 
 	return xconn.NewInvocationResult()
+}
+
+func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	pathArg, err := inv.ArgString(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	result, err := d.files.Browse(pathArg)
+	if err != nil {
+		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	return xconn.NewInvocationResult(result)
 }
