@@ -133,6 +133,9 @@ func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm, cfgDire
 		Serializer:               xconn.CBORSerializerSpec,
 		Authenticator:            authenticator,
 		Session:                  session,
+		ICEServers: []xconnwebrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
 	}
 
 	finalSession, err := xconnwebrtc.ConnectWAMP(config)
@@ -183,6 +186,9 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKe
 			Serializer:               xconn.CBORSerializerSpec,
 			Authenticator:            authenticator,
 			Session:                  cloudSession,
+			ICEServers: []xconnwebrtc.ICEServer{
+				{URLs: []string{"stun:stun.l.google.com:19302"}},
+			},
 		}
 
 		finalSession, err := xconnwebrtc.ConnectWAMP(config)

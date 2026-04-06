@@ -255,6 +255,9 @@ func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P 
 		Serializer:               xconn.CBORSerializerSpec,
 		Authenticator:            authenticator,
 		Session:                  session,
+		ICEServers: []xconnwebrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
 	}
 
 	finalSession, err := xconnwebrtc.ConnectWAMP(config)

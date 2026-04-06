@@ -271,6 +271,9 @@ start:
 				Serializer:                  &serializers.CBORSerializer{},
 				Authenticator:               authenticator,
 				Router:                      router,
+				ICEServers: []xconnwebrtc.ICEServer{
+					{URLs: []string{"stun:stun.l.google.com:19302"}},
+				},
 			}
 			if err := webRtcManager.Setup(cfg); err != nil {
 				retryDelay *= 2
