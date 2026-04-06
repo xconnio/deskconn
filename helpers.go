@@ -14,6 +14,8 @@ import (
 
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
+	xconnauth "github.com/xconnio/xconn-go/auth"
+	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
 const (
@@ -221,6 +223,49 @@ func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
 	}
 
 	return xconn.ConnectCryptosign(context.Background(), CloudURI(), Realm, authid, privKey)
+}
+
+func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P bool) (*xconn.Session, error) {
+	authid, privKey, err := ReadCredentials(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	session, err := xconn.ConnectCryptosign(ctx, CloudURI(), realm, authid, privKey)
+	if err != nil {
+		return nil, err
+	}
+
+	if !useP2P {
+		return session, nil
+	}
+
+	defer func() { _ = session.Leave() }()
+
+	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+
+	config := &xconnwebrtc.ClientConfig{
+		Realm:                    realm,
+		ProcedureWebRTCOffer:     ProcedureWebRTCOffer,
+		TopicAnswererOnCandidate: TopicAnswererOnCandidate,
+		TopicOffererOnCandidate:  TopicOffererOnCandidate,
+		Serializer:               xconn.CBORSerializerSpec,
+		Authenticator:            authenticator,
+		Session:                  session,
+		ICEServers: []xconnwebrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
+	}
+
+	finalSession, err := xconnwebrtc.ConnectWAMP(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return finalSession, nil
 }
 
 func FetchDevicesFromCloud(cfgDirectory string) ([]Device, error) {

@@ -54,10 +54,12 @@ func main() {
 
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().String()
+	shellP2PFlag := shellCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
 	execCmd := app.Command("exec", "Run a command")
 	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().String()
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
+	execP2PFlag := execCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
 	lsCmd := app.Command("ls", "List devices")
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
@@ -134,13 +136,7 @@ func main() {
 			return
 		}
 
-		authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), realm, authid, privKey)
+		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *shellP2PFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -157,13 +153,7 @@ func main() {
 			return
 		}
 
-		authid, privKey, err := deskconn.ReadCredentials(cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := xconn.ConnectCryptosign(context.Background(), deskconn.CloudURI(), realm, authid, privKey)
+		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *execP2PFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
