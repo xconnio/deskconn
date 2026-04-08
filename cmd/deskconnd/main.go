@@ -21,11 +21,7 @@ import (
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-const (
-	port = 8080
-
-	deskconnRealm = "io.xconn.deskconn"
-)
+const port = 8080
 
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
@@ -262,6 +258,24 @@ start:
 				continue
 			}
 
+			cloudRealmSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconn.CloudRealm)
+			if err != nil {
+				log.Printf("failed to connect to cloud, will retry in %v: %v", retryDelay, err)
+				retryDelay *= 2
+				if retryDelay > maxDelay {
+					retryDelay = maxDelay
+				}
+				time.Sleep(retryDelay)
+				continue
+			}
+			iceServers, expiresAt, err := deskconn.FetchTURNServers(cloudRealmSession)
+			if err != nil {
+				log.Printf("failed to fetch TURN credentials, using STUN only: %v", err)
+				iceServers = []xconnwebrtc.ICEServer{
+					{URLs: []string{"stun:stun.l.google.com:19302"}},
+				}
+			}
+
 			webRtcManager := xconnwebrtc.NewWebRTCHandler()
 			cfg := &xconnwebrtc.ProviderConfig{
 				Session:                     cloudSession,
@@ -271,9 +285,7 @@ start:
 				Serializer:                  &serializers.CBORSerializer{},
 				Authenticator:               authenticator,
 				Router:                      router,
-				ICEServers: []xconnwebrtc.ICEServer{
-					{URLs: []string{"stun:stun.l.google.com:19302"}},
-				},
+				ICEServers:                  iceServers,
 			}
 			if err := webRtcManager.Setup(cfg); err != nil {
 				retryDelay *= 2
@@ -285,6 +297,31 @@ start:
 				time.Sleep(retryDelay)
 				continue
 			}
+
+			go func(initialExpiresAt int64) {
+				currentExpiresAt := initialExpiresAt
+				const turnCredentialRefreshBuffer = 5 * time.Minute
+				for {
+					sleepDur := time.Until(time.Unix(currentExpiresAt, 0)) - turnCredentialRefreshBuffer
+					if sleepDur <= 0 {
+						sleepDur = 0
+					}
+					select {
+					case <-cloudRealmSession.Done():
+						return
+					case <-time.After(sleepDur):
+					}
+
+					newServers, newExpiresAt, err := deskconn.FetchTURNServers(cloudRealmSession)
+					if err != nil {
+						log.Printf("failed to refresh TURN credentials: %v", err)
+						currentExpiresAt = time.Now().Add(10 * time.Second).Unix()
+						continue
+					}
+					webRtcManager.UpdateICEServers(newServers)
+					currentExpiresAt = newExpiresAt
+				}
+			}(expiresAt)
 
 			// reset backoff after successful connection
 			retryDelay = 1 * time.Second
@@ -323,7 +360,7 @@ start:
 				KeepAliveTimeout:  10 * time.Second,
 				Authenticator:     crytosignAuthenticator,
 			}
-			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconnRealm)
+			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconn.CloudRealm)
 			if err != nil {
 				log.Printf("failed to connect to cloud realm, will retry in %v: %v", retryDelay, err)
 
