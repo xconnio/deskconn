@@ -21,11 +21,7 @@ import (
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-const (
-	port = 8080
-
-	deskconnRealm = "io.xconn.deskconn"
-)
+const port = 8080
 
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
@@ -262,7 +258,7 @@ start:
 				continue
 			}
 
-			cloudRealmSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconnRealm)
+			cloudRealmSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconn.CloudRealm)
 			if err != nil {
 				log.Printf("failed to connect to cloud, will retry in %v: %v", retryDelay, err)
 				retryDelay *= 2
@@ -364,7 +360,7 @@ start:
 				KeepAliveTimeout:  10 * time.Second,
 				Authenticator:     crytosignAuthenticator,
 			}
-			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconnRealm)
+			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconn.CloudRealm)
 			if err != nil {
 				log.Printf("failed to connect to cloud realm, will retry in %v: %v", retryDelay, err)
 

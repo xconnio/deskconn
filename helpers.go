@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
@@ -37,9 +38,10 @@ const (
 
 	ProcedureAppUpdateCheck = "io.xconn.deskconn.app.update.check"
 
-	ProcedureCoturnCredentialsCreate = "io.xconn.deskconn.coturn.credentials.create"
+	ProcedureCoturnCreate = "io.xconn.deskconn.coturn.credentials.create"
 
 	LocalRealm = "io.xconn.deskconn.local"
+	CloudRealm = "io.xconn.deskconn"
 )
 
 func EnsureCredentials() (*Credentials, error) {
@@ -249,6 +251,13 @@ func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P 
 		return nil, err
 	}
 
+	iceServers, err := GetOrRefreshTURNServers(ctx, authid, privKey, cfgDirectory)
+	if err != nil {
+		iceServers = []xconnwebrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		}
+	}
+
 	config := &xconnwebrtc.ClientConfig{
 		Realm:                    realm,
 		ProcedureWebRTCOffer:     ProcedureWebRTCOffer,
@@ -257,9 +266,7 @@ func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P 
 		Serializer:               xconn.CBORSerializerSpec,
 		Authenticator:            authenticator,
 		Session:                  session,
-		ICEServers: []xconnwebrtc.ICEServer{
-			{URLs: []string{"stun:stun.l.google.com:19302"}},
-		},
+		ICEServers:               iceServers,
 	}
 
 	finalSession, err := xconnwebrtc.ConnectWAMP(config)
@@ -364,55 +371,133 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 	}
 }
 
-func FetchTURNServers(session *xconn.Session) ([]xconnwebrtc.ICEServer, int64, error) {
-	resp := session.Call(ProcedureCoturnCredentialsCreate).Do()
+type TURNCredentials struct {
+	ExpiresAt  int64    `json:"expires_at"`
+	Username   string   `json:"username"`
+	Credential string   `json:"credential"`
+	URLs       []string `json:"urls"`
+}
+
+func turnCredentialsFilePath(cfgDirectory string) string {
+	return filepath.Join(cfgDirectory, "turn_credentials.json")
+}
+
+func loadCachedTURNCredentials(cfgDirectory string) (*TURNCredentials, error) {
+	data, err := os.ReadFile(turnCredentialsFilePath(cfgDirectory))
+	if err != nil {
+		return nil, err
+	}
+
+	var creds TURNCredentials
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return nil, fmt.Errorf("failed to parse cached TURN credentials: %w", err)
+	}
+
+	return &creds, nil
+}
+
+func saveTURNCredentials(cfgDirectory string, creds *TURNCredentials) error {
+	data, err := json.MarshalIndent(creds, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal TURN credentials: %w", err)
+	}
+
+	data = append(data, '\n')
+	return os.WriteFile(turnCredentialsFilePath(cfgDirectory), data, 0600)
+}
+
+func turnCredentialsToICEServers(creds *TURNCredentials) []xconnwebrtc.ICEServer {
+	return []xconnwebrtc.ICEServer{
+		{URLs: []string{"stun:stun.l.google.com:19302"}},
+		{
+			URLs:           creds.URLs,
+			Username:       creds.Username,
+			Credential:     creds.Credential,
+			CredentialType: xconnwebrtc.ICECredentialTypePassword,
+		},
+	}
+}
+
+func fetchTURNCredentials(session *xconn.Session) (*TURNCredentials, error) {
+	resp := session.Call(ProcedureCoturnCreate).Do()
 	if resp.Err != nil {
-		return nil, 0, fmt.Errorf("failed to call TURN credentials API: %w", resp.Err)
+		return nil, fmt.Errorf("failed to call TURN credentials API: %w", resp.Err)
 	}
 
 	cred, err := resp.ArgDict(0)
 	if err != nil {
-		return nil, 0, fmt.Errorf("invalid TURN credentials response: %w", err)
+		return nil, fmt.Errorf("invalid TURN credentials response: %w", err)
 	}
 
 	expiresAt, err := cred.Int64("expires_at")
 	if err != nil {
-		return nil, 0, fmt.Errorf("missing expires_at in TURN credentials: %w", err)
+		return nil, fmt.Errorf("missing expires_at in TURN credentials: %w", err)
 	}
 
 	username, err := cred.String("username")
 	if err != nil {
-		return nil, 0, fmt.Errorf("missing username in TURN credentials: %w", err)
+		return nil, fmt.Errorf("missing username in TURN credentials: %w", err)
 	}
 
 	credential, err := cred.String("credential")
 	if err != nil {
-		return nil, 0, fmt.Errorf("missing password in TURN credentials: %w", err)
+		return nil, fmt.Errorf("missing credential in TURN credentials: %w", err)
 	}
 
 	urlList, err := cred.List("urls")
 	if err != nil {
-		return nil, 0, fmt.Errorf("missing urls in TURN credentials: %w", err)
+		return nil, fmt.Errorf("missing urls in TURN credentials: %w", err)
 	}
 
 	turnURLs := make([]string, urlList.Len())
 	for i := range urlList.Len() {
 		u, err := urlList.String(i)
 		if err != nil {
-			return nil, 0, fmt.Errorf("invalid url at index %d: %w", i, err)
+			return nil, fmt.Errorf("invalid url at index %d: %w", i, err)
 		}
 		turnURLs[i] = u
 	}
 
-	servers := []xconnwebrtc.ICEServer{
-		{URLs: []string{"stun:stun.l.google.com:19302"}},
-		{
-			URLs:           turnURLs,
-			Username:       username,
-			Credential:     credential,
-			CredentialType: xconnwebrtc.ICECredentialTypePassword,
-		},
+	return &TURNCredentials{
+		ExpiresAt:  expiresAt,
+		Username:   username,
+		Credential: credential,
+		URLs:       turnURLs,
+	}, nil
+}
+
+func FetchTURNServers(session *xconn.Session) ([]xconnwebrtc.ICEServer, int64, error) {
+	creds, err := fetchTURNCredentials(session)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	return servers, expiresAt, nil
+	return turnCredentialsToICEServers(creds), creds.ExpiresAt, nil
+}
+
+func GetOrRefreshTURNServers(ctx context.Context, authid, privKey, cfgDirectory string) ([]xconnwebrtc.ICEServer,
+	error) {
+	cached, err := loadCachedTURNCredentials(cfgDirectory)
+	if err == nil && time.Now().Unix() < cached.ExpiresAt {
+		return turnCredentialsToICEServers(cached), nil
+	}
+
+	session, err := xconn.ConnectCryptosign(ctx, CloudURI(), CloudRealm, authid, privKey)
+	if err != nil {
+		return nil, err
+	}
+
+	fresh, err := fetchTURNCredentials(session)
+	if err != nil {
+		if cached != nil {
+			return turnCredentialsToICEServers(cached), nil
+		}
+		return nil, fmt.Errorf("failed to fetch TURN credentials: %w", err)
+	}
+
+	if saveErr := saveTURNCredentials(cfgDirectory, fresh); saveErr != nil {
+		log.Printf("failed to cache TURN credentials: %v", saveErr)
+	}
+
+	return turnCredentialsToICEServers(fresh), nil
 }
