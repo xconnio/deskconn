@@ -132,8 +132,8 @@ github.com/xconnio/wampproto-go v0.0.0-20251205113711-968e34250b9a h1:BKFEdKgWDc
 github.com/xconnio/wampproto-go v0.0.0-20251205113711-968e34250b9a/go.mod h1:k2I4x+dOyJq5XW6SHbnwrqJEuRf/lO9rbF5habINuMM=
 github.com/xconnio/xconn-go v0.0.0-20260213131645-e9582c5daeb5 h1:VbpGwXEOjXLgphM7vjR8xulhx4DXNOQCfcEcW4DQFUg=
 github.com/xconnio/xconn-go v0.0.0-20260213131645-e9582c5daeb5/go.mod h1:GnT3dXZEkFFRvu9H5uvKfYLD8bZ8fNZlcZhqGSBXUHU=
-github.com/xconnio/xconn-webrtc-go v0.0.0-20260406125202-d64a9428ce47 h1:2KhKfi7wjx6gFO7OmX5uuTAitR9t9nuxKW3rI+LnTZ4=
-github.com/xconnio/xconn-webrtc-go v0.0.0-20260406125202-d64a9428ce47/go.mod h1:EFlnNaLs2VHUkNtG/XDJ0sJMr9Yo2QsGKMAXP+LZq+M=
+github.com/xconnio/xconn-webrtc-go v0.0.0-20260408130233-282d066806f6 h1:QqisDMb59rfC7wpBWIBg+MPR7Sa/zudETJXjwf6iRNc=
+github.com/xconnio/xconn-webrtc-go v0.0.0-20260408130233-282d066806f6/go.mod h1:EFlnNaLs2VHUkNtG/XDJ0sJMr9Yo2QsGKMAXP+LZq+M=
 github.com/xhit/go-str2duration/v2 v2.1.0 h1:lxklc02Drh6ynqX+DdPyp5pCKLUQpRT8bp8Ydu2Bstc=
 github.com/xhit/go-str2duration/v2 v2.1.0/go.mod h1:ohY8p+0f07DiV6Em5LKB0s2YpLtXVyJfNt1+BlmyAsU=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=

@@ -37,6 +37,8 @@ const (
 
 	ProcedureAppUpdateCheck = "io.xconn.deskconn.app.update.check"
 
+	ProcedureCoturnCredentialsCreate = "io.xconn.deskconn.coturn.credentials.create"
+
 	LocalRealm = "io.xconn.deskconn.local"
 )
 
@@ -360,4 +362,57 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 		}
 		return xconn.NewInvocationError(xconn.ErrNoResult)
 	}
+}
+
+func FetchTURNServers(session *xconn.Session) ([]xconnwebrtc.ICEServer, int64, error) {
+	resp := session.Call(ProcedureCoturnCredentialsCreate).Do()
+	if resp.Err != nil {
+		return nil, 0, fmt.Errorf("failed to call TURN credentials API: %w", resp.Err)
+	}
+
+	cred, err := resp.ArgDict(0)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invalid TURN credentials response: %w", err)
+	}
+
+	expiresAt, err := cred.Int64("expires_at")
+	if err != nil {
+		return nil, 0, fmt.Errorf("missing expires_at in TURN credentials: %w", err)
+	}
+
+	username, err := cred.String("username")
+	if err != nil {
+		return nil, 0, fmt.Errorf("missing username in TURN credentials: %w", err)
+	}
+
+	credential, err := cred.String("credential")
+	if err != nil {
+		return nil, 0, fmt.Errorf("missing password in TURN credentials: %w", err)
+	}
+
+	urlList, err := cred.List("urls")
+	if err != nil {
+		return nil, 0, fmt.Errorf("missing urls in TURN credentials: %w", err)
+	}
+
+	turnURLs := make([]string, urlList.Len())
+	for i := range urlList.Len() {
+		u, err := urlList.String(i)
+		if err != nil {
+			return nil, 0, fmt.Errorf("invalid url at index %d: %w", i, err)
+		}
+		turnURLs[i] = u
+	}
+
+	servers := []xconnwebrtc.ICEServer{
+		{URLs: []string{"stun:stun.l.google.com:19302"}},
+		{
+			URLs:           turnURLs,
+			Username:       username,
+			Credential:     credential,
+			CredentialType: xconnwebrtc.ICECredentialTypePassword,
+		},
+	}
+
+	return servers, expiresAt, nil
 }
