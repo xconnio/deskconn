@@ -90,14 +90,7 @@ func main() {
 
 	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
 
-	var session *xconn.Session
-	if parsedCmd != selfVersionCmd.FullCommand() && parsedCmd != selfUpdateCmd.FullCommand() {
-		uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-		session, err = xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
+	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
 
 	switch parsedCmd {
 	case selfVersionCmd.FullCommand():
@@ -123,7 +116,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			log.Fatal(err)
+		}
 		callResp := session.Call(deskconn.ProcedureLogin).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
@@ -165,6 +161,11 @@ func main() {
 		}
 
 	case lsCmd.FullCommand():
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		devicesCallResp := session.Call(deskconn.ProcedureConnectedDevices).Do()
 		if devicesCallResp.Err != nil {
 			fmt.Fprintln(os.Stderr, devicesCallResp.Err)
@@ -290,6 +291,11 @@ func main() {
 		if err := logout(cfgDirectory); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
+		}
+
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			log.Fatal(err)
 		}
 
 		callResp := session.Call(deskconn.ProcedureLogout).Do()

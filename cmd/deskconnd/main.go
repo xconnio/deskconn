@@ -120,9 +120,7 @@ start:
 		log.Fatalln(err)
 	}
 
-	deviceRealm := fmt.Sprintf("io.xconn.deskconn.%s.%s", cred.OrganizationID, machineIDStr)
-
-	err = router.AddRealm(deviceRealm, &xconn.RealmConfig{
+	err = router.AddRealm(cred.Realm, &xconn.RealmConfig{
 		AutoDiscloseCaller: true,
 		Roles: []xconn.RealmRole{
 			{Name: "owner", Permissions: []xconn.Permission{
@@ -167,7 +165,7 @@ start:
 	}
 	defer listener.Close()
 
-	localSession, err := xconn.ConnectInMemory(router, deviceRealm)
+	localSession, err := xconn.ConnectInMemory(router, cred.Realm)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -225,7 +223,7 @@ start:
 				Authenticator:     crytosignAuthenticator,
 			}
 
-			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deviceRealm)
+			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), cred.Realm)
 			if err != nil {
 				if err.Error() == "wamp.error.no_such_realm" {
 					select {
@@ -432,7 +430,7 @@ start:
 		}
 	}()
 
-	zeroconfServer, err := deskconn.AdvertiseService(host, port, deviceRealm, cred.OrganizationID)
+	zeroconfServer, err := deskconn.AdvertiseService(host, port, cred.Realm, cred.OrganizationID)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -28,6 +28,7 @@ func CloudURI() string {
 }
 
 type Credentials struct {
+	Realm          string `json:"realm"`
 	AuthID         string `json:"authid"`
 	PublicKey      string `json:"public_key"`
 	PrivateKey     string `json:"private_key"` // #nosec
@@ -51,7 +52,17 @@ func Attach(session *xconn.Session, desktopName, orgID string) error {
 		return fmt.Errorf("failed to attach desktop: %w", callResp.Err)
 	}
 
-	return writeCredentialsFile(machineIDStr, publicKey, privateKey, orgID)
+	respDict, err := callResp.ArgDict(0)
+	if err != nil {
+		return err
+	}
+
+	id, err := respDict.String("realm")
+	if err != nil {
+		return err
+	}
+
+	return writeCredentialsFile(id, machineIDStr, publicKey, privateKey, orgID)
 }
 
 func Detach(session *xconn.Session, authID string) error {
@@ -63,13 +74,14 @@ func Detach(session *xconn.Session, authID string) error {
 	return nil
 }
 
-func writeCredentialsFile(machineID, publicKey, privateKey, orgID string) error {
+func writeCredentialsFile(realm, machineID, publicKey, privateKey, orgID string) error {
 	credFilePath, err := CredentialsFilePath()
 	if err != nil {
 		return err
 	}
 
 	creds := Credentials{
+		Realm:          realm,
 		AuthID:         machineID,
 		PublicKey:      publicKey,
 		PrivateKey:     privateKey,
