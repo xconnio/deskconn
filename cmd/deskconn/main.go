@@ -90,14 +90,7 @@ func main() {
 
 	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
 
-	var session *xconn.Session
-	if parsedCmd != selfVersionCmd.FullCommand() && parsedCmd != selfUpdateCmd.FullCommand() {
-		uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-		session, err = xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
+	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
 
 	switch parsedCmd {
 	case selfVersionCmd.FullCommand():
@@ -123,7 +116,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			log.Fatal(err)
+		}
 		callResp := session.Call(deskconn.ProcedureLogin).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
@@ -165,6 +161,11 @@ func main() {
 		}
 
 	case lsCmd.FullCommand():
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		devicesCallResp := session.Call(deskconn.ProcedureConnectedDevices).Do()
 		if devicesCallResp.Err != nil {
 			fmt.Fprintln(os.Stderr, devicesCallResp.Err)
@@ -292,6 +293,11 @@ func main() {
 			return
 		}
 
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		callResp := session.Call(deskconn.ProcedureLogout).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
@@ -364,6 +370,10 @@ func updateApp(cfgDirectory string) error {
 
 	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
+		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) {
+			_ = deskconn.RemoveCredentialsFiles(cfgDirectory)
+			return fmt.Errorf("invalid credentials, please login again")
+		}
 		return err
 	}
 
@@ -667,6 +677,9 @@ func login(username string, useStdin bool) error {
 func logout(cfgDirectory string) error {
 	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
+		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) {
+			return deskconn.RemoveCredentialsFiles(cfgDirectory)
+		}
 		return err
 	}
 
@@ -680,19 +693,7 @@ func logout(cfgDirectory string) error {
 		return callResp.Err
 	}
 
-	files := []string{
-		filepath.Join(cfgDirectory, "id_ed25519"),
-		filepath.Join(cfgDirectory, "id_ed25519.pub"),
-		filepath.Join(cfgDirectory, "config.yml"),
-	}
-
-	for _, f := range files {
-		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-
-	return nil
+	return deskconn.RemoveCredentialsFiles(cfgDirectory)
 }
 
 func deviceRealm(deviceName, cfgDirectory string) (string, error) {
