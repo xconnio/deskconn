@@ -42,6 +42,8 @@ const (
 
 	LocalRealm = "io.xconn.deskconn.local"
 	CloudRealm = "io.xconn.deskconn"
+
+	ErrAuthenticationFailed = "wamp.error.authentication_failed"
 )
 
 func EnsureCredentials() (*Credentials, error) {
@@ -229,6 +231,22 @@ func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
 	return xconn.ConnectCryptosign(context.Background(), CloudURI(), Realm, authid, privKey)
 }
 
+func RemoveCredentialsFiles(cfgDirectory string) error {
+	files := []string{
+		filepath.Join(cfgDirectory, "id_ed25519"),
+		filepath.Join(cfgDirectory, "id_ed25519.pub"),
+		filepath.Join(cfgDirectory, "config.yml"),
+	}
+
+	for _, f := range files {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P bool) (*xconn.Session, error) {
 	authid, privKey, err := ReadCredentials(cfgDirectory)
 	if err != nil {
@@ -280,6 +298,10 @@ func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P 
 func FetchDevicesFromCloud(cfgDirectory string) ([]Device, error) {
 	cloudSession, err := ConnectCloudRealm(cfgDirectory)
 	if err != nil {
+		if strings.Contains(err.Error(), ErrAuthenticationFailed) {
+			_ = RemoveCredentialsFiles(cfgDirectory)
+			return []Device{}, fmt.Errorf("invalid credentials, please login again")
+		}
 		return []Device{}, err
 	}
 

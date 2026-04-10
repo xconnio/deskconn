@@ -370,6 +370,10 @@ func updateApp(cfgDirectory string) error {
 
 	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
+		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) {
+			_ = deskconn.RemoveCredentialsFiles(cfgDirectory)
+			return fmt.Errorf("invalid credentials, please login again")
+		}
 		return err
 	}
 
@@ -673,6 +677,9 @@ func login(username string, useStdin bool) error {
 func logout(cfgDirectory string) error {
 	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
+		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) {
+			return deskconn.RemoveCredentialsFiles(cfgDirectory)
+		}
 		return err
 	}
 
@@ -686,19 +693,7 @@ func logout(cfgDirectory string) error {
 		return callResp.Err
 	}
 
-	files := []string{
-		filepath.Join(cfgDirectory, "id_ed25519"),
-		filepath.Join(cfgDirectory, "id_ed25519.pub"),
-		filepath.Join(cfgDirectory, "config.yml"),
-	}
-
-	for _, f := range files {
-		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-
-	return nil
+	return deskconn.RemoveCredentialsFiles(cfgDirectory)
 }
 
 func deviceRealm(deviceName, cfgDirectory string) (string, error) {
