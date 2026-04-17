@@ -55,6 +55,8 @@ mv "$TMP_DIR/deskconnd" "$EXEC_DIR/deskconnd"
 chmod 755 "$BIN_DIR/deskconn"
 chmod 700 "$EXEC_DIR/deskconnd"
 
+ln -sf "$BIN_DIR/deskconn" "$BIN_DIR/desk"
+
 echo "Installed deskconn $VERSION"
 
 echo "Setting up systemd user service for $SERVICE_NAME..."
