@@ -56,6 +56,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureShell:               d.shellSession.handleShell(),
 		ProcedureExec:                d.shellSession.handleExec(),
 		ProcedureFileBrowse:          d.handleFileBrowse,
+		ProcedureFileDownload:        d.handleFileDownload,
 		ProcedureMPRISPlayers:        d.handleListPlayers,
 		ProcedureMPRISPlayPause:      d.handlePlayPause,
 		ProcedureMPRISPlay:           d.handlePlay,
