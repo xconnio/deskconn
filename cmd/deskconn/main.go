@@ -529,6 +529,55 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		return fmt.Errorf("update archive missing required binaries")
 	}
 
+	deskconnBin := filepath.Join(binDir, "deskconn")
+	if err := installCompletions(deskconnBin); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to update shell completions: %v\n", err)
+	}
+
+	return nil
+}
+
+func installCompletions(deskconnBin string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home dir: %w", err)
+	}
+
+	bashDir := filepath.Join(homeDir, ".local", "share", "bash-completion", "completions")
+	zshDir := filepath.Join(homeDir, ".local", "share", "zsh", "site-functions")
+
+	for _, dir := range []string{bashDir, zshDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+
+	bashOut, err := exec.Command(deskconnBin, "--completion-script-bash").Output() // nolint: gosec
+	if err != nil {
+		return fmt.Errorf("generating bash completion: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(bashDir, "deskconn"), bashOut, 0644); err != nil { // nolint: gosec
+		return fmt.Errorf("writing bash completion: %w", err)
+	}
+	deskBash := strings.Replace(string(bashOut),
+		"complete -F _deskconn_bash_autocomplete -o default deskconn",
+		"complete -F _deskconn_bash_autocomplete -o default desk", 1)
+	if err := os.WriteFile(filepath.Join(bashDir, "desk"), []byte(deskBash), 0644); err != nil { // nolint: gosec
+		return fmt.Errorf("writing desk bash completion: %w", err)
+	}
+
+	zshOut, err := exec.Command(deskconnBin, "--completion-script-zsh").Output() // nolint: gosec
+	if err != nil {
+		return fmt.Errorf("generating zsh completion: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(zshDir, "_deskconn"), zshOut, 0644); err != nil { // nolint: gosec
+		return fmt.Errorf("writing zsh completion: %w", err)
+	}
+	deskZsh := "#compdef desk\n_deskconn \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(zshDir, "_desk"), []byte(deskZsh), 0644); err != nil { // nolint: gosec
+		return fmt.Errorf("writing desk zsh completion: %w", err)
+	}
+
 	return nil
 }
 
