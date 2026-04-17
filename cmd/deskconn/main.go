@@ -507,8 +507,13 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		switch name {
 		case "deskconn":
 			fmt.Println("Installing deskconn...")
-			if err := installBinaryFromReader(tarReader, filepath.Join(binDir, "deskconn"), 0755); err != nil {
+			deskconnPath := filepath.Join(binDir, "deskconn")
+			if err := installBinaryFromReader(tarReader, deskconnPath, 0755); err != nil {
 				return err
+			}
+			_ = os.Remove(filepath.Join(binDir, "desk"))
+			if err := os.Symlink(deskconnPath, filepath.Join(binDir, "desk")); err != nil {
+				return fmt.Errorf("failed to create desk symlink: %w", err)
 			}
 			foundDeskconn = true
 		case "deskconnd":
