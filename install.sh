@@ -57,6 +57,19 @@ chmod 700 "$EXEC_DIR/deskconnd"
 
 ln -sf "$BIN_DIR/deskconn" "$BIN_DIR/desk"
 
+BASH_COMP_DIR="$HOME/.local/share/bash-completion/completions"
+ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
+
+mkdir -p "$BASH_COMP_DIR" "$ZSH_COMP_DIR"
+
+"$BIN_DIR/deskconn" --completion-script-bash > "$BASH_COMP_DIR/deskconn"
+sed 's/complete -F _deskconn_bash_autocomplete -o default deskconn/complete -F _deskconn_bash_autocomplete -o default desk/' \
+    "$BASH_COMP_DIR/deskconn" > "$BASH_COMP_DIR/desk"
+
+"$BIN_DIR/deskconn" --completion-script-zsh > "$ZSH_COMP_DIR/_deskconn"
+printf '#compdef desk\n_deskconn "$@"\n' > "$ZSH_COMP_DIR/_desk"
+
+echo "Installed shell completions"
 echo "Installed deskconn $VERSION"
 
 echo "Setting up systemd user service for $SERVICE_NAME..."
