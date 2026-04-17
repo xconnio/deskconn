@@ -41,16 +41,19 @@ func main() {
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
+	attachUsername := attachCmd.Flag("username", "Username").Short('u').String()
+	attachPassword := attachCmd.Flag("password", "Password").Short('p').String()
 	attachPasswordStdin := attachCmd.Flag("password-stdin", "Read password from stdin").Bool()
-	attachUsername := attachCmd.Arg("username", "Username").Required().String()
 
 	detachCmd := app.Command("detach", "Detach device")
+	detachUsername := detachCmd.Flag("username", "Username").Short('u').String()
+	detachPassword := detachCmd.Flag("password", "Password").Short('p').String()
 	detachPasswordStdin := detachCmd.Flag("password-stdin", "Read password from stdin").Bool()
-	detachUsername := detachCmd.Arg("username", "Username").Required().String()
 
 	loginCmd := app.Command("login", "Login and store credentials")
+	loginUsername := loginCmd.Flag("username", "Username").Short('u').String()
+	loginPassword := loginCmd.Flag("password", "Password").Short('p').String()
 	loginPasswordStdin := loginCmd.Flag("password-stdin", "Read password from stdin").Bool()
-	loginUsername := loginCmd.Arg("username", "Username").Required().String()
 
 	fileCmd := app.Command("file", "File operations")
 	pullCmd := fileCmd.Command("pull", "Download a file or directory from a device")
@@ -105,12 +108,12 @@ func main() {
 		fmt.Println(versionString)
 
 	case attachCmd.FullCommand():
-		if err := attach(*attachUsername, *attachName, *attachPasswordStdin); err != nil {
+		if err := attach(*attachUsername, *attachPassword, *attachName, *attachPasswordStdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case detachCmd.FullCommand():
-		if err := detach(*detachUsername, *detachPasswordStdin); err != nil {
+		if err := detach(*detachUsername, *detachPassword, *detachPasswordStdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
@@ -120,7 +123,7 @@ func main() {
 			return
 		}
 
-		if err := login(*loginUsername, *loginPasswordStdin); err != nil {
+		if err := login(*loginUsername, *loginPassword, *loginPasswordStdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
@@ -559,7 +562,7 @@ func installBinaryFromReader(src io.Reader, dst string, mode os.FileMode) error 
 	return nil
 }
 
-func attach(username, name string, useStdin bool) error {
+func attach(flagUsername, flagPassword, name string, useStdin bool) error {
 	file, err := deskconn.CredentialsFilePath()
 	if err != nil {
 		return err
@@ -567,7 +570,8 @@ func attach(username, name string, useStdin bool) error {
 	if _, err := os.Stat(file); err == nil {
 		return fmt.Errorf("device already attached")
 	}
-	password, err := readPassword(useStdin)
+
+	username, password, err := readCredentials(flagUsername, flagPassword, useStdin)
 	if err != nil {
 		return err
 	}
@@ -652,8 +656,8 @@ func attach(username, name string, useStdin bool) error {
 	return deskconn.Attach(session, deviceName, organizationDict.StringOr("id", ""))
 }
 
-func detach(username string, useStdin bool) error {
-	password, err := readPassword(useStdin)
+func detach(flagUsername, flagPassword string, useStdin bool) error {
+	username, password, err := readCredentials(flagUsername, flagPassword, useStdin)
 	if err != nil {
 		return err
 	}
@@ -685,8 +689,8 @@ func detach(username string, useStdin bool) error {
 	return deskconn.Detach(session, authID)
 }
 
-func login(username string, useStdin bool) error {
-	password, err := readPassword(useStdin)
+func login(flagUsername, flagPassword string, useStdin bool) error {
+	username, password, err := readCredentials(flagUsername, flagPassword, useStdin)
 	if err != nil {
 		return err
 	}
@@ -759,18 +763,51 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 	return "", fmt.Errorf("device not found: %s", deviceName)
 }
 
-func readPassword(fromStdin bool) (string, error) {
-	if fromStdin {
+func readCredentials(flagUsername, flagPassword string, useStdin bool) (username, password string, err error) {
+	if useStdin {
+		if flagUsername == "" {
+			return "", "", fmt.Errorf("--username is required when using --password-stdin")
+		}
+		if flagPassword == "" {
+			reader := bufio.NewReader(os.Stdin)
+			line, err := reader.ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				return "", "", fmt.Errorf("reading password from stdin: %w", err)
+			}
+			flagPassword = strings.TrimRight(line, "\r\n")
+		}
+		return flagUsername, flagPassword, nil
+	}
+
+	if flagUsername == "" {
+		if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
+			return "", "", fmt.Errorf("username required: use --username flag")
+		}
+		fmt.Fprint(os.Stderr, "Username: ")
 		reader := bufio.NewReader(os.Stdin)
 		pwd, err := reader.ReadString('\n')
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		return strings.TrimRight(pwd, "\r\n"), nil
+		flagUsername = strings.TrimSpace(pwd)
+		if flagUsername == "" {
+			return "", "", fmt.Errorf("username cannot be empty")
+		}
 	}
 
+	if flagPassword == "" {
+		flagPassword, err = readPassword()
+		if err != nil {
+			return "", "", err
+		}
+	}
+
+	return flagUsername, flagPassword, nil
+}
+
+func readPassword() (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
-		return "", fmt.Errorf("password required from TTY or use --password-stdin")
+		return "", fmt.Errorf("password required: use --password or --password-stdin flag")
 	}
 
 	fmt.Fprint(os.Stderr, "Password: ")
