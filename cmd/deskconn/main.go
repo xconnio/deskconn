@@ -52,6 +52,14 @@ func main() {
 	loginPasswordStdin := loginCmd.Flag("password-stdin", "Read password from stdin").Bool()
 	loginUsername := loginCmd.Arg("username", "Username").Required().String()
 
+	fileCmd := app.Command("file", "File operations")
+	pullCmd := fileCmd.Command("pull", "Download a file or directory from a device")
+	pullDevice := pullCmd.Arg("device", "ID, name or alias of device").Required().String()
+	pullRemote := pullCmd.Arg("remote-path", "Path on the remote device").Required().String()
+	pullLocal := pullCmd.Arg("local-path", "Local path to store the download").Required().String()
+	pullRecursive := pullCmd.Flag("recursive", "Download directories recursively").Short('r').Bool()
+	pullP2PFlag := pullCmd.Flag("p2p", "Connect using WebRTC").Bool()
+
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().String()
 	shellP2PFlag := shellCmd.Flag("p2p", "Connect using WebRTC").Bool()
@@ -123,6 +131,23 @@ func main() {
 		callResp := session.Call(deskconn.ProcedureLogin).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
+		}
+
+	case pullCmd.FullCommand():
+		realm, err := deviceRealm(*pullDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *pullP2PFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		if err := deskconn.PullFiles(deviceSession, *pullRemote, *pullLocal, *pullRecursive); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case shellCmd.FullCommand():

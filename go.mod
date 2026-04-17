@@ -13,7 +13,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/xconnio/wampproto-go v0.0.0-20251205113711-968e34250b9a
 	github.com/xconnio/xconn-go v0.1.1-0.20260413134126-500053d9c099
-	github.com/xconnio/xconn-webrtc-go v0.0.0-20260415091451-11c3de13a79f
+	github.com/xconnio/xconn-webrtc-go v0.0.0-20260417074731-c9814aefd1fe
 	golang.org/x/term v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 )
