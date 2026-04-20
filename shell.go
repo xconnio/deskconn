@@ -36,12 +36,8 @@ func newInteractiveShellSession() *interactiveShellSession {
 	}
 }
 
-func (p *interactiveShellSession) performKeyExchange(inv *xconn.Invocation, payload []byte) (*shellEncryption,
+func (p *interactiveShellSession) setupEncryption(inv *xconn.Invocation, clientPublicKey []byte) (*shellEncryption,
 	*xconn.InvocationResult) {
-	if !bytes.HasPrefix(payload, []byte("KEY:")) {
-		return nil, xconn.NewInvocationError("wamp.error.invalid_argument", "expected key exchange")
-	}
-	clientPublicKey := payload[4:]
 	serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
 	if err != nil {
 		return nil, xconn.NewInvocationError("io.xconn.error", err.Error())
@@ -113,12 +109,16 @@ func (p *interactiveShellSession) startOutputReader(inv *xconn.Invocation, ptmx 
 	for {
 		n, err := ptmx.Read(buf)
 		if n > 0 {
-			encrypted, encErr := EncryptPayload(buf[:n], sendKey)
-			if encErr != nil {
-				_ = inv.SendProgress(nil, nil)
-				return
+			if sendKey != nil {
+				encrypted, encErr := EncryptPayload(buf[:n], sendKey)
+				if encErr != nil {
+					_ = inv.SendProgress(nil, nil)
+					return
+				}
+				_ = inv.SendProgress([]any{encrypted}, nil)
+			} else {
+				_ = inv.SendProgress([]any{buf[:n]}, nil)
 			}
-			_ = inv.SendProgress([]any{encrypted}, nil)
 		}
 		if err != nil {
 			_ = inv.SendProgress(nil, nil)
@@ -144,17 +144,32 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 			}
 
 			if !encExists {
-				var invErr *xconn.InvocationResult
-				enc, invErr = p.performKeyExchange(inv, payload)
-				if invErr != nil {
-					return invErr
+				// First message must be SIZE (optionally with embedded public key).
+				// New clients send SIZE:cols:rows:KEY:<32 bytes>; old clients send SIZE:cols:rows.
+				// Old servers parse SIZE:%d:%d via Sscanf which stops at :KEY:, so this format
+				// is safe to send to any server version.
+				keyMarker := []byte(":KEY:")
+				if keyIdx := bytes.Index(payload, keyMarker); keyIdx >= 0 {
+					var invErr *xconn.InvocationResult
+					enc, invErr = p.setupEncryption(inv, payload[keyIdx+len(keyMarker):])
+					if invErr != nil {
+						return invErr
+					}
+					payload = payload[:keyIdx]
+				} else {
+					// Old client: operate without encryption.
+					enc = &shellEncryption{}
+					p.Lock()
+					p.enc[caller] = enc
+					p.Unlock()
 				}
-				return xconn.NewInvocationError(xconn.ErrNoResult)
-			}
-
-			payload, err = DecryptPayload(payload, enc.receiveKey)
-			if err != nil {
-				return xconn.NewInvocationError("io.xconn.error", err.Error())
+				// Fall through to process the SIZE payload.
+			} else if enc.receiveKey != nil {
+				var decErr error
+				payload, decErr = DecryptPayload(payload, enc.receiveKey)
+				if decErr != nil {
+					return xconn.NewInvocationError("io.xconn.error", decErr.Error())
+				}
 			}
 
 			if bytes.HasPrefix(payload, []byte("SIZE:")) {
@@ -217,17 +232,28 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 			}
 
 			if !encExists {
-				var invErr *xconn.InvocationResult
-				enc, invErr = p.performKeyExchange(inv, payload)
-				if invErr != nil {
-					return invErr
+				keyMarker := []byte(":KEY:")
+				if keyIdx := bytes.Index(payload, keyMarker); keyIdx >= 0 {
+					var invErr *xconn.InvocationResult
+					enc, invErr = p.setupEncryption(inv, payload[keyIdx+len(keyMarker):])
+					if invErr != nil {
+						return invErr
+					}
+					payload = payload[:keyIdx]
+				} else {
+					// Old client: operate without encryption.
+					enc = &shellEncryption{}
+					p.Lock()
+					p.enc[caller] = enc
+					p.Unlock()
 				}
-				return xconn.NewInvocationError(xconn.ErrNoResult)
-			}
-
-			payload, err = DecryptPayload(payload, enc.receiveKey)
-			if err != nil {
-				return xconn.NewInvocationError("io.xconn.error", err.Error())
+				// Fall through to process the SIZE payload.
+			} else if enc.receiveKey != nil {
+				var decErr error
+				payload, decErr = DecryptPayload(payload, enc.receiveKey)
+				if decErr != nil {
+					return xconn.NewInvocationError("io.xconn.error", decErr.Error())
+				}
 			}
 
 			if bytes.HasPrefix(payload, []byte("SIZE:")) {
@@ -289,35 +315,39 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 	}
 
 	var sendKey, receiveKey []byte
+	var encEnabled bool
 	keyExchangeReady := make(chan struct{})
 	progressChan := make(chan *xconn.Progress, 32)
 
-	getSizeBytes := func() []byte {
+	buildSizeProgress := func(firstMsg bool) *xconn.Progress {
 		width, height, err := term.GetSize(fd)
 		if err != nil {
 			return nil
 		}
-		return []byte(fmt.Sprintf("SIZE:%d:%d", width, height))
+		sizeStr := fmt.Sprintf("SIZE:%d:%d", width, height)
+		if firstMsg {
+			// Append raw public key — old servers parse SIZE:%d:%d and stop before :KEY:.
+			return xconn.NewProgress(append([]byte(sizeStr+":KEY:"), publicKey...), args)
+		}
+		if encEnabled {
+			encrypted, err := EncryptPayload([]byte(sizeStr), sendKey)
+			if err != nil {
+				return nil
+			}
+			return xconn.NewProgress(encrypted, args)
+		}
+		return xconn.NewProgress(sizeStr, args)
 	}
 
-	// Feed SIZE and stdin into progressChan after key exchange completes.
 	go func() {
 		<-keyExchangeReady
-
-		if sizeBytes := getSizeBytes(); sizeBytes != nil {
-			if encrypted, err := EncryptPayload(sizeBytes, sendKey); err == nil {
-				progressChan <- xconn.NewProgress(encrypted, args)
-			}
-		}
 
 		go func() {
 			sigChan := make(chan os.Signal, 1)
 			signal.Notify(sigChan, syscall.SIGWINCH)
 			for range sigChan {
-				if sizeBytes := getSizeBytes(); sizeBytes != nil {
-					if encrypted, err := EncryptPayload(sizeBytes, sendKey); err == nil {
-						progressChan <- xconn.NewProgress(encrypted, args)
-					}
+				if p := buildSizeProgress(false); p != nil {
+					progressChan <- p
 				}
 			}
 		}()
@@ -329,18 +359,24 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 				close(progressChan)
 				return
 			}
-			if encrypted, err := EncryptPayload(buf[:n], sendKey); err == nil {
-				progressChan <- xconn.NewProgress(encrypted)
+			if encEnabled {
+				if encrypted, err := EncryptPayload(buf[:n], sendKey); err == nil {
+					progressChan <- xconn.NewProgress(encrypted)
+				}
+			} else {
+				progressChan <- xconn.NewProgress(buf[:n])
 			}
 		}
 	}()
 
-	keySent := false
+	firstSent := false
+	firstServerMsg := true
 	callResp := session.Call(procedureName).
 		ProgressSender(func(ctx context.Context) *xconn.Progress {
-			if !keySent {
-				keySent = true
-				return xconn.NewProgress(append([]byte("KEY:"), publicKey...))
+			if !firstSent {
+				firstSent = true
+				// First message: SIZE with embedded public key for key negotiation.
+				return buildSizeProgress(true)
 			}
 			p, ok := <-progressChan
 			if !ok {
@@ -354,29 +390,43 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 				return
 			}
 			data := result.Args()[0].([]byte)
-			if bytes.HasPrefix(data, []byte("KEY:")) {
-				serverPublicKey := data[4:]
-				sharedSecret, err := PerformKeyExchange(privateKey, serverPublicKey)
-				if err != nil {
-					close(progressChan)
+
+			if firstServerMsg {
+				firstServerMsg = false
+				if bytes.HasPrefix(data, []byte("KEY:")) {
+					// New server: complete key exchange.
+					serverPublicKey := data[4:]
+					sharedSecret, err := PerformKeyExchange(privateKey, serverPublicKey)
+					if err != nil {
+						close(progressChan)
+						return
+					}
+					sendKey, err = DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
+					if err != nil {
+						close(progressChan)
+						return
+					}
+					receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+					if err != nil {
+						close(progressChan)
+						return
+					}
+					encEnabled = true
+					close(keyExchangeReady)
 					return
 				}
-				sendKey, err = DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
-				if err != nil {
-					close(progressChan)
-					return
-				}
-				receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
-				if err != nil {
-					close(progressChan)
-					return
-				}
+				// Old server: no encryption — unblock data flow and write this output.
 				close(keyExchangeReady)
+				_, _ = os.Stdout.Write(data)
 				return
 			}
-			plaintext, err := DecryptPayload(data, receiveKey)
-			if err == nil {
-				_, _ = os.Stdout.Write(plaintext)
+
+			if encEnabled {
+				if plaintext, err := DecryptPayload(data, receiveKey); err == nil {
+					_, _ = os.Stdout.Write(plaintext)
+				}
+			} else {
+				_, _ = os.Stdout.Write(data)
 			}
 		}).Do()
 
