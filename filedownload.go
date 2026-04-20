@@ -1,7 +1,9 @@
 package deskconn
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +23,14 @@ const (
 	fileChunkSize = 32 * 1024 // 32 KB
 )
 
+type fileHeaderMsg struct {
+	Name    string `json:"name"`
+	RelPath string `json:"rel_path"`
+	Size    int64  `json:"size"`
+	Mode    uint32 `json:"mode"`
+	IsDir   bool   `json:"is_dir"`
+}
+
 func (d *Deskconn) handleFileDownload(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 	remotePath, err := inv.ArgString(0)
 	if err != nil {
@@ -28,6 +38,26 @@ func (d *Deskconn) handleFileDownload(_ context.Context, inv *xconn.Invocation) 
 	}
 
 	recursive, _ := inv.ArgBool(1)
+
+	// arg[2]: optional client public key for E2E encryption (new clients only).
+	var sendKey []byte
+	if clientPublicKey, err := inv.ArgBytes(2); err == nil && len(clientPublicKey) == 32 {
+		serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+		sharedSecret, err := PerformKeyExchange(serverPrivateKey, clientPublicKey)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+		sendKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+		if err := inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil); err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -59,9 +89,9 @@ func (d *Deskconn) handleFileDownload(_ context.Context, inv *xconn.Invocation) 
 
 	var streamErr error
 	if info.IsDir() {
-		streamErr = dlStreamDir(inv, resolvedPath, basePath)
+		streamErr = dlStreamDir(inv, resolvedPath, basePath, sendKey)
 	} else {
-		streamErr = dlStreamFile(inv, resolvedPath, basePath)
+		streamErr = dlStreamFile(inv, resolvedPath, basePath, sendKey)
 	}
 	if streamErr != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, streamErr.Error())
@@ -70,7 +100,29 @@ func (d *Deskconn) handleFileDownload(_ context.Context, inv *xconn.Invocation) 
 	return xconn.NewInvocationResult()
 }
 
-func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string) error {
+func dlSendProgress(inv *xconn.Invocation, sendKey []byte, msgType string, payload any) error {
+	if sendKey == nil {
+		return inv.SendProgress([]any{msgType, payload}, nil)
+	}
+	var plaintext []byte
+	switch v := payload.(type) {
+	case []byte:
+		plaintext = v
+	default:
+		var err error
+		plaintext, err = json.Marshal(v)
+		if err != nil {
+			return err
+		}
+	}
+	encrypted, err := EncryptPayload(plaintext, sendKey)
+	if err != nil {
+		return err
+	}
+	return inv.SendProgress([]any{msgType, encrypted}, nil)
+}
+
+func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string, sendKey []byte) error {
 	info, err := os.Lstat(dirPath)
 	if err != nil {
 		return err
@@ -78,13 +130,13 @@ func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string) error {
 
 	relPath, _ := filepath.Rel(basePath, dirPath)
 
-	if err := inv.SendProgress([]any{msgHeader, map[string]any{
+	if err := dlSendProgress(inv, sendKey, msgHeader, map[string]any{
 		"name":     info.Name(),
 		"rel_path": filepath.ToSlash(relPath),
 		"size":     int64(0),
 		"mode":     uint32(info.Mode().Perm()),
 		"is_dir":   true,
-	}}, nil); err != nil {
+	}); err != nil {
 		return err
 	}
 
@@ -96,11 +148,11 @@ func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string) error {
 	for _, entry := range entries {
 		entryPath := filepath.Join(dirPath, entry.Name())
 		if entry.IsDir() {
-			if err := dlStreamDir(inv, entryPath, basePath); err != nil {
+			if err := dlStreamDir(inv, entryPath, basePath, sendKey); err != nil {
 				return err
 			}
 		} else {
-			if err := dlStreamFile(inv, entryPath, basePath); err != nil {
+			if err := dlStreamFile(inv, entryPath, basePath, sendKey); err != nil {
 				return err
 			}
 		}
@@ -109,7 +161,7 @@ func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string) error {
 	return nil
 }
 
-func dlStreamFile(inv *xconn.Invocation, filePath, basePath string) error {
+func dlStreamFile(inv *xconn.Invocation, filePath, basePath string, sendKey []byte) error {
 	info, err := os.Lstat(filePath)
 	if err != nil {
 		return err
@@ -120,13 +172,13 @@ func dlStreamFile(inv *xconn.Invocation, filePath, basePath string) error {
 
 	relPath, _ := filepath.Rel(basePath, filePath)
 
-	if err := inv.SendProgress([]any{msgHeader, map[string]any{
+	if err := dlSendProgress(inv, sendKey, msgHeader, map[string]any{
 		"name":     info.Name(),
 		"rel_path": filepath.ToSlash(relPath),
 		"size":     info.Size(),
 		"mode":     uint32(info.Mode().Perm()),
 		"is_dir":   false,
-	}}, nil); err != nil {
+	}); err != nil {
 		return err
 	}
 
@@ -142,7 +194,7 @@ func dlStreamFile(inv *xconn.Invocation, filePath, basePath string) error {
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
-			if err := inv.SendProgress([]any{msgData, chunk}, nil); err != nil {
+			if err := dlSendProgress(inv, sendKey, msgData, chunk); err != nil {
 				return err
 			}
 		}
@@ -161,7 +213,15 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	publicKey, privateKey, err := CreateX25519KeyPair()
+	if err != nil {
+		return fmt.Errorf("failed to generate keypair: %w", err)
+	}
+
 	var (
+		receiveKey      []byte
+		encEnabled      bool
+		firstServerMsg  = true
 		currentFile     *os.File
 		sourceRoot      string
 		localIsDir      bool
@@ -181,6 +241,28 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 				return
 			}
 
+			// First response: detect new server (KEY:) vs old server.
+			if firstServerMsg {
+				firstServerMsg = false
+				if data, argErr := progress.ArgBytes(0); argErr == nil && bytes.HasPrefix(data, []byte("KEY:")) {
+					sharedSecret, err := PerformKeyExchange(privateKey, data[4:])
+					if err != nil {
+						transferErr = fmt.Errorf("key exchange failed: %w", err)
+						cancel()
+						return
+					}
+					receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+					if err != nil {
+						transferErr = fmt.Errorf("key derivation failed: %w", err)
+						cancel()
+						return
+					}
+					encEnabled = true
+					return
+				}
+				// Old server: fall through to normal H/D processing below.
+			}
+
 			msgType, err := progress.ArgString(0)
 			if err != nil {
 				transferErr = fmt.Errorf("invalid message format: %w", err)
@@ -190,7 +272,6 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 
 			switch msgType {
 			case msgHeader:
-				// Finalize any open file before starting the next.
 				if currentFile != nil {
 					_ = currentFile.Close()
 					currentFile = nil
@@ -198,18 +279,44 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 					fmt.Fprintln(os.Stderr)
 				}
 
-				headerDict, err := progress.ArgDict(1)
-				if err != nil {
-					transferErr = fmt.Errorf("invalid file header: %w", err)
-					cancel()
-					return
-				}
+				var name, relPath string
+				var size int64
+				var modeVal uint64
+				var isDir bool
 
-				relPath := headerDict.StringOr("rel_path", "")
-				name := headerDict.StringOr("name", "")
-				size := headerDict.Int64Or("size", 0)
-				modeVal := headerDict.UInt64Or("mode", 0)
-				isDir := headerDict.BoolOr("is_dir", false)
+				if encEnabled {
+					encrypted, err := progress.ArgBytes(1)
+					if err != nil {
+						transferErr = fmt.Errorf("invalid encrypted header: %w", err)
+						cancel()
+						return
+					}
+					plaintext, err := DecryptPayload(encrypted, receiveKey)
+					if err != nil {
+						transferErr = fmt.Errorf("failed to decrypt header: %w", err)
+						cancel()
+						return
+					}
+					var h fileHeaderMsg
+					if err := json.Unmarshal(plaintext, &h); err != nil {
+						transferErr = fmt.Errorf("failed to parse header: %w", err)
+						cancel()
+						return
+					}
+					name, relPath, size, modeVal, isDir = h.Name, h.RelPath, h.Size, uint64(h.Mode), h.IsDir
+				} else {
+					headerDict, err := progress.ArgDict(1)
+					if err != nil {
+						transferErr = fmt.Errorf("invalid file header: %w", err)
+						cancel()
+						return
+					}
+					name = headerDict.StringOr("name", "")
+					relPath = headerDict.StringOr("rel_path", "")
+					size = headerDict.Int64Or("size", 0)
+					modeVal = headerDict.UInt64Or("mode", 0)
+					isDir = headerDict.BoolOr("is_dir", false)
+				}
 
 				if sourceRoot == "" {
 					sourceRoot = relPath
@@ -246,8 +353,6 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 					}
 					f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 					if err != nil && os.IsPermission(err) {
-						// Existing file may have restrictive permissions (e.g. 0444).
-						// handles this by removing the file first, then recreating it.
 						if rmErr := os.Remove(destPath); rmErr == nil {
 							f, err = os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 						}
@@ -271,14 +376,37 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 					cancel()
 					return
 				}
-				chunk, err := progress.ArgBytes(1)
-				if err != nil {
-					_ = currentFile.Close()
-					currentFile = nil
-					transferErr = fmt.Errorf("invalid data chunk: %w", err)
-					cancel()
-					return
+
+				var chunk []byte
+				if encEnabled {
+					encrypted, err := progress.ArgBytes(1)
+					if err != nil {
+						_ = currentFile.Close()
+						currentFile = nil
+						transferErr = fmt.Errorf("invalid encrypted chunk: %w", err)
+						cancel()
+						return
+					}
+					chunk, err = DecryptPayload(encrypted, receiveKey)
+					if err != nil {
+						_ = currentFile.Close()
+						currentFile = nil
+						transferErr = fmt.Errorf("failed to decrypt chunk: %w", err)
+						cancel()
+						return
+					}
+				} else {
+					var err error
+					chunk, err = progress.ArgBytes(1)
+					if err != nil {
+						_ = currentFile.Close()
+						currentFile = nil
+						transferErr = fmt.Errorf("invalid data chunk: %w", err)
+						cancel()
+						return
+					}
 				}
+
 				if _, err := currentFile.Write(chunk); err != nil {
 					_ = currentFile.Close()
 					currentFile = nil
@@ -289,7 +417,7 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 				currentReceived += int64(len(chunk))
 				printProgress(currentName, currentReceived, currentSize, time.Since(currentStart))
 			}
-		}).Args(remotePath, recursive).DoContext(ctx)
+		}).Args(remotePath, recursive, publicKey).DoContext(ctx)
 
 	if currentFile != nil {
 		_ = currentFile.Close()
