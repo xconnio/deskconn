@@ -122,6 +122,7 @@ start:
 
 	err = router.AddRealm(cred.Realm, &xconn.RealmConfig{
 		AutoDiscloseCaller: true,
+		Meta:               true,
 		Roles: []xconn.RealmRole{
 			{Name: "owner", Permissions: []xconn.Permission{
 				{

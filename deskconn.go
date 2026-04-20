@@ -31,6 +31,8 @@ const (
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
+
+	MetaTopicSessionLeave = "wamp.session.on_leave"
 )
 
 type Deskconn struct {
@@ -76,6 +78,12 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 
 		log.Printf("Registered procedure %s", uri)
 	}
+
+	subResp := session.Subscribe(MetaTopicSessionLeave, d.handleSessionLeave).Do()
+	if subResp.Err != nil {
+		return subResp.Err
+	}
+
 	return nil
 }
 
@@ -209,6 +217,14 @@ func (d *Deskconn) handlePrevious(_ context.Context, inv *xconn.Invocation) *xco
 	}
 
 	return xconn.NewInvocationResult()
+}
+
+func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
+	sessionID, err := event.ArgUInt64(0)
+	if err != nil {
+		return
+	}
+	d.keys.delete(sessionID)
 }
 
 func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
