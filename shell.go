@@ -25,14 +25,14 @@ type shellEncryption struct {
 
 type interactiveShellSession struct {
 	ptmx map[uint64]*os.File
-	enc  map[uint64]*shellEncryption
+	keys *keyManager
 	sync.Mutex
 }
 
 func newInteractiveShellSession() *interactiveShellSession {
 	return &interactiveShellSession{
 		ptmx: make(map[uint64]*os.File),
-		enc:  make(map[uint64]*shellEncryption),
+		keys: newKeyManager(),
 	}
 }
 
@@ -55,9 +55,7 @@ func (p *interactiveShellSession) setupEncryption(inv *xconn.Invocation, clientP
 		return nil, xconn.NewInvocationError("io.xconn.error", err.Error())
 	}
 	enc := &shellEncryption{sendKey: sendKey, receiveKey: receiveKey}
-	p.Lock()
-	p.enc[inv.Caller()] = enc
-	p.Unlock()
+	p.keys.store(inv.Caller(), enc)
 
 	_ = inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil)
 	return enc, nil
@@ -69,8 +67,8 @@ func (p *interactiveShellSession) cleanupCaller(caller uint64) {
 		_ = stored.Close()
 		delete(p.ptmx, caller)
 	}
-	delete(p.enc, caller)
 	p.Unlock()
+	p.keys.delete(caller)
 }
 
 func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey []byte,
@@ -134,8 +132,8 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 
 		p.Lock()
 		ptmx, exists := p.ptmx[caller]
-		enc, encExists := p.enc[caller]
 		p.Unlock()
+		enc, encExists := p.keys.get(caller)
 
 		if inv.Progress() {
 			payload, err := inv.ArgBytes(0)
@@ -159,9 +157,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 				} else {
 					// Old client: operate without encryption.
 					enc = &shellEncryption{}
-					p.Lock()
-					p.enc[caller] = enc
-					p.Unlock()
+					p.keys.store(caller, enc)
 				}
 				// Fall through to process the SIZE payload.
 			} else if enc.receiveKey != nil {
@@ -222,8 +218,8 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 
 		p.Lock()
 		ptmx, exists := p.ptmx[caller]
-		enc, encExists := p.enc[caller]
 		p.Unlock()
+		enc, encExists := p.keys.get(caller)
 
 		if inv.Progress() {
 			payload, err := inv.ArgBytes(0)
@@ -243,9 +239,7 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 				} else {
 					// Old client: operate without encryption.
 					enc = &shellEncryption{}
-					p.Lock()
-					p.enc[caller] = enc
-					p.Unlock()
+					p.keys.store(caller, enc)
 				}
 				// Fall through to process the SIZE payload.
 			} else if enc.receiveKey != nil {
