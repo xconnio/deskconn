@@ -2,6 +2,7 @@ package deskconn
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 
@@ -12,6 +13,7 @@ import (
 )
 
 const (
+	ProcedureKeyExchange         = "io.xconn.deskconn.deskconnd.key.exchange"
 	ProcedureScreenBrightnessGet = "io.xconn.deskconn.deskconnd.screen.brightness.get"
 	ProcedureScreenBrightnessSet = "io.xconn.deskconn.deskconnd.screen.brightness.set"
 	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
@@ -29,10 +31,13 @@ const (
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
+
+	MetaTopicSessionLeave = "wamp.session.on_leave"
 )
 
 type Deskconn struct {
 	shellSession *interactiveShellSession
+	keys         *keyManager
 	files        *FileBrowser
 	screen       *Screen
 	mpris        *MPRIS
@@ -41,6 +46,7 @@ type Deskconn struct {
 func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 	return &Deskconn{
 		shellSession: newInteractiveShellSession(),
+		keys:         newKeyManager(),
 		files:        NewFileBrowser(),
 		screen:       screen,
 		mpris:        mpris,
@@ -49,6 +55,7 @@ func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 
 func (d *Deskconn) Register(session *xconn.Session) error {
 	for uri, handler := range map[string]xconn.InvocationHandler{
+		ProcedureKeyExchange:         d.handleKeyExchange,
 		ProcedureScreenBrightnessGet: d.brightnessGetHandler,
 		ProcedureScreenBrightnessSet: d.brightnessSetHandler,
 		ProcedureScreenLock:          d.lockScreenLockHandler,
@@ -71,6 +78,12 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 
 		log.Printf("Registered procedure %s", uri)
 	}
+
+	subResp := session.Subscribe(MetaTopicSessionLeave, d.handleSessionLeave).Do()
+	if subResp.Err != nil {
+		return subResp.Err
+	}
+
 	return nil
 }
 
@@ -206,20 +219,76 @@ func (d *Deskconn) handlePrevious(_ context.Context, inv *xconn.Invocation) *xco
 	return xconn.NewInvocationResult()
 }
 
-func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	pathArg, err := inv.ArgString(0)
+func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
+	sessionID, err := event.ArgUInt64(0)
+	if err != nil {
+		return
+	}
+	d.keys.delete(sessionID)
+}
+
+func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	clientPublicKey, err := inv.ArgBytes(0)
 	if err != nil {
 		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 	}
 
-	result, err := d.files.Browse(pathArg)
+	serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	sharedSecret, err := PerformKeyExchange(serverPrivateKey, clientPublicKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	sendKey, err := DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	receiveKey, err := DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	d.keys.store(inv.Caller(), &shellEncryption{sendKey: sendKey, receiveKey: receiveKey})
+
+	return xconn.NewInvocationResult(serverPublicKey)
+}
+
+func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, ok := d.keys.get(inv.Caller())
+	if !ok {
+		return xconn.NewInvocationError(ErrInvalidArgument, "no session keys found, call key exchange first")
+	}
+
+	encrypted, err := inv.ArgBytes(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	plaintext, err := DecryptPayload(encrypted, enc.receiveKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	result, err := d.files.Browse(string(plaintext))
 	if err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
-
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 
-	return xconn.NewInvocationResult(result)
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	encryptedResult, err := EncryptPayload(resultBytes, enc.sendKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	return xconn.NewInvocationResult(encryptedResult)
 }

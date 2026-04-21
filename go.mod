@@ -14,6 +14,7 @@ require (
 	github.com/xconnio/wampproto-go v0.0.0-20251205113711-968e34250b9a
 	github.com/xconnio/xconn-go v0.1.1-0.20260413134126-500053d9c099
 	github.com/xconnio/xconn-webrtc-go v0.0.0-20260417074731-c9814aefd1fe
+	golang.org/x/crypto v0.43.0
 	golang.org/x/term v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -69,7 +70,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.46.0 // indirect
