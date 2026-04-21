@@ -21,7 +21,7 @@ import (
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-const port = 8080
+const port = 18080
 
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
@@ -160,7 +160,7 @@ start:
 
 	authenticator := deskconn.NewAuthenticator(principals)
 	server := xconn.NewServer(router, authenticator, &xconn.ServerConfig{})
-	listener, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:8080")
+	listener, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:18080")
 	if err != nil {
 		log.Fatalln(err)
 	}
