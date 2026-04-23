@@ -63,6 +63,13 @@ func main() {
 	pullRecursive := pullCmd.Flag("recursive", "Download directories recursively").Short('r').Bool()
 	pullP2PFlag := pullCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
+	pushCmd := fileCmd.Command("push", "Upload a file or directory to a device")
+	pushDevice := pushCmd.Arg("device", "ID, name or alias of device").Required().String()
+	pushLocal := pushCmd.Arg("local-path", "Local path to upload").Required().String()
+	pushRemote := pushCmd.Arg("remote-path", "Path on the remote device").Required().String()
+	pushRecursive := pushCmd.Flag("recursive", "Upload directories recursively").Short('r').Bool()
+	pushP2PFlag := pushCmd.Flag("p2p", "Connect using WebRTC").Bool()
+
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().String()
 	shellP2PFlag := shellCmd.Flag("p2p", "Connect using WebRTC").Bool()
@@ -150,6 +157,23 @@ func main() {
 		}
 
 		if err := deskconn.PullFiles(deviceSession, *pullRemote, *pullLocal, *pullRecursive); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case pushCmd.FullCommand():
+		realm, err := deviceRealm(*pushDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *pushP2PFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		if err := deskconn.PushFiles(deviceSession, *pushLocal, *pushRemote, *pushRecursive); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 

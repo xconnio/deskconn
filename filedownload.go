@@ -20,7 +20,7 @@ const (
 	msgHeader = "H"
 	msgData   = "D"
 
-	fileChunkSize = 32 * 1024 // 32 KB
+	fileChunkSize = 1024 * 1024 // 1mb
 )
 
 type fileHeaderMsg struct {
