@@ -38,6 +38,7 @@ const (
 type Deskconn struct {
 	shellSession *interactiveShellSession
 	keys         *keyManager
+	uploads      *uploadSessions
 	files        *FileBrowser
 	screen       *Screen
 	mpris        *MPRIS
@@ -47,6 +48,7 @@ func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 	return &Deskconn{
 		shellSession: newInteractiveShellSession(),
 		keys:         newKeyManager(),
+		uploads:      newUploadSessions(),
 		files:        NewFileBrowser(),
 		screen:       screen,
 		mpris:        mpris,
@@ -64,6 +66,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureExec:                d.shellSession.handleExec(),
 		ProcedureFileBrowse:          d.handleFileBrowse,
 		ProcedureFileDownload:        d.handleFileDownload,
+		ProcedureFileUpload:          d.handleFileUpload,
 		ProcedureMPRISPlayers:        d.handleListPlayers,
 		ProcedureMPRISPlayPause:      d.handlePlayPause,
 		ProcedureMPRISPlay:           d.handlePlay,
@@ -225,6 +228,7 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 		return
 	}
 	d.keys.delete(sessionID)
+	d.uploads.delete(sessionID)
 }
 
 func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
@@ -259,7 +263,7 @@ func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *
 }
 
 func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	enc, ok := d.keys.get(inv.Caller())
+	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
 		return xconn.NewInvocationError(ErrInvalidArgument, "no session keys found, call key exchange first")
 	}

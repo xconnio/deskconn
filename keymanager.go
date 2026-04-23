@@ -19,7 +19,7 @@ func (k *keyManager) store(sessionID uint64, enc *shellEncryption) {
 	k.keys[sessionID] = enc
 }
 
-func (k *keyManager) get(sessionID uint64) (*shellEncryption, bool) {
+func (k *keyManager) fetch(sessionID uint64) (*shellEncryption, bool) {
 	k.Lock()
 	defer k.Unlock()
 	enc, ok := k.keys[sessionID]

@@ -133,7 +133,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 		p.Lock()
 		ptmx, exists := p.ptmx[caller]
 		p.Unlock()
-		enc, encExists := p.keys.get(caller)
+		enc, encExists := p.keys.fetch(caller)
 
 		if inv.Progress() {
 			payload, err := inv.ArgBytes(0)
@@ -219,7 +219,7 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 		p.Lock()
 		ptmx, exists := p.ptmx[caller]
 		p.Unlock()
-		enc, encExists := p.keys.get(caller)
+		enc, encExists := p.keys.fetch(caller)
 
 		if inv.Progress() {
 			payload, err := inv.ArgBytes(0)
