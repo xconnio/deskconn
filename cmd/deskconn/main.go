@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -30,6 +31,80 @@ import (
 
 var version = "v0.1.0-alpha"
 
+const printerUsageTemplate = `{{define "FormatArg" -}}
+{{if not .Hidden}} {{if not .Required}}[{{end -}}
+{{- if .PlaceHolder}}{{.PlaceHolder}}{{else}}<{{.Name}}>{{end -}}
+{{- if .Value|IsCumulative}}...{{end -}}
+{{- if not .Required}}]{{end}}{{end -}}
+{{end -}}
+
+{{define "FormatCommand" -}}
+{{if .FlagSummary}} {{.FlagSummary}}{{end -}}
+{{range .Args}}{{template "FormatArg" .}}{{end -}}
+{{end -}}
+
+{{define "FormatRestArgs" -}}
+{{$skip := true -}}
+{{range .Args -}}
+{{- if $skip}}{{$skip = false}}{{else}}{{template "FormatArg" .}}{{end -}}
+{{- end -}}
+{{end -}}
+
+{{define "FormatCommands" -}}
+{{range .FlattenedCommands -}}
+{{if not .Hidden -}}
+{{if isDeviceFirstCmd .FullCommand -}}
+  {{printerCmdUsage .FullCommand -}}
+{{- template "FormatRestArgs" .}}{{if .FlagSummary}} {{.FlagSummary}}{{end}}
+{{else -}}
+  {{.FullCommand}}{{if .Default}}*{{end}}{{template "FormatCommand" .}}
+{{end -}}
+{{.Help|Wrap 4}}
+{{end -}}
+{{end -}}
+{{end -}}
+
+{{define "FormatUsage" -}}
+{{template "FormatCommand" .}}{{if .Commands}} <command> [<args> ...]{{end}}
+{{if .Help}}
+{{.Help|Wrap 0 -}}
+{{end -}}
+
+{{end -}}
+
+{{if .Context.SelectedCommand -}}
+{{if isDeviceFirstCmd .Context.SelectedCommand.FullCommand -}}
+usage: {{.App.Name}} {{printerCmdUsage .Context.SelectedCommand.FullCommand -}}
+{{- template "FormatRestArgs" .Context.SelectedCommand -}}
+{{- if .Context.SelectedCommand.FlagSummary}} {{.Context.SelectedCommand.FlagSummary}}{{end}}
+{{if .Context.SelectedCommand.Help}}
+{{.Context.SelectedCommand.Help|Wrap 0 -}}
+{{end}}
+{{else -}}
+usage: {{.App.Name}} {{.Context.SelectedCommand}}{{template "FormatUsage" .Context.SelectedCommand}}
+{{end -}}
+{{ else -}}
+usage: {{.App.Name}}{{template "FormatUsage" .App}}
+{{end}}
+{{if .Context.Flags -}}
+Flags:
+{{.Context.Flags|FlagsToTwoColumns|FormatTwoColumns}}
+{{end -}}
+{{if .Context.Args -}}
+Args:
+{{.Context.Args|ArgsToTwoColumns|FormatTwoColumns}}
+{{end -}}
+{{if .Context.SelectedCommand -}}
+{{if len .Context.SelectedCommand.Commands -}}
+Subcommands:
+{{template "FormatCommands" .Context.SelectedCommand}}
+{{end -}}
+{{else if .App.Commands -}}
+Commands:
+{{template "FormatCommands" .App}}
+{{end -}}
+`
+
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
 	if err != nil {
@@ -38,6 +113,20 @@ func main() {
 
 	versionString := fmt.Sprintf("deskconn %s", version)
 	app := kingpin.New("deskconn", "Deskconn control CLI")
+	app.UsageFuncs(template.FuncMap{
+		"isDeviceFirstCmd": func(fullCmd string) bool {
+			return fullCmd == "printer list" || fullCmd == "printer print"
+		},
+		"printerCmdUsage": func(fullCmd string) string {
+			parts := strings.Fields(fullCmd)
+			if len(parts) >= 2 {
+				parent := strings.Join(parts[:len(parts)-1], " ")
+				return parent + " <device> " + parts[len(parts)-1]
+			}
+			return fullCmd
+		},
+	})
+	app.UsageTemplate(printerUsageTemplate)
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
@@ -79,6 +168,21 @@ func main() {
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 	execP2PFlag := execCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
+	printerCmd := app.Command("printer", "Printer operations")
+	printerEnableCmd := printerCmd.Command("enable", "Enable receiving print jobs on this desktop")
+	printerEnableHostPrinters := printerEnableCmd.Flag("host-printers",
+		"Also allow remote clients to list this desktop's printers").Bool()
+	printerDisableCmd := printerCmd.Command("disable", "Disable receiving print jobs on this desktop")
+	printerStatusCmd := printerCmd.Command("status", "Show whether this desktop accepts print jobs")
+	printerListCmd := printerCmd.Command("list", "List printers on a device")
+	printerListDevice := printerListCmd.Arg("device", "ID, name or alias of device").Required().String()
+	printerListP2PFlag := printerListCmd.Flag("p2p", "Connect using WebRTC").Bool()
+	printerPrintCmd := printerCmd.Command("print", "Print a local file on a device")
+	printerPrintDevice := printerPrintCmd.Arg("device", "ID, name or alias of device").Required().String()
+	printerPrintFilePath := printerPrintCmd.Arg("file_path", "Local file path").Required().String()
+	printerPrintPrinter := printerPrintCmd.Flag("printer", "Printer name").Required().String()
+	printerPrintP2PFlag := printerPrintCmd.Flag("p2p", "Connect using WebRTC").Bool()
+
 	lsCmd := app.Command("ls", "List devices")
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
 	lsDetailedFlag := lsCmd.Flag("detailed", "Show detailed output").Bool()
@@ -104,6 +208,18 @@ func main() {
 	if len(os.Args) == 2 && os.Args[1] == "self" {
 		app.Usage([]string{"self"})
 		return
+	}
+
+	// Rewrite "printer <device> <subcmd> ..." → "printer <subcmd> <location> ..."
+	// so that kingpin sees device as a subcommand arg, not a subcommand name.
+	if len(os.Args) > 3 && os.Args[1] == "printer" {
+		printerLocalSubs := map[string]bool{"enable": true, "disable": true, "status": true}
+		if !printerLocalSubs[os.Args[2]] {
+			rewritten := make([]string, len(os.Args))
+			copy(rewritten, os.Args)
+			rewritten[2], rewritten[3] = rewritten[3], rewritten[2]
+			os.Args = rewritten
+		}
 	}
 
 	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
@@ -210,6 +326,119 @@ func main() {
 		err = deskconn.StartInteractiveCommand(deviceSession, deskconn.ProcedureExec, *command...)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case printerEnableCmd.FullCommand():
+		if *printerEnableHostPrinters {
+			if err := deskconn.EnablePrinterHosting(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			fmt.Println("printer hosting enabled")
+		} else {
+			if err := deskconn.EnablePrinting(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			fmt.Println("printing enabled")
+		}
+
+	case printerDisableCmd.FullCommand():
+		if err := deskconn.DisablePrinting(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		fmt.Println("printing disabled")
+
+	case printerStatusCmd.FullCommand():
+		mode, err := deskconn.CurrentPrintMode()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		switch mode {
+		case deskconn.PrintModeDisabled:
+			fmt.Println("printing disabled")
+		case deskconn.PrintModeAccept:
+			fmt.Println("printing enabled")
+		case deskconn.PrintModeHost:
+			fmt.Println("printing enabled; printer hosting enabled")
+		default:
+			fmt.Printf("printing mode: %s\n", mode)
+		}
+
+	case printerListCmd.FullCommand():
+		realm, err := deviceRealm(*printerListDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *printerListP2PFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		callResp := deviceSession.Call(deskconn.ProcedurePrinterList).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+			return
+		}
+		if len(callResp.Args()) == 0 {
+			return
+		}
+
+		jsonData, err := json.Marshal(callResp.Args()[0])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		var printers []deskconn.PrinterInfo
+		if err := json.Unmarshal(jsonData, &printers); err != nil {
+			fmt.Fprintln(os.Stderr, "expected a list of printers")
+			return
+		}
+
+		table := tablewriter.NewWriter(os.Stdout)
+		table.Header([]string{"NAME", "PPD"})
+		for _, printerInfo := range printers {
+			_ = table.Append([]any{printerInfo.Name, printerInfo.PPDModel})
+		}
+		if err = table.Render(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case printerPrintCmd.FullCommand():
+		realm, err := deviceRealm(*printerPrintDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		data, err := os.ReadFile(*printerPrintFilePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		filename := filepath.Base(*printerPrintFilePath)
+
+		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *printerPrintP2PFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		callResp := deviceSession.Call(deskconn.ProcedurePrinterPrint).Args(*printerPrintPrinter, filename, data).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+			return
+		}
+		if len(callResp.Args()) > 0 {
+			fmt.Printf("print job queued: %v\n", callResp.Args()[0])
+		} else {
+			fmt.Println("print job queued")
 		}
 
 	case lsCmd.FullCommand():
