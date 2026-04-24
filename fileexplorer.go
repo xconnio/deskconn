@@ -1,13 +1,18 @@
 package deskconn
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/xconnio/xconn-go"
 )
 
 var errFilePathEscapesHome = errors.New("relative path escapes home directory")
@@ -174,4 +179,261 @@ func fileTypeFromInfo(info os.FileInfo) string {
 	default:
 		return "other"
 	}
+}
+
+// resolveOperationPath resolves a path and always enforces home-directory containment.
+func resolveOperationPath(homeDir, pathArg string) (string, error) {
+	if pathArg == "" {
+		return "", errors.New("path cannot be empty")
+	}
+
+	var resolved string
+	if filepath.IsAbs(pathArg) {
+		resolved = filepath.Clean(pathArg)
+	} else {
+		resolved = filepath.Clean(filepath.Join(homeDir, pathArg))
+	}
+
+	rel, err := filepath.Rel(homeDir, resolved)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", errFilePathEscapesHome
+	}
+
+	return resolved, nil
+}
+
+func (f *FileBrowser) Rename(oldPath, newPath string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home dir: %w", err)
+	}
+
+	resolvedOld, err := resolveOperationPath(homeDir, oldPath)
+	if err != nil {
+		return err
+	}
+	resolvedNew, err := resolveOperationPath(homeDir, newPath)
+	if err != nil {
+		return err
+	}
+
+	return os.Rename(resolvedOld, resolvedNew)
+}
+
+func (f *FileBrowser) Delete(path string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home dir: %w", err)
+	}
+
+	resolved, err := resolveOperationPath(homeDir, path)
+	if err != nil {
+		return err
+	}
+
+	if filepath.Clean(resolved) == filepath.Clean(homeDir) {
+		return errors.New("cannot delete home directory")
+	}
+
+	return os.RemoveAll(resolved)
+}
+
+func (f *FileBrowser) Copy(srcPath, dstPath string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home dir: %w", err)
+	}
+
+	resolvedSrc, err := resolveOperationPath(homeDir, srcPath)
+	if err != nil {
+		return err
+	}
+	resolvedDst, err := resolveOperationPath(homeDir, dstPath)
+	if err != nil {
+		return err
+	}
+
+	srcInfo, err := os.Lstat(resolvedSrc)
+	if err != nil {
+		return err
+	}
+
+	if srcInfo.IsDir() {
+		return copyDir(resolvedSrc, resolvedDst)
+	}
+	return copyFile(resolvedSrc, resolvedDst)
+}
+
+func copyFile(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return err
+	}
+
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (d *Deskconn) handleFileRename(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, ok := d.keys.fetch(inv.Caller())
+	if !ok {
+		return xconn.NewInvocationError(ErrInvalidArgument, "no session keys found, call key exchange first")
+	}
+
+	encrypted, err := inv.ArgBytes(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	plaintext, err := DecryptPayload(encrypted, enc.receiveKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	var args struct {
+		OldPath string `json:"old_path"`
+		NewPath string `json:"new_path"`
+	}
+	if err := json.Unmarshal(plaintext, &args); err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	if err := d.files.Rename(args.OldPath, args.NewPath); err != nil {
+		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
+	encryptedResult, err := EncryptPayload(resultBytes, enc.sendKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(encryptedResult)
+}
+
+func (d *Deskconn) handleFileDelete(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, ok := d.keys.fetch(inv.Caller())
+	if !ok {
+		return xconn.NewInvocationError(ErrInvalidArgument, "no session keys found, call key exchange first")
+	}
+
+	encrypted, err := inv.ArgBytes(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	plaintext, err := DecryptPayload(encrypted, enc.receiveKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(plaintext, &args); err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	if err := d.files.Delete(args.Path); err != nil {
+		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
+	encryptedResult, err := EncryptPayload(resultBytes, enc.sendKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(encryptedResult)
+}
+
+func (d *Deskconn) handleFileCopy(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, ok := d.keys.fetch(inv.Caller())
+	if !ok {
+		return xconn.NewInvocationError(ErrInvalidArgument, "no session keys found, call key exchange first")
+	}
+
+	encrypted, err := inv.ArgBytes(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	plaintext, err := DecryptPayload(encrypted, enc.receiveKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	var args struct {
+		Src string `json:"src"`
+		Dst string `json:"dst"`
+	}
+	if err := json.Unmarshal(plaintext, &args); err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	if err := d.files.Copy(args.Src, args.Dst); err != nil {
+		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
+	encryptedResult, err := EncryptPayload(resultBytes, enc.sendKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(encryptedResult)
 }

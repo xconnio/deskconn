@@ -23,6 +23,9 @@ const (
 	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
 	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
 	ProcedurePrinterPrint        = "io.xconn.deskconn.deskconnd.printer.print"
+	ProcedureFileRename          = "io.xconn.deskconn.deskconnd.file.rename"
+	ProcedureFileDelete          = "io.xconn.deskconn.deskconnd.file.delete"
+	ProcedureFileCopy            = "io.xconn.deskconn.deskconnd.file.copy"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
@@ -69,6 +72,9 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureShell:               d.shellSession.handleShell(),
 		ProcedureExec:                d.shellSession.handleExec(),
 		ProcedureFileBrowse:          d.handleFileBrowse,
+		ProcedureFileRename:          d.handleFileRename,
+		ProcedureFileDelete:          d.handleFileDelete,
+		ProcedureFileCopy:            d.handleFileCopy,
 		ProcedureFileDownload:        d.handleFileDownload,
 		ProcedureFileUpload:          d.handleFileUpload,
 		ProcedurePrinterList:         d.printer.handleListPrinters,
