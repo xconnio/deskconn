@@ -41,24 +41,26 @@ const (
 )
 
 type Deskconn struct {
-	shellSession *interactiveShellSession
-	keys         *keyManager
-	uploads      *uploadSessions
-	files        *FileBrowser
-	screen       *Screen
-	mpris        *MPRIS
-	printer      *Printer
+	shellSession    *interactiveShellSession
+	keys            *keyManager
+	uploads         *uploadSessions
+	forwardSessions *portForwardSessions
+	files           *FileBrowser
+	screen          *Screen
+	mpris           *MPRIS
+	printer         *Printer
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 	return &Deskconn{
-		shellSession: newInteractiveShellSession(),
-		keys:         newKeyManager(),
-		uploads:      newUploadSessions(),
-		files:        NewFileBrowser(),
-		screen:       screen,
-		mpris:        mpris,
-		printer:      NewPrinter(),
+		shellSession:    newInteractiveShellSession(),
+		keys:            newKeyManager(),
+		uploads:         newUploadSessions(),
+		forwardSessions: newPortForwardSessions(),
+		files:           NewFileBrowser(),
+		screen:          screen,
+		mpris:           mpris,
+		printer:         NewPrinter(),
 	}
 }
 
@@ -79,6 +81,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureFileUpload:          d.handleFileUpload,
 		ProcedurePrinterList:         d.printer.handleListPrinters,
 		ProcedurePrinterPrint:        d.printer.handlePrint(),
+		ProcedurePortForward:         d.handlePortForward,
 		ProcedureMPRISPlayers:        d.handleListPlayers,
 		ProcedureMPRISPlayPause:      d.handlePlayPause,
 		ProcedureMPRISPlay:           d.handlePlay,
@@ -241,6 +244,7 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 	}
 	d.keys.delete(sessionID)
 	d.uploads.delete(sessionID)
+	d.forwardSessions.deleteCaller(sessionID)
 }
 
 func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {

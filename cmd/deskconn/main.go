@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -182,6 +184,14 @@ func main() {
 	printerPrintFilePath := printerPrintCmd.Arg("file_path", "Local file path").Required().String()
 	printerPrintPrinter := printerPrintCmd.Flag("printer", "Printer name").Required().String()
 	printerPrintP2PFlag := printerPrintCmd.Flag("p2p", "Connect using WebRTC").Bool()
+
+	portCmd := app.Command("port", "Port forwarding operations")
+	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
+	portForwardDevice := portForwardCmd.Arg("device", "ID, name or alias of device").Required().String()
+	portForwardRemotePort := portForwardCmd.Arg("remote-port", "Port on the remote device to connect to").
+		Required().String()
+	portForwardLocalPort := portForwardCmd.Arg("local-port", "Local port to listen on").Required().String()
+	portForwardP2PFlag := portForwardCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
 	lsCmd := app.Command("ls", "List devices")
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
@@ -439,6 +449,42 @@ func main() {
 			fmt.Printf("print job queued: %v\n", callResp.Args()[0])
 		} else {
 			fmt.Println("print job queued")
+		}
+
+	case portForwardCmd.FullCommand():
+		realm, err := deviceRealm(*portForwardDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *portForwardP2PFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		fmt.Printf("Forwarding 127.0.0.1:%s -> %s:%s\n", *portForwardLocalPort, *portForwardDevice,
+			*portForwardRemotePort)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- deskconn.ForwardLocalPort(ctx, deviceSession, *portForwardRemotePort, *portForwardLocalPort)
+		}()
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		select {
+		case <-sigCh:
+			fmt.Println("\nStopping port forwarding...")
+			cancel()
+		case err := <-errCh:
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		}
 
 	case lsCmd.FullCommand():
