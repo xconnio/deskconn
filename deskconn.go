@@ -21,6 +21,8 @@ const (
 	ProcedureShell               = "io.xconn.deskconn.deskconnd.shell"
 	ProcedureExec                = "io.xconn.deskconn.deskconnd.exec"
 	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
+	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
+	ProcedurePrinterPrint        = "io.xconn.deskconn.deskconnd.printer.print"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
@@ -42,6 +44,7 @@ type Deskconn struct {
 	files        *FileBrowser
 	screen       *Screen
 	mpris        *MPRIS
+	printer      *Printer
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
@@ -52,6 +55,7 @@ func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 		files:        NewFileBrowser(),
 		screen:       screen,
 		mpris:        mpris,
+		printer:      NewPrinter(),
 	}
 }
 
@@ -67,6 +71,8 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureFileBrowse:          d.handleFileBrowse,
 		ProcedureFileDownload:        d.handleFileDownload,
 		ProcedureFileUpload:          d.handleFileUpload,
+		ProcedurePrinterList:         d.printer.handleListPrinters,
+		ProcedurePrinterPrint:        d.printer.handlePrint(),
 		ProcedureMPRISPlayers:        d.handleListPlayers,
 		ProcedureMPRISPlayPause:      d.handlePlayPause,
 		ProcedureMPRISPlay:           d.handlePlay,
