@@ -39,24 +39,24 @@ func (d *Deskconn) handleFileDownload(_ context.Context, inv *xconn.Invocation) 
 
 	recursive, _ := inv.ArgBool(1)
 
-	// arg[2]: optional client public key for E2E encryption (new clients only).
-	var sendKey []byte
-	if clientPublicKey, err := inv.ArgBytes(2); err == nil && len(clientPublicKey) == 32 {
-		serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-		sharedSecret, err := PerformKeyExchange(serverPrivateKey, clientPublicKey)
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-		sendKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-		if err := inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil); err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
+	clientPublicKey, err := inv.ArgBytes(2)
+	if err != nil || len(clientPublicKey) != 32 {
+		return xconn.NewInvocationError(ErrInvalidArgument, "client public key is required")
+	}
+	serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	sharedSecret, err := PerformKeyExchange(serverPrivateKey, clientPublicKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	sendKey, err := DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	if err := inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil); err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -101,9 +101,6 @@ func (d *Deskconn) handleFileDownload(_ context.Context, inv *xconn.Invocation) 
 }
 
 func dlSendProgress(inv *xconn.Invocation, sendKey []byte, msgType string, payload any) error {
-	if sendKey == nil {
-		return inv.SendProgress([]any{msgType, payload}, nil)
-	}
 	var plaintext []byte
 	switch v := payload.(type) {
 	case []byte:
@@ -220,7 +217,6 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 
 	var (
 		receiveKey      []byte
-		encEnabled      bool
 		firstServerMsg  = true
 		currentFile     *os.File
 		sourceRoot      string
@@ -241,26 +237,27 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 				return
 			}
 
-			// First response: detect new server (KEY:) vs old server.
 			if firstServerMsg {
 				firstServerMsg = false
-				if data, argErr := progress.ArgBytes(0); argErr == nil && bytes.HasPrefix(data, []byte("KEY:")) {
-					sharedSecret, err := PerformKeyExchange(privateKey, data[4:])
-					if err != nil {
-						transferErr = fmt.Errorf("key exchange failed: %w", err)
-						cancel()
-						return
-					}
-					receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
-					if err != nil {
-						transferErr = fmt.Errorf("key derivation failed: %w", err)
-						cancel()
-						return
-					}
-					encEnabled = true
+				data, argErr := progress.ArgBytes(0)
+				if argErr != nil || !bytes.HasPrefix(data, []byte("KEY:")) {
+					transferErr = fmt.Errorf("expected key exchange message from server")
+					cancel()
 					return
 				}
-				// Old server: fall through to normal H/D processing below.
+				sharedSecret, err := PerformKeyExchange(privateKey, data[4:])
+				if err != nil {
+					transferErr = fmt.Errorf("key exchange failed: %w", err)
+					cancel()
+					return
+				}
+				receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+				if err != nil {
+					transferErr = fmt.Errorf("key derivation failed: %w", err)
+					cancel()
+					return
+				}
+				return
 			}
 
 			msgType, err := progress.ArgString(0)
@@ -279,44 +276,25 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 					fmt.Fprintln(os.Stderr)
 				}
 
-				var name, relPath string
-				var size int64
-				var modeVal uint64
-				var isDir bool
-
-				if encEnabled {
-					encrypted, err := progress.ArgBytes(1)
-					if err != nil {
-						transferErr = fmt.Errorf("invalid encrypted header: %w", err)
-						cancel()
-						return
-					}
-					plaintext, err := DecryptPayload(encrypted, receiveKey)
-					if err != nil {
-						transferErr = fmt.Errorf("failed to decrypt header: %w", err)
-						cancel()
-						return
-					}
-					var h fileHeaderMsg
-					if err := json.Unmarshal(plaintext, &h); err != nil {
-						transferErr = fmt.Errorf("failed to parse header: %w", err)
-						cancel()
-						return
-					}
-					name, relPath, size, modeVal, isDir = h.Name, h.RelPath, h.Size, uint64(h.Mode), h.IsDir
-				} else {
-					headerDict, err := progress.ArgDict(1)
-					if err != nil {
-						transferErr = fmt.Errorf("invalid file header: %w", err)
-						cancel()
-						return
-					}
-					name = headerDict.StringOr("name", "")
-					relPath = headerDict.StringOr("rel_path", "")
-					size = headerDict.Int64Or("size", 0)
-					modeVal = headerDict.UInt64Or("mode", 0)
-					isDir = headerDict.BoolOr("is_dir", false)
+				encrypted, err := progress.ArgBytes(1)
+				if err != nil {
+					transferErr = fmt.Errorf("invalid encrypted header: %w", err)
+					cancel()
+					return
 				}
+				plaintext, err := DecryptPayload(encrypted, receiveKey)
+				if err != nil {
+					transferErr = fmt.Errorf("failed to decrypt header: %w", err)
+					cancel()
+					return
+				}
+				var h fileHeaderMsg
+				if err := json.Unmarshal(plaintext, &h); err != nil {
+					transferErr = fmt.Errorf("failed to parse header: %w", err)
+					cancel()
+					return
+				}
+				name, relPath, size, modeVal, isDir := h.Name, h.RelPath, h.Size, uint64(h.Mode), h.IsDir
 
 				if sourceRoot == "" {
 					sourceRoot = relPath
@@ -377,34 +355,21 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 					return
 				}
 
-				var chunk []byte
-				if encEnabled {
-					encrypted, err := progress.ArgBytes(1)
-					if err != nil {
-						_ = currentFile.Close()
-						currentFile = nil
-						transferErr = fmt.Errorf("invalid encrypted chunk: %w", err)
-						cancel()
-						return
-					}
-					chunk, err = DecryptPayload(encrypted, receiveKey)
-					if err != nil {
-						_ = currentFile.Close()
-						currentFile = nil
-						transferErr = fmt.Errorf("failed to decrypt chunk: %w", err)
-						cancel()
-						return
-					}
-				} else {
-					var err error
-					chunk, err = progress.ArgBytes(1)
-					if err != nil {
-						_ = currentFile.Close()
-						currentFile = nil
-						transferErr = fmt.Errorf("invalid data chunk: %w", err)
-						cancel()
-						return
-					}
+				encrypted, err := progress.ArgBytes(1)
+				if err != nil {
+					_ = currentFile.Close()
+					currentFile = nil
+					transferErr = fmt.Errorf("invalid encrypted chunk: %w", err)
+					cancel()
+					return
+				}
+				chunk, err := DecryptPayload(encrypted, receiveKey)
+				if err != nil {
+					_ = currentFile.Close()
+					currentFile = nil
+					transferErr = fmt.Errorf("failed to decrypt chunk: %w", err)
+					cancel()
+					return
 				}
 
 				if _, err := currentFile.Write(chunk); err != nil {
