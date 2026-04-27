@@ -188,9 +188,9 @@ func main() {
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
 	portForwardDevice := portForwardCmd.Arg("device", "ID, name or alias of device").Required().String()
-	portForwardRemotePort := portForwardCmd.Arg("remote-port", "Port on the remote device to connect to").
-		Required().String()
-	portForwardLocalPort := portForwardCmd.Arg("local-port", "Local port to listen on").Required().String()
+	portForwardPorts := portForwardCmd.Arg("ports", "Port mapping as localport:remoteport").String()
+	portForwardLocalFlag := portForwardCmd.Flag("local", "Local port to listen on").Short('l').String()
+	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote device to connect to").Short('r').String()
 	portForwardP2PFlag := portForwardCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
 	lsCmd := app.Command("ls", "List devices")
@@ -452,6 +452,30 @@ func main() {
 		}
 
 	case portForwardCmd.FullCommand():
+		var localPort, remotePort string
+		if *portForwardPorts != "" && (*portForwardLocalFlag != "" || *portForwardRemoteFlag != "") {
+			fmt.Fprintln(os.Stderr, "specify ports with either localport:remoteport or --local and --remote, not both")
+			return
+		}
+
+		if *portForwardPorts != "" {
+			parts := strings.SplitN(*portForwardPorts, ":", 2)
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+				fmt.Fprintln(os.Stderr, "invalid port mapping: use localport:remoteport")
+				return
+			}
+			localPort, remotePort = parts[0], parts[1]
+		} else if *portForwardLocalFlag != "" && *portForwardRemoteFlag != "" {
+			localPort = *portForwardLocalFlag
+			remotePort = *portForwardRemoteFlag
+		} else if *portForwardLocalFlag != "" || *portForwardRemoteFlag != "" {
+			fmt.Fprintln(os.Stderr, "both --local(-l) and --remote(-r) must be provided together")
+			return
+		} else {
+			fmt.Fprintln(os.Stderr, "specify ports as localport:remoteport or use --local and --remote flags")
+			return
+		}
+
 		realm, err := deviceRealm(*portForwardDevice, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -464,15 +488,14 @@ func main() {
 			return
 		}
 
-		fmt.Printf("Forwarding 127.0.0.1:%s -> %s:%s\n", *portForwardLocalPort, *portForwardDevice,
-			*portForwardRemotePort)
+		fmt.Printf("Forwarding 127.0.0.1:%s -> %s:%s\n", localPort, *portForwardDevice, remotePort)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- deskconn.ForwardLocalPort(ctx, deviceSession, *portForwardRemotePort, *portForwardLocalPort)
+			errCh <- deskconn.ForwardLocalPort(ctx, deviceSession, remotePort, localPort)
 		}()
 
 		sigCh := make(chan os.Signal, 1)
