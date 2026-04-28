@@ -117,7 +117,8 @@ func main() {
 	app := kingpin.New("deskconn", "Deskconn control CLI")
 	app.UsageFuncs(template.FuncMap{
 		"isDeviceFirstCmd": func(fullCmd string) bool {
-			return fullCmd == "printer list" || fullCmd == "printer print"
+			return fullCmd == "printer list" || fullCmd == "printer print" ||
+				fullCmd == "file pull" || fullCmd == "file push"
 		},
 		"printerCmdUsage": func(fullCmd string) string {
 			parts := strings.Fields(fullCmd)
@@ -220,11 +221,22 @@ func main() {
 		return
 	}
 
-	// Rewrite "printer <device> <subcmd> ..." → "printer <subcmd> <location> ..."
+	// Rewrite "printer <device> <subcmd> ..." → "printer <subcmd> <device> ..."
 	// so that kingpin sees device as a subcommand arg, not a subcommand name.
 	if len(os.Args) > 3 && os.Args[1] == "printer" {
 		printerLocalSubs := map[string]bool{"enable": true, "disable": true, "status": true}
 		if !printerLocalSubs[os.Args[2]] {
+			rewritten := make([]string, len(os.Args))
+			copy(rewritten, os.Args)
+			rewritten[2], rewritten[3] = rewritten[3], rewritten[2]
+			os.Args = rewritten
+		}
+	}
+
+	// Rewrite "file <device> <subcmd> ..." → "file <subcmd> <device> ..."
+	if len(os.Args) > 3 && os.Args[1] == "file" {
+		fileSubcmds := map[string]bool{"pull": true, "push": true}
+		if !fileSubcmds[os.Args[2]] {
 			rewritten := make([]string, len(os.Args))
 			copy(rewritten, os.Args)
 			rewritten[2], rewritten[3] = rewritten[3], rewritten[2]
