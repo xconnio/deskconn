@@ -72,6 +72,26 @@ printf '#compdef desk\n_deskconn "$@"\n' > "$ZSH_COMP_DIR/_desk"
 echo "Installed shell completions"
 echo "Installed deskconn $VERSION"
 
+# Add BIN_DIR to PATH in shell config files if not already present
+add_to_path() {
+    local file="$1"
+    grep -qF '.local/bin' "$file" 2>/dev/null && return
+    printf '\n# Added by deskconn installer\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$file"
+    echo "  Updated $file"
+}
+
+if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+    echo "Adding $BIN_DIR to PATH..."
+    [ -f "$HOME/.bashrc" ]        && add_to_path "$HOME/.bashrc"
+    [ -f "$HOME/.bash_profile" ]  && add_to_path "$HOME/.bash_profile"
+    [ -f "$HOME/.zshrc" ]         && add_to_path "$HOME/.zshrc"
+    # Fall back to .profile if none of the above exist
+    if [ ! -f "$HOME/.bashrc" ] && [ ! -f "$HOME/.bash_profile" ] && [ ! -f "$HOME/.zshrc" ]; then
+        add_to_path "$HOME/.profile"
+    fi
+    echo "Run this to apply immediately:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+fi
+
 echo "Setting up systemd user service for $SERVICE_NAME..."
 mkdir -p "$(dirname "$SERVICE_FILE")"
 
