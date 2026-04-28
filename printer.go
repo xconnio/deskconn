@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/phin1x/go-ipp"
+	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/xconn-go"
 )
@@ -117,14 +118,6 @@ func (p *Printer) currentPrintMode() (PrintMode, error) {
 	return CurrentPrintMode()
 }
 
-func PrintEnableFilePath() (string, error) {
-	cfgDirectory, err := CfgDirectory()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cfgDirectory, "printing_enabled"), nil
-}
-
 func EnablePrinting() error {
 	return SetPrintMode(PrintModeAccept)
 }
@@ -134,62 +127,68 @@ func EnablePrinterHosting() error {
 }
 
 func SetPrintMode(mode PrintMode) error {
-	path, err := PrintEnableFilePath()
-	if err != nil {
-		return err
-	}
-
 	switch mode {
-	case PrintModeAccept, PrintModeHost:
-		return os.WriteFile(path, []byte(mode+"\n"), 0600)
-	case PrintModeDisabled:
-		return DisablePrinting()
+	case PrintModeAccept, PrintModeHost, PrintModeDisabled:
+		return updatePrintingConfig(mode)
 	default:
 		return fmt.Errorf("unsupported print mode %q", mode)
 	}
 }
 
 func DisablePrinting() error {
-	path, err := PrintEnableFilePath()
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
-func PrintingEnabled() (bool, error) {
-	mode, err := CurrentPrintMode()
-	if err != nil {
-		return false, err
-	}
-	return mode != PrintModeDisabled, nil
+	return SetPrintMode(PrintModeDisabled)
 }
 
 func CurrentPrintMode() (PrintMode, error) {
-	path, err := PrintEnableFilePath()
+	cfgDirectory, err := CfgDirectory()
 	if err != nil {
 		return PrintModeDisabled, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return PrintModeDisabled, nil
 		}
 		return PrintModeDisabled, err
 	}
-
-	mode := PrintMode(strings.TrimSpace(string(data)))
-	switch mode {
-	case PrintModeAccept, PrintModeHost:
-		return mode, nil
-	case "":
-		return PrintModeAccept, nil
-	default:
-		return PrintModeDisabled, fmt.Errorf("unsupported print mode %q", mode)
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return PrintModeDisabled, err
 	}
+	switch config.Printing.Mode {
+	case PrintModeAccept, PrintModeHost:
+		return config.Printing.Mode, nil
+	case PrintModeDisabled, "":
+		return PrintModeDisabled, nil
+	default:
+		return PrintModeDisabled, fmt.Errorf("unsupported print mode %q", config.Printing.Mode)
+	}
+}
+
+func updatePrintingConfig(mode PrintMode) error {
+	cfgDirectory, err := CfgDirectory()
+	if err != nil {
+		return err
+	}
+	cfgPath := filepath.Join(cfgDirectory, "config.yml")
+
+	var config Config
+	data, err := os.ReadFile(cfgPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil {
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return err
+		}
+	}
+
+	config.Printing.Mode = mode
+	b, err := yaml.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cfgPath, b, 0600)
 }
 
 func (p *Printer) ExecutePrint(ctx context.Context, printer string, filename string, data []byte) error {
