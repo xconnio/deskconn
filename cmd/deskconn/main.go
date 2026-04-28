@@ -244,7 +244,17 @@ func main() {
 		}
 	}
 
-	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
+	parsedCmd, parseErr := app.Parse(os.Args[1:])
+	if parseErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n\n", parseErr)
+		ctx, _ := app.ParseContext(os.Args[1:])
+		if ctx != nil {
+			_ = app.UsageForContext(ctx)
+		} else {
+			app.Usage(os.Args[1:])
+		}
+		os.Exit(1)
+	}
 
 	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
 
