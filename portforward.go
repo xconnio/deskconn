@@ -319,7 +319,7 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 
 	firstSent := false
 	callResp := session.Call(ProcedurePortForward).
-		ProgressSender(func(sendCtx context.Context) *xconn.Progress {
+		ProgressSender(func(_ context.Context) *xconn.Progress {
 			// First message: include host, port, and client public key so the
 			// server can perform key exchange before opening the TCP connection.
 			if !firstSent {
@@ -337,14 +337,14 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 					keyExchanged = true
 				case <-done:
 					return &xconn.Progress{Args: []any{connID}}
-				case <-sendCtx.Done():
+				case <-ctx.Done():
 					closeDone()
 					return &xconn.Progress{Args: []any{connID}}
 				}
 			}
 
 			select {
-			case <-sendCtx.Done():
+			case <-ctx.Done():
 				closeDone()
 				return &xconn.Progress{Args: []any{connID}}
 			case <-done:
