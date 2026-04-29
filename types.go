@@ -61,8 +61,13 @@ type Device struct {
 	Connected    bool         `yaml:"-" json:"-"`
 }
 
+type PrintingConfig struct {
+	Mode PrintMode `yaml:"mode,omitempty"`
+}
+
 type Config struct {
-	Devices []Device `yaml:"devices"`
+	Devices  []Device       `yaml:"devices"`
+	Printing PrintingConfig `yaml:"printing,omitempty"`
 }
 
 type ClientSessions struct {
