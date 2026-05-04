@@ -11,6 +11,11 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
+const (
+	getActive = "GetActive"
+	lock      = "Lock"
+)
+
 var BacklightBasePath = "/sys/class/backlight" //nolint: gochecknoglobals
 
 type lockProvider struct {
@@ -23,14 +28,14 @@ type lockProvider struct {
 
 func lockProviders() []*lockProvider {
 	return []*lockProvider{
-		{"org.gnome.ScreenSaver", "/org/gnome/ScreenSaver", "org.gnome.ScreenSaver", "Lock", "GetActive"},
-		{"org.freedesktop.ScreenSaver", "/ScreenSaver", "org.freedesktop.ScreenSaver", "Lock", "GetActive"},
-		{"com.canonical.Unity.Session", "/com/canonical/Unity/Session", "com.canonical.Unity.Session", "Lock", "IsLocked"},
-		{"org.cinnamon.ScreenSaver", "/org/cinnamon/ScreenSaver", "org.cinnamon.ScreenSaver", "Lock", "GetActive"},
-		{"org.mate.ScreenSaver", "/org/mate/ScreenSaver", "org.mate.ScreenSaver", "Lock", "GetActive"},
-		{"org.xscreensaver", "/org/xscreensaver/ScreenSaver", "org.xscreensaver.ScreenSaver", "Lock", "GetActive"},
-		{"org.lxqt.ScreenSaver", "/org/lxqt/ScreenSaver", "org.lxqt.ScreenSaver", "Lock", "GetActive"},
-		{"org.xfce.SessionManager", "/org/xfce/SessionManager", "org.xfce.SessionManager", "Lock", ""},
+		{"org.gnome.ScreenSaver", "/org/gnome/ScreenSaver", "org.gnome.ScreenSaver", lock, getActive},
+		{"org.freedesktop.ScreenSaver", "/ScreenSaver", "org.freedesktop.ScreenSaver", lock, getActive},
+		{"com.canonical.Unity.Session", "/com/canonical/Unity/Session", "com.canonical.Unity.Session", lock, "IsLocked"},
+		{"org.cinnamon.ScreenSaver", "/org/cinnamon/ScreenSaver", "org.cinnamon.ScreenSaver", lock, getActive},
+		{"org.mate.ScreenSaver", "/org/mate/ScreenSaver", "org.mate.ScreenSaver", lock, getActive},
+		{"org.xscreensaver", "/org/xscreensaver/ScreenSaver", "org.xscreensaver.ScreenSaver", lock, getActive},
+		{"org.lxqt.ScreenSaver", "/org/lxqt/ScreenSaver", "org.lxqt.ScreenSaver", lock, getActive},
+		{"org.xfce.SessionManager", "/org/xfce/SessionManager", "org.xfce.SessionManager", lock, ""},
 	}
 }
 

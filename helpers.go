@@ -44,6 +44,8 @@ const (
 	CloudRealm = "io.xconn.deskconn"
 
 	ErrAuthenticationFailed = "wamp.error.authentication_failed"
+
+	StunServerURL = "stun:stun.l.google.com:19302"
 )
 
 func EnsureCredentials() (*Credentials, error) {
@@ -272,7 +274,7 @@ func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P 
 	iceServers, err := GetOrRefreshTURNServers(ctx, authid, privKey, cfgDirectory)
 	if err != nil {
 		iceServers = []xconnwebrtc.ICEServer{
-			{URLs: []string{"stun:stun.l.google.com:19302"}},
+			{URLs: []string{StunServerURL}},
 		}
 	}
 
@@ -430,7 +432,7 @@ func saveTURNCredentials(cfgDirectory string, creds *TURNCredentials) error {
 
 func turnCredentialsToICEServers(creds *TURNCredentials) []xconnwebrtc.ICEServer {
 	return []xconnwebrtc.ICEServer{
-		{URLs: []string{"stun:stun.l.google.com:19302"}},
+		{URLs: []string{StunServerURL}},
 		{
 			URLs:           creds.URLs,
 			Username:       creds.Username,

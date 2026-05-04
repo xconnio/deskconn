@@ -22,13 +22,13 @@ func makeBaseRequest(method auth.Method, authid string) auth.Request {
 
 func TestNewAuthenticator(t *testing.T) {
 	a := deskconn.NewAuthenticator([]*deskconn.CryptosignPrincipal{
-		{AuthID: "user1", AuthorizedKeys: []string{"key1"}, AuthRole: "admin"},
+		{AuthID: "user1", AuthorizedKeys: []string{"key1"}, AuthRole: admin},
 	})
 	require.NotNil(t, a)
 
 	p, ok := a.RetrievePrincipal("user1")
 	require.True(t, ok)
-	require.Equal(t, "admin", p.AuthRole)
+	require.Equal(t, admin, p.AuthRole)
 
 	_, ok = a.RetrievePrincipal("nobody")
 	require.False(t, ok)
@@ -47,13 +47,13 @@ func TestAuthenticatorAuthenticate(t *testing.T) {
 	require.NoError(t, err)
 
 	a := deskconn.NewAuthenticator([]*deskconn.CryptosignPrincipal{
-		{AuthID: "alice", AuthorizedKeys: []string{pubKey}, AuthRole: "admin"},
+		{AuthID: "alice", AuthorizedKeys: []string{pubKey}, AuthRole: admin},
 	})
 
 	resp, err := a.Authenticate(makeCryptoSignRequest("alice", pubKey))
 	require.NoError(t, err)
 	require.Equal(t, "alice", resp.AuthID())
-	require.Equal(t, "admin", resp.AuthRole())
+	require.Equal(t, admin, resp.AuthRole())
 
 	_, err = a.Authenticate(makeCryptoSignRequest("nobody", pubKey))
 	require.ErrorContains(t, err, "unknown authid")
@@ -70,12 +70,12 @@ func TestAuthenticatorAuthenticate(t *testing.T) {
 
 func TestAuthenticatorSetPrincipals(t *testing.T) {
 	a := deskconn.NewAuthenticator([]*deskconn.CryptosignPrincipal{
-		{AuthID: "old", AuthorizedKeys: []string{"k"}, AuthRole: "user"},
+		{AuthID: "old", AuthorizedKeys: []string{"k"}, AuthRole: user},
 	})
 
 	a.SetPrincipals([]*deskconn.CryptosignPrincipal{
-		{AuthID: "new1", AuthorizedKeys: []string{"k1"}, AuthRole: "admin"},
-		{AuthID: "new2", AuthorizedKeys: []string{"k2"}, AuthRole: "user"},
+		{AuthID: "new1", AuthorizedKeys: []string{"k1"}, AuthRole: admin},
+		{AuthID: "new2", AuthorizedKeys: []string{"k2"}, AuthRole: user},
 	})
 
 	_, ok := a.RetrievePrincipal("old")
@@ -83,25 +83,26 @@ func TestAuthenticatorSetPrincipals(t *testing.T) {
 
 	p, ok := a.RetrievePrincipal("new1")
 	require.True(t, ok)
-	require.Equal(t, "admin", p.AuthRole)
+	require.Equal(t, admin, p.AuthRole)
 }
 
 func TestAuthenticatorSetPrincipal(t *testing.T) {
 	a := deskconn.NewAuthenticator(nil)
+	const key = "key-d"
 	a.SetPrincipal("dave", &deskconn.CryptosignPrincipal{
-		AuthID: "dave", AuthorizedKeys: []string{"key-d"}, AuthRole: "user",
+		AuthID: "dave", AuthorizedKeys: []string{key}, AuthRole: user,
 	})
 
 	p, ok := a.RetrievePrincipal("dave")
 	require.True(t, ok)
-	require.Equal(t, []string{"key-d"}, p.AuthorizedKeys)
+	require.Equal(t, []string{key}, p.AuthorizedKeys)
 
 	a.SetPrincipal("dave", &deskconn.CryptosignPrincipal{
-		AuthID: "dave", AuthorizedKeys: []string{"key-d", "new-key"}, AuthRole: "admin",
+		AuthID: "dave", AuthorizedKeys: []string{key, "new-key"}, AuthRole: admin,
 	})
 
 	p, ok = a.RetrievePrincipal("dave")
 	require.True(t, ok)
-	require.Equal(t, "admin", p.AuthRole)
+	require.Equal(t, admin, p.AuthRole)
 	require.Len(t, p.AuthorizedKeys, 2)
 }

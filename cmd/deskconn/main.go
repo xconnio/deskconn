@@ -164,7 +164,9 @@ func main() {
 
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().String()
-	shellP2PFlag := shellCmd.Flag("p2p", "Connect using WebRTC").Bool()
+	shellModeFlag := shellCmd.Flag("mode",
+		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
+	).Enum("p2p", "routed")
 
 	execCmd := app.Command("exec", "Run a command")
 	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().String()
@@ -332,13 +334,30 @@ func main() {
 			return
 		}
 
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *shellP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		var shellSession *xconn.Session
+		if *shellModeFlag == "p2p" {
+			shellSession, err = deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, true)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		} else {
+			shellSession, err = deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		}
+
+		if *shellModeFlag == "" {
+			if err := deskconn.StartInteractiveCommandWithMigration(context.Background(), shellSession,
+				realm, cfgDirectory, deskconn.ProcedureShell); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 			return
 		}
 
-		if err := deskconn.StartInteractiveCommand(deviceSession, deskconn.ProcedureShell); err != nil {
+		if err := deskconn.StartInteractiveCommand(shellSession, deskconn.ProcedureShell); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 

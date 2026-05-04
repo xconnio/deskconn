@@ -15,13 +15,18 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn"
+	"github.com/xconnio/wampproto-go"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-const port = 18080
+const (
+	port = 18080
+
+	xconnURIPrefix = "io.xconn."
+)
 
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
@@ -39,7 +44,7 @@ func main() {
 			Name: "anonymous",
 			Permissions: []xconn.Permission{{
 				URI:         "",
-				MatchPolicy: "prefix",
+				MatchPolicy: wampproto.MatchPrefix,
 				AllowCall:   true,
 			}},
 		}},
@@ -126,22 +131,22 @@ start:
 		Roles: []xconn.RealmRole{
 			{Name: "owner", Permissions: []xconn.Permission{
 				{
-					URI:         "io.xconn.",
-					MatchPolicy: "prefix",
+					URI:         xconnURIPrefix,
+					MatchPolicy: wampproto.MatchPrefix,
 					AllowCall:   true,
 				},
 			}},
 			{Name: "admin", Permissions: []xconn.Permission{
 				{
-					URI:         "io.xconn.",
-					MatchPolicy: "prefix",
+					URI:         xconnURIPrefix,
+					MatchPolicy: wampproto.MatchPrefix,
 					AllowCall:   true,
 				},
 			}},
 			{Name: "member", Permissions: []xconn.Permission{
 				{
-					URI:         "io.xconn.",
-					MatchPolicy: "prefix",
+					URI:         xconnURIPrefix,
+					MatchPolicy: wampproto.MatchPrefix,
 					AllowCall:   true,
 				},
 			}},
@@ -271,7 +276,7 @@ start:
 			if err != nil {
 				log.Printf("failed to fetch TURN credentials, using STUN only: %v", err)
 				iceServers = []xconnwebrtc.ICEServer{
-					{URLs: []string{"stun:stun.l.google.com:19302"}},
+					{URLs: []string{deskconn.StunServerURL}},
 				}
 			}
 

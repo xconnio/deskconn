@@ -67,7 +67,7 @@ func (p *Printer) handleListPrinters(ctx context.Context, _ *xconn.Invocation) *
 
 	result := make([]map[string]any, len(infos))
 	for i, info := range infos {
-		result[i] = map[string]any{"name": info.Name, "ppd": info.PPDModel}
+		result[i] = map[string]any{name: info.Name, "ppd": info.PPDModel}
 	}
 
 	return xconn.NewInvocationResult(result)

@@ -21,6 +21,8 @@ const (
 	msgData   = "D"
 
 	fileChunkSize = 1024 * 1024 // 1mb
+
+	name = "name"
 )
 
 type fileHeaderMsg struct {
@@ -128,7 +130,7 @@ func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string, sendKey []byte
 	relPath, _ := filepath.Rel(basePath, dirPath)
 
 	if err := dlSendProgress(inv, sendKey, msgHeader, map[string]any{
-		"name":     info.Name(),
+		name:       info.Name(),
 		"rel_path": filepath.ToSlash(relPath),
 		"size":     int64(0),
 		"mode":     uint32(info.Mode().Perm()),
@@ -170,7 +172,7 @@ func dlStreamFile(inv *xconn.Invocation, filePath, basePath string, sendKey []by
 	relPath, _ := filepath.Rel(basePath, filePath)
 
 	if err := dlSendProgress(inv, sendKey, msgHeader, map[string]any{
-		"name":     info.Name(),
+		name:       info.Name(),
 		"rel_path": filepath.ToSlash(relPath),
 		"size":     info.Size(),
 		"mode":     uint32(info.Mode().Perm()),
