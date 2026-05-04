@@ -586,7 +586,11 @@ func StartInteractiveCommandWithMigration(parentCtx context.Context, normalSessi
 					sendFinal()
 					return
 				}
-				data := result.Args()[0].([]byte)
+				data, err := result.ArgBytes(0)
+				if err != nil {
+					sendFinal()
+					return
+				}
 
 				if firstServerMsg {
 					firstServerMsg = false

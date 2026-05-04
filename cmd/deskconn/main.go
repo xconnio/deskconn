@@ -165,7 +165,7 @@ func main() {
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().String()
 	shellModeFlag := shellCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses relay/server, default auto-migrates from routed to p2p",
+		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum("p2p", "routed")
 
 	execCmd := app.Command("exec", "Run a command")

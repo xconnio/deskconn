@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/xconnio/wampproto-go"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -326,7 +327,7 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 				firstSent = true
 				return &xconn.Progress{
 					Args:    []any{msgConnect, connID, remoteHost, remotePort, clientPubKey},
-					Options: map[string]any{"progress": true},
+					Options: map[string]any{wampproto.OptionProgress: true},
 				}
 			}
 
@@ -357,7 +358,7 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 				}
 				return &xconn.Progress{
 					Args:    []any{msgData, connID, encrypted},
-					Options: map[string]any{"progress": true},
+					Options: map[string]any{wampproto.OptionProgress: true},
 				}
 			}
 		}).

@@ -12,6 +12,11 @@ import (
 	"github.com/xconnio/deskconn"
 )
 
+const (
+	user  = "user"
+	admin = "admin"
+)
+
 func TestCredentialsFilePath(t *testing.T) {
 	path, err := deskconn.CredentialsFilePath()
 	require.NoError(t, err)
@@ -174,8 +179,8 @@ func TestWriteAndReadPrincipalsRoundTrip(t *testing.T) {
 	t.Cleanup(savePrincipalsFile(t))
 
 	principals := []*deskconn.CryptosignPrincipal{
-		{AuthID: "alice", AuthorizedKeys: []string{"key-a1", "key-a2"}, AuthRole: "admin"},
-		{AuthID: "bob", AuthorizedKeys: []string{"key-b1"}, AuthRole: "user"},
+		{AuthID: "alice", AuthorizedKeys: []string{"key-a1", "key-a2"}, AuthRole: admin},
+		{AuthID: "bob", AuthorizedKeys: []string{"key-b1"}, AuthRole: user},
 	}
 
 	require.NoError(t, deskconn.WritePrincipalsToFile(principals))
@@ -189,7 +194,7 @@ func TestWriteAndReadPrincipalsRoundTrip(t *testing.T) {
 		byID[p.AuthID] = p
 	}
 	require.Equal(t, []string{"key-a1", "key-a2"}, byID["alice"].AuthorizedKeys)
-	require.Equal(t, "admin", byID["alice"].AuthRole)
+	require.Equal(t, admin, byID["alice"].AuthRole)
 	require.Equal(t, []string{"key-b1"}, byID["bob"].AuthorizedKeys)
 }
 
@@ -197,7 +202,7 @@ func TestWritePrincipalsProducesValidJSON(t *testing.T) {
 	t.Cleanup(savePrincipalsFile(t))
 
 	principals := []*deskconn.CryptosignPrincipal{
-		{AuthID: "charlie", AuthorizedKeys: []string{"key-c"}, AuthRole: "user"},
+		{AuthID: "charlie", AuthorizedKeys: []string{"key-c"}, AuthRole: user},
 	}
 	require.NoError(t, deskconn.WritePrincipalsToFile(principals))
 
