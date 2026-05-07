@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -330,25 +331,19 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 		caller := inv.Caller()
 		if !inv.Progress() {
 			if pc, exists := proxyCalls.Get(caller); exists {
-				close(pc.ProgressChan)
+				if len(inv.Args()) > 0 {
+					pc.send(xconn.NewFinalProgress(inv.Args()...))
+				}
+				pc.closeCh()
 				proxyCalls.Delete(caller)
 			}
 
 			return xconn.NewInvocationResult()
 		}
 
-		payload, err := inv.ArgBytes(1)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
 		pc, exists := proxyCalls.Get(caller)
 		if !exists {
-			progressChan := make(chan *xconn.Progress, 32)
-
-			pc = &ProxyCall{
-				ProgressChan: progressChan,
-			}
+			pc = newProxyCall()
 			proxyCalls.Store(caller, pc)
 
 			realm, err := inv.ArgString(0)
@@ -356,26 +351,23 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 			}
 
-			deviceSession, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+			deviceSession, err := clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
 			if err != nil {
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 			}
 
+			ch := pc.progCh
 			go func() {
 				callResp := deviceSession.Call(procedure).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
-						p, ok := <-progressChan
+						p, ok := <-ch
 						if !ok {
 							return xconn.NewFinalProgress()
 						}
 						return p
 					}).
 					ProgressReceiver(func(pr *xconn.ProgressResult) {
-						if len(pr.Args()) > 0 {
-							_ = inv.SendProgress(pr.Args(), nil)
-						} else {
-							progressChan <- xconn.NewFinalProgress()
-						}
+						_ = inv.SendProgress(pr.Args(), nil)
 					}).Do()
 				if callResp.Err != nil {
 					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
@@ -387,9 +379,155 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 		}
 
 		if len(inv.Args()) > 2 {
-			pc.ProgressChan <- xconn.NewProgress(inv.Args()[1:]...)
+			pc.send(xconn.NewProgress(inv.Args()[1:]...))
 		} else {
-			pc.ProgressChan <- xconn.NewProgress(payload)
+			payload, err := inv.ArgBytes(1)
+			if err != nil {
+				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+			}
+			pc.send(xconn.NewProgress(payload))
+		}
+		return xconn.NewInvocationError(xconn.ErrNoResult)
+	}
+}
+
+// ProxyShellHandler proxies ProcedureShell with transparent PTY migration.
+// On first connection it uses a cloud session for fast start, then upgrades to WebRTC in the background.
+// When WebRTC is ready the daemon migrates the live PTY and stores the WebRTC session for future reuse.
+// If a P2P session is already cached it is used directly with no migration needed.
+func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
+	cfgDirectory string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		caller := inv.Caller()
+
+		if !inv.Progress() {
+			if pc, exists := proxyCalls.Get(caller); exists {
+				if len(inv.Args()) > 0 {
+					pc.send(xconn.NewFinalProgress(inv.Args()...))
+				}
+				pc.closeCh()
+				proxyCalls.Delete(caller)
+			}
+			return xconn.NewInvocationResult()
+		}
+
+		pc, exists := proxyCalls.Get(caller)
+		if !exists {
+			pc = newProxyCall()
+			proxyCalls.Store(caller, pc)
+
+			realm, err := inv.ArgString(0)
+			if err != nil {
+				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+			}
+			initialArgs := append([]any(nil), inv.Args()[1:]...)
+
+			deviceSession, upgradeCh, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+			if err != nil {
+				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+			}
+
+			var migratedMu sync.Mutex
+			migrated := false
+			migrationStarted := false
+
+			cloudCh := pc.progCh
+			go func() {
+				callResp := deviceSession.Call(ProcedureShell).
+					ProgressSender(func(ctx context.Context) *xconn.Progress {
+						p, ok := <-cloudCh
+						if !ok {
+							return xconn.NewFinalProgress()
+						}
+						return p
+					}).
+					ProgressReceiver(func(pr *xconn.ProgressResult) {
+						migratedMu.Lock()
+						m := migrated
+						started := migrationStarted
+						migratedMu.Unlock()
+						if !m && !started {
+							_ = inv.SendProgress(pr.Args(), nil)
+						}
+					}).Do()
+
+				migratedMu.Lock()
+				m := migrated
+				migratedMu.Unlock()
+				if !m {
+					if callResp.Err != nil {
+						_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
+					}
+					_ = inv.SendProgress(nil, nil)
+				}
+			}()
+
+			// Migration goroutine — fires only when a cloud→WebRTC upgrade completes
+			go func() {
+				webrtcSession, ok := <-upgradeCh
+				if !ok || webrtcSession == nil {
+					return // already P2P or upgrade failed; cloud goroutine owns the session
+				}
+
+				newCh := make(chan *xconn.Progress, 32)
+				var closeCloudOnce sync.Once
+				closeCloud := func() {
+					closeCloudOnce.Do(func() {
+						close(cloudCh)
+					})
+				}
+				switched := false
+
+				migratedMu.Lock()
+				migrationStarted = true
+				migratedMu.Unlock()
+
+				// WebRTC shell call with session-id so device migrates the live PTY.
+				// session-id must be in the first progress kwargs
+				sessionID := deviceSession.ID()
+				callResp := webrtcSession.Call(ProcedureShell).
+					ProgressSender(func(ctx context.Context) *xconn.Progress {
+						if !switched {
+							switched = true
+							p := xconn.NewProgress(initialArgs...)
+							p.Kwargs = map[string]any{"session-id": sessionID}
+							return p
+						}
+						p, ok := <-newCh
+						if !ok {
+							return xconn.NewFinalProgress()
+						}
+						return p
+					}).
+					ProgressReceiver(func(pr *xconn.ProgressResult) {
+						migratedMu.Lock()
+						if !migrated {
+							migrated = true
+							pc.switchCh(newCh)
+							closeCloud()
+						}
+						migratedMu.Unlock()
+						_ = inv.SendProgress(pr.Args(), nil)
+					}).
+					Do()
+
+				closeCloud()
+				if callResp.Err != nil {
+					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
+					clientSessions.DeleteDeviceSession(realm)
+				}
+				_ = inv.SendProgress(nil, nil)
+			}()
+		}
+
+		if len(inv.Args()) > 2 {
+			pc.send(xconn.NewProgress(inv.Args()[1:]...))
+		} else {
+			payload, err := inv.ArgBytes(1)
+			if err != nil {
+				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+			}
+			pc.send(xconn.NewProgress(payload))
 		}
 		return xconn.NewInvocationError(xconn.ErrNoResult)
 	}
