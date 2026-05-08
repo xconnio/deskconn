@@ -416,6 +416,10 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			return xconn.NewInvocationResult()
 		}
 
+		var resultCh chan *xconn.InvocationResult
+		migrationCtx, cancelMigration := context.WithCancel(ctx)
+		defer cancelMigration()
+
 		proxyCall, exists := proxyCalls.Fetch(caller)
 		if !exists {
 			proxyCall = newProxyCall()
@@ -436,7 +440,17 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			migrated := false
 			migrationStarted := false
 
+			resultCh = make(chan *xconn.InvocationResult, 1)
 			cloudCh := proxyCall.progressChan
+
+			var closeCloudOnce sync.Once
+			closeCloud := func() {
+				closeCloudOnce.Do(func() {
+					close(cloudCh)
+				})
+			}
+			proxyCall.setCloseFunc(closeCloud)
+
 			go func() {
 				callResp := deviceSession.Call(ProcedureShell).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
@@ -461,26 +475,33 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				migratedMu.Unlock()
 				if !m {
 					if callResp.Err != nil {
-						_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
+						select {
+						case resultCh <- xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error()):
+						default:
+						}
+						return
 					}
-					_ = inv.SendProgress(nil, nil)
+					select {
+					case resultCh <- xconn.NewInvocationResult():
+					default:
+					}
 				}
 			}()
 
 			// Migration goroutine, fires only when a cloud upgrade to WebRTC completes
 			go func() {
-				webrtcSession, ok := <-upgradeCh
-				if !ok || webrtcSession == nil {
-					return // already P2P or upgrade failed; cloud goroutine owns the session
+				var webrtcSession *xconn.Session
+				select {
+				case ws, ok := <-upgradeCh:
+					if !ok || ws == nil {
+						return // already P2P or upgrade failed; cloud goroutine owns the session
+					}
+					webrtcSession = ws
+				case <-migrationCtx.Done():
+					return
 				}
 
 				newCh := make(chan *xconn.Progress, 32)
-				var closeCloudOnce sync.Once
-				closeCloud := func() {
-					closeCloudOnce.Do(func() {
-						close(cloudCh)
-					})
-				}
 				switched := false
 
 				migratedMu.Lock()
@@ -491,24 +512,29 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				// session-id must be in the first progress kwargs
 				sessionID := deviceSession.ID()
 				callResp := webrtcSession.Call(ProcedureShell).
-					ProgressSender(func(ctx context.Context) *xconn.Progress {
+					ProgressSender(func(_ context.Context) *xconn.Progress {
 						if !switched {
 							switched = true
 							p := xconn.NewProgress(initialArgs...)
 							p.Kwargs = map[string]any{"session-id": sessionID}
 							return p
 						}
-						p, ok := <-newCh
-						if !ok {
+						select {
+						case p, ok := <-newCh:
+							if !ok {
+								return xconn.NewFinalProgress()
+							}
+							return p
+						case <-migrationCtx.Done():
 							return xconn.NewFinalProgress()
 						}
-						return p
 					}).
 					ProgressReceiver(func(pr *xconn.ProgressResult) {
 						migratedMu.Lock()
 						if !migrated {
 							migrated = true
 							proxyCall.switchChannel(newCh)
+							proxyCall.setCloseFunc(nil)
 							closeCloud()
 						}
 						migratedMu.Unlock()
@@ -518,10 +544,17 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 
 				closeCloud()
 				if callResp.Err != nil {
-					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
+					select {
+					case resultCh <- xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error()):
+					default:
+					}
 					clientSessions.DeleteDeviceSession(realm)
+					return
 				}
-				_ = inv.SendProgress(nil, nil)
+				select {
+				case resultCh <- xconn.NewInvocationResult():
+				default:
+				}
 			}()
 		}
 
@@ -533,6 +566,9 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 			}
 			proxyCall.send(xconn.NewProgress(payload))
+		}
+		if resultCh != nil {
+			return <-resultCh
 		}
 		return xconn.NewInvocationError(xconn.ErrNoResult)
 	}

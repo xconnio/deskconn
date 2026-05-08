@@ -12,6 +12,7 @@ import (
 
 type ProxyCall struct {
 	progressChan chan *xconn.Progress
+	closeFunc    func()
 
 	sync.Mutex
 }
@@ -33,11 +34,22 @@ func (pc *ProxyCall) switchChannel(newCh chan *xconn.Progress) {
 	pc.Unlock()
 }
 
+func (pc *ProxyCall) setCloseFunc(f func()) {
+	pc.Lock()
+	pc.closeFunc = f
+	pc.Unlock()
+}
+
 func (pc *ProxyCall) closeChannel() {
 	pc.Lock()
+	f := pc.closeFunc
 	progressChan := pc.progressChan
 	pc.Unlock()
-	close(progressChan)
+	if f != nil {
+		f()
+	} else {
+		close(progressChan)
+	}
 }
 
 type ProxyCalls struct {
