@@ -334,31 +334,41 @@ func main() {
 			return
 		}
 
-		var shellSession *xconn.Session
-		if *shellModeFlag == "p2p" {
-			shellSession, err = deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, true)
+		switch *shellModeFlag {
+		case "routed":
+			// Direct cloud connection, no session stored.
+			shellSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-		} else {
-			shellSession, err = deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err := deskconn.StartInteractiveCommand(shellSession, "", deskconn.ProcedureShell); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+
+		case "p2p":
+			// Synchronous WebRTC via exec proxy (reuses or creates cached P2P session).
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-		}
-
-		if *shellModeFlag == "" {
-			if err := deskconn.StartInteractiveCommandWithMigration(context.Background(), shellSession,
-				realm, cfgDirectory, deskconn.ProcedureShell); err != nil {
+			if err := deskconn.StartInteractiveCommand(localSession, realm,
+				deskconn.ProcedureProxyExec, "bash"); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
-			return
-		}
 
-		if err := deskconn.StartInteractiveCommand(shellSession, deskconn.ProcedureShell); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		default:
+			// Default: daemon handles cloud-first start, WebRTC upgrade in background
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.StartInteractiveCommand(localSession, realm,
+				deskconn.ProcedureProxyShell); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		}
 
 	case execCmd.FullCommand():
@@ -368,15 +378,26 @@ func main() {
 			return
 		}
 
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *execP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		err = deskconn.StartInteractiveCommand(deviceSession, deskconn.ProcedureExec, *command...)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if *execP2PFlag {
+			// P2P: proxy establishes/reuses a WebRTC session.
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.StartInteractiveCommand(localSession, realm,
+				deskconn.ProcedureProxyExec, *command...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		} else {
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.StartInteractiveCommand(deviceSession, "", deskconn.ProcedureExec, *command...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		}
 
 	case printerEnableCmd.FullCommand():

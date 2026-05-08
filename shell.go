@@ -328,7 +328,7 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 	}
 }
 
-func StartInteractiveCommand(session *xconn.Session, procedureName string, args ...string) error {
+func StartInteractiveCommand(session *xconn.Session, realm, procedureName string, args ...string) error {
 	fd := int(os.Stdin.Fd()) // #nosec
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
@@ -343,6 +343,7 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 
 	var sendKey, receiveKey []byte
 	keyExchangeReady := make(chan struct{})
+	var keyExchangeOnce sync.Once
 	progressChan := make(chan *xconn.Progress, 32)
 
 	buildSizeProgress := func(firstMsg bool) *xconn.Progress {
@@ -352,13 +353,19 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 		}
 		sizeStr := fmt.Sprintf("SIZE:%d:%d", width, height)
 		if firstMsg {
-			return xconn.NewProgress(append([]byte(sizeStr+":KEY:"), publicKey...), args)
+			if realm == "" {
+				return xconn.NewProgress(append([]byte(sizeStr+":KEY:"), publicKey...), args)
+			}
+			return xconn.NewProgress(realm, append([]byte(sizeStr+":KEY:"), publicKey...), args)
 		}
 		encrypted, err := EncryptPayload([]byte(sizeStr), sendKey)
 		if err != nil {
 			return nil
 		}
-		return xconn.NewProgress(encrypted, args)
+		if realm == "" {
+			return xconn.NewProgress(encrypted, args)
+		}
+		return xconn.NewProgress(realm, encrypted, args)
 	}
 
 	go func() {
@@ -382,13 +389,16 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 				return
 			}
 			if encrypted, err := EncryptPayload(buf[:n], sendKey); err == nil {
-				progressChan <- xconn.NewProgress(encrypted)
+				if realm == "" {
+					progressChan <- xconn.NewProgress(encrypted)
+					continue
+				}
+				progressChan <- xconn.NewProgress(realm, encrypted)
 			}
 		}
 	}()
 
 	firstSent := false
-	firstServerMsg := true
 	callResp := session.Call(procedureName).
 		ProgressSender(func(ctx context.Context) *xconn.Progress {
 			if !firstSent {
@@ -407,14 +417,12 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 				progressChan <- xconn.NewFinalProgress()
 				return
 			}
-			data := result.Args()[0].([]byte)
+			data, err := result.ArgBytes(0)
+			if err != nil {
+				return
+			}
 
-			if firstServerMsg {
-				firstServerMsg = false
-				if !bytes.HasPrefix(data, []byte("KEY:")) {
-					progressChan <- xconn.NewFinalProgress()
-					return
-				}
+			if bytes.HasPrefix(data, []byte("KEY:")) {
 				serverPublicKey := data[4:]
 				sharedSecret, err := PerformKeyExchange(privateKey, serverPublicKey)
 				if err != nil {
@@ -431,7 +439,7 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 					close(progressChan)
 					return
 				}
-				close(keyExchangeReady)
+				keyExchangeOnce.Do(func() { close(keyExchangeReady) })
 				return
 			}
 
@@ -441,220 +449,4 @@ func StartInteractiveCommand(session *xconn.Session, procedureName string, args 
 		}).Do()
 
 	return callResp.Err
-}
-
-// StartInteractiveCommandWithMigration starts a shell on normalSession, then transparently
-// upgrades to a WebRTC session when one becomes available, migrating the PTY to the new session.
-func StartInteractiveCommandWithMigration(parentCtx context.Context, normalSession *xconn.Session,
-	realm, cfgDirectory, procedureName string, args ...string) error {
-
-	fd := int(os.Stdin.Fd()) // #nosec
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return fmt.Errorf("failed to set raw mode: %w", err)
-	}
-	defer func() { _ = term.Restore(fd, oldState) }()
-
-	ctx, cancel := context.WithCancel(parentCtx)
-	defer cancel()
-
-	type routerState struct {
-		mu      sync.Mutex
-		sendKey []byte
-		progCh  chan *xconn.Progress
-	}
-	router := &routerState{progCh: make(chan *xconn.Progress, 32)}
-
-	getSendKey := func() []byte {
-		router.mu.Lock()
-		defer router.mu.Unlock()
-		return router.sendKey
-	}
-	setSendKey := func(key []byte) {
-		router.mu.Lock()
-		router.sendKey = key
-		router.mu.Unlock()
-	}
-	sendToActive := func(p *xconn.Progress) {
-		router.mu.Lock()
-		ch := router.progCh
-		router.mu.Unlock()
-		select {
-		case ch <- p:
-		case <-ctx.Done():
-		}
-	}
-	switchChannel := func(newCh chan *xconn.Progress) {
-		router.mu.Lock()
-		router.progCh = newCh
-		router.mu.Unlock()
-	}
-
-	keyExchangeReady := make(chan struct{})
-	var keyExchangeOnce sync.Once
-
-	go func() {
-		select {
-		case <-keyExchangeReady:
-		case <-ctx.Done():
-			return
-		}
-
-		go func() {
-			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, syscall.SIGWINCH)
-			for range sigChan {
-				key := getSendKey()
-				if key == nil {
-					continue
-				}
-				width, height, sErr := term.GetSize(fd)
-				if sErr != nil {
-					continue
-				}
-				sizeStr := fmt.Sprintf("SIZE:%d:%d", width, height)
-				if enc, eErr := EncryptPayload([]byte(sizeStr), key); eErr == nil {
-					sendToActive(xconn.NewProgress(enc, args))
-				}
-			}
-		}()
-
-		buf := make([]byte, 1024)
-		for {
-			n, readErr := os.Stdin.Read(buf)
-			if readErr != nil {
-				sendToActive(xconn.NewFinalProgress())
-				return
-			}
-			key := getSendKey()
-			if key == nil {
-				continue
-			}
-			if enc, eErr := EncryptPayload(buf[:n], key); eErr == nil {
-				sendToActive(xconn.NewProgress(enc))
-			}
-		}
-	}()
-
-	migrated := make(chan struct{})
-	var migrateOnce sync.Once
-	signalMigrated := func() { migrateOnce.Do(func() { close(migrated) }) }
-	isMigrated := func() bool {
-		select {
-		case <-migrated:
-			return true
-		default:
-			return false
-		}
-	}
-
-	resultCh := make(chan error, 2)
-
-	doCall := func(session *xconn.Session, progCh chan *xconn.Progress, oldSessionID uint64) error {
-		pubKey, privKey, kErr := CreateX25519KeyPair()
-		if kErr != nil {
-			return fmt.Errorf("failed to generate keypair: %w", kErr)
-		}
-
-		var recvKey []byte
-		firstSent := false
-		firstServerMsg := true
-
-		sendFinal := func() {
-			select {
-			case progCh <- xconn.NewFinalProgress():
-			default:
-			}
-		}
-
-		resp := session.Call(procedureName).
-			ProgressSender(func(_ context.Context) *xconn.Progress {
-				if !firstSent {
-					firstSent = true
-					width, height, _ := term.GetSize(fd)
-					sizeStr := fmt.Sprintf("SIZE:%d:%d", width, height)
-					p := xconn.NewProgress(append([]byte(sizeStr+":KEY:"), pubKey...), args)
-					if oldSessionID != 0 {
-						p.Kwargs = map[string]any{"session-id": oldSessionID}
-					}
-					return p
-				}
-				return <-progCh
-			}).
-			ProgressReceiver(func(result *xconn.ProgressResult) {
-				if len(result.Args()) == 0 {
-					sendFinal()
-					return
-				}
-				data, err := result.ArgBytes(0)
-				if err != nil {
-					sendFinal()
-					return
-				}
-
-				if firstServerMsg {
-					firstServerMsg = false
-					if !bytes.HasPrefix(data, []byte("KEY:")) {
-						sendFinal()
-						return
-					}
-					serverPub := data[4:]
-					sharedSecret, sErr := PerformKeyExchange(privKey, serverPub)
-					if sErr != nil {
-						sendFinal()
-						return
-					}
-					sndKey, sErr := DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
-					if sErr != nil {
-						sendFinal()
-						return
-					}
-					recvKey, sErr = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
-					if sErr != nil {
-						sendFinal()
-						return
-					}
-					setSendKey(sndKey)
-					keyExchangeOnce.Do(func() { close(keyExchangeReady) })
-					return
-				}
-
-				if plaintext, dErr := DecryptPayload(data, recvKey); dErr == nil {
-					_, _ = os.Stdout.Write(plaintext)
-				}
-			}).Do()
-
-		return resp.Err
-	}
-
-	go func() {
-		err := doCall(normalSession, router.progCh, 0)
-		if isMigrated() {
-			_ = normalSession.Leave()
-			return
-		}
-		cancel()
-		resultCh <- err
-	}()
-
-	go func() {
-		select {
-		case <-keyExchangeReady:
-		case <-ctx.Done():
-			return
-		}
-		webrtcSession, connErr := ConnectDeviceRealm(ctx, realm, cfgDirectory, true)
-		if connErr != nil {
-			log.Debugf("webrtc migration: %v", connErr)
-			return
-		}
-		newCh := make(chan *xconn.Progress, 32)
-		switchChannel(newCh)
-		signalMigrated()
-
-		err := doCall(webrtcSession, newCh, normalSession.ID())
-		resultCh <- err
-	}()
-
-	return <-resultCh
 }

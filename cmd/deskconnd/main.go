@@ -68,8 +68,8 @@ func main() {
 	proxyCalls := deskconn.NewProxyCalls()
 	clientSession := deskconn.NewClientSessions()
 
-	regRespShell := sess.Register(deskconn.ProcedureProxyShell, deskconn.ProxyProgressiveInvocationHandler(proxyCalls,
-		clientSession, cfgDirectory, deskconn.ProcedureShell)).Do()
+	regRespShell := sess.Register(deskconn.ProcedureProxyShell, deskconn.ProxyShellHandler(proxyCalls,
+		clientSession, cfgDirectory)).Do()
 	if regRespShell.Err != nil {
 		log.Fatal(regRespShell.Err)
 	}
@@ -77,7 +77,7 @@ func main() {
 	regRespExec := sess.Register(deskconn.ProcedureProxyExec, deskconn.ProxyProgressiveInvocationHandler(proxyCalls,
 		clientSession, cfgDirectory, deskconn.ProcedureExec)).Do()
 	if regRespExec.Err != nil {
-		log.Fatal(regRespShell.Err)
+		log.Fatal(regRespExec.Err)
 	}
 
 	regRespLogin := sess.Register(deskconn.ProcedureLogin,
