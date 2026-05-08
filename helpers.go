@@ -267,12 +267,17 @@ func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P 
 
 	defer func() { _ = session.Leave() }()
 
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
+	return ConnectWebrtc(ctx, session, realm, authid, privKey, cfgDirectory)
+}
+
+func ConnectWebrtc(ctx context.Context, session *xconn.Session, realm, authid, privateKey,
+	cfgDirectory string) (*xconn.Session, error) {
+	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
 	if err != nil {
 		return nil, err
 	}
 
-	iceServers, err := GetOrRefreshTURNServers(ctx, authid, privKey, cfgDirectory)
+	iceServers, err := GetOrRefreshTURNServers(ctx, authid, privateKey, cfgDirectory)
 	if err != nil {
 		iceServers = []xconnwebrtc.ICEServer{
 			{URLs: []string{StunServerURL}},
@@ -330,21 +335,21 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		caller := inv.Caller()
 		if !inv.Progress() {
-			if pc, exists := proxyCalls.Get(caller); exists {
+			if proxyCall, exists := proxyCalls.Fetch(caller); exists {
 				if len(inv.Args()) > 0 {
-					pc.send(xconn.NewFinalProgress(inv.Args()...))
+					proxyCall.send(xconn.NewFinalProgress(inv.Args()...))
 				}
-				pc.closeCh()
+				proxyCall.closeChannel()
 				proxyCalls.Delete(caller)
 			}
 
 			return xconn.NewInvocationResult()
 		}
 
-		pc, exists := proxyCalls.Get(caller)
+		proxyCall, exists := proxyCalls.Fetch(caller)
 		if !exists {
-			pc = newProxyCall()
-			proxyCalls.Store(caller, pc)
+			proxyCall = newProxyCall()
+			proxyCalls.Store(caller, proxyCall)
 
 			realm, err := inv.ArgString(0)
 			if err != nil {
@@ -356,7 +361,7 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 			}
 
-			ch := pc.progCh
+			ch := proxyCall.progressChan
 			go func() {
 				callResp := deviceSession.Call(procedure).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
@@ -379,13 +384,13 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 		}
 
 		if len(inv.Args()) > 2 {
-			pc.send(xconn.NewProgress(inv.Args()[1:]...))
+			proxyCall.send(xconn.NewProgress(inv.Args()[1:]...))
 		} else {
 			payload, err := inv.ArgBytes(1)
 			if err != nil {
 				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 			}
-			pc.send(xconn.NewProgress(payload))
+			proxyCall.send(xconn.NewProgress(payload))
 		}
 		return xconn.NewInvocationError(xconn.ErrNoResult)
 	}
@@ -401,20 +406,20 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 		caller := inv.Caller()
 
 		if !inv.Progress() {
-			if pc, exists := proxyCalls.Get(caller); exists {
+			if proxyCall, exists := proxyCalls.Fetch(caller); exists {
 				if len(inv.Args()) > 0 {
-					pc.send(xconn.NewFinalProgress(inv.Args()...))
+					proxyCall.send(xconn.NewFinalProgress(inv.Args()...))
 				}
-				pc.closeCh()
+				proxyCall.closeChannel()
 				proxyCalls.Delete(caller)
 			}
 			return xconn.NewInvocationResult()
 		}
 
-		pc, exists := proxyCalls.Get(caller)
+		proxyCall, exists := proxyCalls.Fetch(caller)
 		if !exists {
-			pc = newProxyCall()
-			proxyCalls.Store(caller, pc)
+			proxyCall = newProxyCall()
+			proxyCalls.Store(caller, proxyCall)
 
 			realm, err := inv.ArgString(0)
 			if err != nil {
@@ -431,7 +436,7 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			migrated := false
 			migrationStarted := false
 
-			cloudCh := pc.progCh
+			cloudCh := proxyCall.progressChan
 			go func() {
 				callResp := deviceSession.Call(ProcedureShell).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
@@ -462,7 +467,7 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				}
 			}()
 
-			// Migration goroutine — fires only when a cloud→WebRTC upgrade completes
+			// Migration goroutine, fires only when a cloud upgrade to WebRTC completes
 			go func() {
 				webrtcSession, ok := <-upgradeCh
 				if !ok || webrtcSession == nil {
@@ -503,7 +508,7 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 						migratedMu.Lock()
 						if !migrated {
 							migrated = true
-							pc.switchCh(newCh)
+							proxyCall.switchChannel(newCh)
 							closeCloud()
 						}
 						migratedMu.Unlock()
@@ -521,13 +526,13 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 		}
 
 		if len(inv.Args()) > 2 {
-			pc.send(xconn.NewProgress(inv.Args()[1:]...))
+			proxyCall.send(xconn.NewProgress(inv.Args()[1:]...))
 		} else {
 			payload, err := inv.ArgBytes(1)
 			if err != nil {
 				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 			}
-			pc.send(xconn.NewProgress(payload))
+			proxyCall.send(xconn.NewProgress(payload))
 		}
 		return xconn.NewInvocationError(xconn.ErrNoResult)
 	}

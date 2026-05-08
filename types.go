@@ -2,44 +2,42 @@ package deskconn
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/xconn-go"
-	"github.com/xconnio/xconn-go/auth"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
 type ProxyCall struct {
+	progressChan chan *xconn.Progress
+
 	sync.Mutex
-	progCh chan *xconn.Progress
 }
 
 func newProxyCall() *ProxyCall {
-	return &ProxyCall{progCh: make(chan *xconn.Progress, 32)}
+	return &ProxyCall{progressChan: make(chan *xconn.Progress, 32)}
 }
 
 func (pc *ProxyCall) send(p *xconn.Progress) {
 	pc.Lock()
-	ch := pc.progCh
+	ch := pc.progressChan
 	pc.Unlock()
 	ch <- p
 }
 
-func (pc *ProxyCall) switchCh(newCh chan *xconn.Progress) {
+func (pc *ProxyCall) switchChannel(newCh chan *xconn.Progress) {
 	pc.Lock()
-	pc.progCh = newCh
+	pc.progressChan = newCh
 	pc.Unlock()
 }
 
-func (pc *ProxyCall) closeCh() {
+func (pc *ProxyCall) closeChannel() {
 	pc.Lock()
-	ch := pc.progCh
+	progressChan := pc.progressChan
 	pc.Unlock()
-	close(ch)
+	close(progressChan)
 }
 
 type ProxyCalls struct {
@@ -53,7 +51,7 @@ func NewProxyCalls() *ProxyCalls {
 	}
 }
 
-func (p *ProxyCalls) Get(id uint64) (*ProxyCall, bool) {
+func (p *ProxyCalls) Fetch(id uint64) (*ProxyCall, bool) {
 	p.Lock()
 	defer p.Unlock()
 	c, ok := p.calls[id]
@@ -159,7 +157,7 @@ func (c *ClientSessions) EnsureDeviceSessionWithUpgrade(ctx context.Context, rea
 
 	upgradeCh := make(chan *xconn.Session, 1)
 	go func() { // nolint:contextcheck
-		if sess := c.upgradeToWebRTC(cloudSession, authid, privKey, realm); sess != nil {
+		if sess := c.upgradeToWebRTC(cloudSession, authid, privKey, realm, cfgDirectory); sess != nil {
 			upgradeCh <- sess
 		}
 		close(upgradeCh)
@@ -171,25 +169,9 @@ func (c *ClientSessions) EnsureDeviceSessionWithUpgrade(ctx context.Context, rea
 // upgradeToWebRTC negotiates a WebRTC session using cloudSession for signalling. On
 // success it atomically replaces the stored session, starts the reconnect loop, and
 // returns the WebRTC session. Returns nil on failure.
-func (c *ClientSessions) upgradeToWebRTC(cloudSession *xconn.Session, authid, privKey, realm string) *xconn.Session {
-	authenticator, err := auth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
-	if err != nil {
-		log.Printf("webrtc upgrade: failed to create authenticator: %v", err)
-		return nil
-	}
-
-	config := &xconnwebrtc.ClientConfig{
-		Realm:                    realm,
-		ProcedureWebRTCOffer:     ProcedureWebRTCOffer,
-		TopicAnswererOnCandidate: TopicAnswererOnCandidate,
-		TopicOffererOnCandidate:  TopicOffererOnCandidate,
-		Serializer:               xconn.CBORSerializerSpec,
-		Authenticator:            authenticator,
-		Session:                  cloudSession,
-		ICEServers:               []xconnwebrtc.ICEServer{{URLs: []string{StunServerURL}}},
-	}
-
-	webrtcSession, err := xconnwebrtc.ConnectWAMP(config)
+func (c *ClientSessions) upgradeToWebRTC(cloudSession *xconn.Session, authid, privateKey, realm,
+	cfgDirectory string) *xconn.Session {
+	webrtcSession, err := ConnectWebrtc(context.Background(), cloudSession, realm, authid, privateKey, cfgDirectory)
 	if err != nil {
 		log.Printf("webrtc upgrade: failed to connect: %v", err)
 		return nil
@@ -198,7 +180,7 @@ func (c *ClientSessions) upgradeToWebRTC(cloudSession *xconn.Session, authid, pr
 	c.StoreDeviceSession(realm, webrtcSession)
 
 	log.Printf("webrtc upgrade: session for %s upgraded to WebRTC", realm)
-	go c.reconnectLoop(webrtcSession, authid, privKey, realm) //nolint
+	go c.reconnectLoop(webrtcSession, authid, privateKey, realm, cfgDirectory) //nolint
 	return webrtcSession
 }
 
@@ -213,45 +195,28 @@ func (c *ClientSessions) EnsureP2PDeviceSession(ctx context.Context, realm,
 		c.DeleteDeviceSession(realm)
 	}
 
-	authid, privKey, err := ReadCredentials(cfgDirectory)
+	authid, privateKey, err := ReadCredentials(cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
 
-	cloudSession, err := xconn.ConnectCryptosign(ctx, CloudURI(), realm, authid, privKey)
+	cloudSession, err := xconn.ConnectCryptosign(ctx, CloudURI(), realm, authid, privateKey)
 	if err != nil {
 		return nil, err
 	}
 
-	authenticator, err := auth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
+	webrtcSession, err := ConnectWebrtc(ctx, cloudSession, realm, authid, privateKey, cfgDirectory)
 	if err != nil {
-		_ = cloudSession.Leave()
 		return nil, err
-	}
-	config := &xconnwebrtc.ClientConfig{
-		Realm:                    realm,
-		ProcedureWebRTCOffer:     ProcedureWebRTCOffer,
-		TopicAnswererOnCandidate: TopicAnswererOnCandidate,
-		TopicOffererOnCandidate:  TopicOffererOnCandidate,
-		Serializer:               xconn.CBORSerializerSpec,
-		Authenticator:            authenticator,
-		Session:                  cloudSession,
-		ICEServers:               []xconnwebrtc.ICEServer{{URLs: []string{StunServerURL}}},
-	}
-
-	webrtcSession, err := xconnwebrtc.ConnectWAMP(config)
-	if err != nil {
-		_ = cloudSession.Leave()
-		return nil, fmt.Errorf("failed to establish P2P connection: %w", err)
 	}
 
 	_ = cloudSession.Leave()
 	c.StoreDeviceSession(realm, webrtcSession)
-	go c.reconnectLoop(webrtcSession, authid, privKey, realm) //nolint
+	go c.reconnectLoop(webrtcSession, authid, privateKey, realm, cfgDirectory) //nolint
 	return webrtcSession, nil
 }
 
-func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKey, realm string) {
+func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKey, realm, cfgDirectory string) {
 	<-session.Done()
 	retryDelay := 1 * time.Second
 	maxDelay := 30 * time.Second
@@ -267,31 +232,7 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKe
 			time.Sleep(retryDelay)
 			continue
 		}
-
-		authenticator, err := auth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
-		if err != nil {
-			log.Printf("failed to create authenticator: %v", err)
-			retryDelay *= 2
-			if retryDelay > maxDelay {
-				retryDelay = maxDelay
-			}
-			time.Sleep(retryDelay)
-			continue
-		}
-		config := &xconnwebrtc.ClientConfig{
-			Realm:                    realm,
-			ProcedureWebRTCOffer:     ProcedureWebRTCOffer,
-			TopicAnswererOnCandidate: TopicAnswererOnCandidate,
-			TopicOffererOnCandidate:  TopicOffererOnCandidate,
-			Serializer:               xconn.CBORSerializerSpec,
-			Authenticator:            authenticator,
-			Session:                  cloudSession,
-			ICEServers: []xconnwebrtc.ICEServer{
-				{URLs: []string{StunServerURL}},
-			},
-		}
-
-		finalSession, err := xconnwebrtc.ConnectWAMP(config)
+		webrtcSession, err := ConnectWebrtc(context.Background(), cloudSession, realm, authid, privateKey, cfgDirectory)
 		if err != nil {
 			log.Printf("failed to connect using webrtc: %v", err)
 			retryDelay *= 2
@@ -304,14 +245,14 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKe
 		_ = cloudSession.Leave()
 		if sess, ok := c.SessionByRealm(realm); ok {
 			if sess.Connected() {
-				_ = finalSession.Leave()
+				_ = webrtcSession.Leave()
 				break
 			}
 
 			c.DeleteDeviceSession(realm)
 		}
-		c.StoreDeviceSession(realm, finalSession)
-		<-finalSession.Done()
+		c.StoreDeviceSession(realm, webrtcSession)
+		<-webrtcSession.Done()
 	}
 }
 
