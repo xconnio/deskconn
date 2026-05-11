@@ -220,6 +220,10 @@ func (f *FileBrowser) Rename(oldPath, newPath string) error {
 		return err
 	}
 
+	if dstInfo, err := os.Lstat(resolvedNew); err == nil && dstInfo.IsDir() {
+		resolvedNew = filepath.Join(resolvedNew, filepath.Base(resolvedOld))
+	}
+
 	return os.Rename(resolvedOld, resolvedNew)
 }
 
@@ -236,6 +240,10 @@ func (f *FileBrowser) Delete(path string) error {
 
 	if filepath.Clean(resolved) == filepath.Clean(homeDir) {
 		return errors.New("cannot delete home directory")
+	}
+
+	if _, err := os.Lstat(resolved); err != nil {
+		return err
 	}
 
 	return os.RemoveAll(resolved)
@@ -261,7 +269,16 @@ func (f *FileBrowser) Copy(srcPath, dstPath string) error {
 		return err
 	}
 
+	if dstInfo, err := os.Lstat(resolvedDst); err == nil && dstInfo.IsDir() {
+		resolvedDst = filepath.Join(resolvedDst, filepath.Base(resolvedSrc))
+	}
+
 	if srcInfo.IsDir() {
+		srcClean := filepath.Clean(resolvedSrc)
+		dstClean := filepath.Clean(resolvedDst)
+		if dstClean == srcClean || strings.HasPrefix(dstClean, srcClean+string(os.PathSeparator)) {
+			return fmt.Errorf("cannot copy a directory into itself")
+		}
 		return copyDir(resolvedSrc, resolvedDst)
 	}
 	return copyFile(resolvedSrc, resolvedDst)

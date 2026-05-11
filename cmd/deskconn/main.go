@@ -107,6 +107,11 @@ Commands:
 {{end -}}
 `
 
+const (
+	ModeRouted = "routed"
+	ModeP2P    = "p2p"
+)
+
 func main() {
 	cfgDirectory, err := deskconn.CfgDirectory()
 	if err != nil {
@@ -119,7 +124,7 @@ func main() {
 		"isDeviceFirstCmd": func(fullCmd string) bool {
 			return fullCmd == "printer list" || fullCmd == "printer print" ||
 				fullCmd == "file pull" || fullCmd == "file push" ||
-				fullCmd == "file mv" || fullCmd == "file cp" || fullCmd == "file rm"
+				fullCmd == "file ls" || fullCmd == "file mv" || fullCmd == "file cp" || fullCmd == "file rm"
 		},
 		"printerCmdUsage": func(fullCmd string) string {
 			parts := strings.Fields(fullCmd)
@@ -163,13 +168,20 @@ func main() {
 	pushRecursive := pushCmd.Flag("recursive", "Upload directories recursively").Short('r').Bool()
 	pushP2PFlag := pushCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
+	lsFileCmd := fileCmd.Command("ls", "List files on a device")
+	lsFileDevice := lsFileCmd.Arg("device", "ID, name or alias of device").Required().String()
+	lsFilePath := lsFileCmd.Arg("path", "Path on the remote device (default: home directory)").String()
+	lsFileModeFlag := lsFileCmd.Flag("mode",
+		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
+	).Enum(ModeP2P, ModeRouted)
+
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
 	mvDevice := mvCmd.Arg("device", "ID, name or alias of device").Required().String()
 	mvOldPath := mvCmd.Arg("old-path", "Current path on the remote device").Required().String()
 	mvNewPath := mvCmd.Arg("new-path", "New path on the remote device").Required().String()
 	mvModeFlag := mvCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum("p2p", "routed")
+	).Enum(ModeP2P, ModeRouted)
 
 	cpCmd := fileCmd.Command("cp", "Copy a file or directory on a device")
 	cpDevice := cpCmd.Arg("device", "ID, name or alias of device").Required().String()
@@ -177,20 +189,20 @@ func main() {
 	cpDstPath := cpCmd.Arg("dst-path", "Destination path on the remote device").Required().String()
 	cpModeFlag := cpCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum("p2p", "routed")
+	).Enum(ModeP2P, ModeRouted)
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
 	rmDevice := rmCmd.Arg("device", "ID, name or alias of device").Required().String()
 	rmPath := rmCmd.Arg("path", "Path on the remote device").Required().String()
 	rmModeFlag := rmCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum("p2p", "routed")
+	).Enum(ModeP2P, ModeRouted)
 
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().String()
 	shellModeFlag := shellCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum("p2p", "routed")
+	).Enum(ModeP2P, ModeRouted)
 
 	execCmd := app.Command("exec", "Run a command")
 	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().String()
@@ -261,7 +273,7 @@ func main() {
 
 	// Rewrite "file <device> <subcmd> ..." → "file <subcmd> <device> ..."
 	if len(os.Args) > 3 && os.Args[1] == "file" {
-		fileSubcmds := map[string]bool{"pull": true, "push": true, "mv": true, "cp": true, "rm": true}
+		fileSubcmds := map[string]bool{"pull": true, "push": true, "ls": true, "mv": true, "cp": true, "rm": true}
 		if !fileSubcmds[os.Args[2]] {
 			rewritten := make([]string, len(os.Args))
 			copy(rewritten, os.Args)
@@ -351,6 +363,37 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
+	case lsFileCmd.FullCommand():
+		realm, err := deviceRealm(*lsFileDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		args := []string{"ls"}
+		if *lsFilePath != "" {
+			args = append(args, *lsFilePath)
+		}
+		switch *lsFileModeFlag {
+		case ModeRouted:
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.StartInteractiveCommand(deviceSession, "", deskconn.ProcedureExec, args...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		default:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.StartInteractiveCommand(localSession, realm, deskconn.ProcedureProxyExec, args...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		}
+
 	case mvCmd.FullCommand():
 		realm, err := deviceRealm(*mvDevice, cfgDirectory)
 		if err != nil {
@@ -395,7 +438,7 @@ func main() {
 		}
 
 		switch *shellModeFlag {
-		case "routed":
+		case ModeRouted:
 			// Direct cloud connection, no session stored.
 			shellSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 			if err != nil {
@@ -406,7 +449,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 			}
 
-		case "p2p":
+		case ModeP2P:
 			// Synchronous WebRTC via exec proxy (reuses or creates cached P2P session).
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
@@ -1434,14 +1477,14 @@ func selectOrganization(callResp xconn.CallResponse) (int, error) {
 
 func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
 	switch mode {
-	case "routed":
+	case ModeRouted:
 		deviceSession, err := deskconn.ConnectDeviceRealm(ctx, realm, cfgDirectory, false)
 		if err != nil {
 			return err
 		}
 		_, err = deskconn.CallFileOp(deviceSession, procedure, payload)
 		return err
-	case "p2p":
+	case ModeP2P:
 		localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
 		if err != nil {
 			return err
