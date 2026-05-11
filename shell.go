@@ -18,7 +18,7 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-type shellEncryption struct {
+type encryptionKeys struct {
 	sendKey    []byte
 	receiveKey []byte
 }
@@ -44,7 +44,7 @@ func newInteractiveShellSession() *interactiveShellSession {
 	}
 }
 
-func (p *interactiveShellSession) setupEncryption(inv *xconn.Invocation, clientPublicKey []byte) (*shellEncryption,
+func (p *interactiveShellSession) setupEncryption(inv *xconn.Invocation, clientPublicKey []byte) (*encryptionKeys,
 	*xconn.InvocationResult) {
 	serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
 	if err != nil {
@@ -62,7 +62,7 @@ func (p *interactiveShellSession) setupEncryption(inv *xconn.Invocation, clientP
 	if err != nil {
 		return nil, xconn.NewInvocationError("io.xconn.error", err.Error())
 	}
-	enc := &shellEncryption{sendKey: sendKey, receiveKey: receiveKey}
+	enc := &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey}
 	p.keys.store(inv.Caller(), enc)
 
 	_ = inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil)

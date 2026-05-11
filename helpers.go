@@ -31,6 +31,7 @@ const (
 
 	ProcedureProxyShell       = "io.xconn.deskconn.deskconnd.proxy.shell"
 	ProcedureProxyExec        = "io.xconn.deskconn.deskconnd.proxy.exec"
+	ProcedureProxyFileOp      = "io.xconn.deskconn.deskconnd.proxy.file.op"
 	ProcedureLogin            = "io.xconn.deskconn.login"
 	ProcedureLogout           = "io.xconn.deskconn.logout"
 	ProcedureConnectedDevices = "io.xconn.deskconn.connected_devices"
@@ -676,6 +677,116 @@ func FetchTURNServers(session *xconn.Session) ([]xconnwebrtc.ICEServer, int64, e
 	}
 
 	return turnCredentialsToICEServers(creds), creds.ExpiresAt, nil
+}
+
+func clientKeyExchange(session *xconn.Session) (*encryptionKeys, error) {
+	publicKey, privateKey, err := CreateX25519KeyPair()
+	if err != nil {
+		return nil, err
+	}
+
+	keyResp := session.Call(ProcedureKeyExchange).Args(publicKey).Do()
+	if keyResp.Err != nil {
+		return nil, keyResp.Err
+	}
+
+	serverPublicKey, err := keyResp.ArgBytes(0)
+	if err != nil {
+		return nil, err
+	}
+
+	sharedSecret, err := PerformKeyExchange(privateKey, serverPublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	sendKey, err := DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
+	if err != nil {
+		return nil, err
+	}
+
+	receiveKey, err := DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+	if err != nil {
+		return nil, err
+	}
+
+	return &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey}, nil
+}
+
+func encryptedCall(session *xconn.Session, procedure string, payload []byte, enc *encryptionKeys) ([]byte, error) {
+	encrypted, err := EncryptPayload(payload, enc.sendKey)
+	if err != nil {
+		return nil, err
+	}
+
+	opResp := session.Call(procedure).Args(encrypted).Do()
+	if opResp.Err != nil {
+		return nil, opResp.Err
+	}
+
+	encResult, err := opResp.ArgBytes(0)
+	if err != nil {
+		return nil, err
+	}
+
+	return DecryptPayload(encResult, enc.receiveKey)
+}
+
+func CallFileOp(deviceSession *xconn.Session, procedure string, payload []byte) ([]byte, error) {
+	enc, err := clientKeyExchange(deviceSession)
+	if err != nil {
+		return nil, err
+	}
+
+	return encryptedCall(deviceSession, procedure, payload, enc)
+}
+
+func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	km := newKeyManager()
+
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		procedure, err := inv.ArgString(1)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		payload, err := inv.ArgBytes(2)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		useP2P, _ := inv.ArgBool(3)
+
+		var deviceSession *xconn.Session
+		if useP2P {
+			deviceSession, err = clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
+		} else {
+			deviceSession, _, err = clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		}
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		enc, ok := km.fetch(deviceSession.ID())
+		if !ok {
+			enc, err = clientKeyExchange(deviceSession)
+			if err != nil {
+				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+			}
+			km.store(deviceSession.ID(), enc)
+		}
+
+		result, err := encryptedCall(deviceSession, procedure, payload, enc)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+		return xconn.NewInvocationResult(result)
+	}
 }
 
 func GetOrRefreshTURNServers(ctx context.Context, authid, privKey, cfgDirectory string) ([]xconnwebrtc.ICEServer,
