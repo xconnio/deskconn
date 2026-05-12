@@ -48,8 +48,7 @@ usage: deskconn <command> [<args> ...]
 Deskconn control CLI
 
 Flags:
-  --[no-]help  Show context-sensitive help (also try --help-long and
-               --help-man).
+  --[no-]help  Show context-sensitive help (also try --help-long and --help-man).
 
 Commands:
 help [<command>...]
@@ -78,52 +77,46 @@ login [<flags>]
     -p, --password=PASSWORD    Password
         --[no-]password-stdin  Read password from stdin
 
-file pull [<flags>] <device> <remote-path> <local-path>
-    Download a file or directory from a device
+file ls [<flags>] <target>
+    List files on a device
 
-    -r, --[no-]recursive  Download directories recursively
-        --[no-]p2p        Connect using WebRTC
+    --mode=MODE  Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
 
-file push [<flags>] <device> <local-path> <remote-path>
-    Upload a file or directory to a device
+file mv [<flags>] <src> <dst>
+    Move or rename a file or directory on a device
 
-    -r, --[no-]recursive  Upload directories recursively
-        --[no-]p2p        Connect using WebRTC
+    --mode=MODE  Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
+
+file cp [<flags>] <src> <dst>
+    Copy files to/from/between devices
+
+    -r, --[no-]recursive  Copy directories recursively
+        --mode=MODE       Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
+
+file rm [<flags>] <target>
+    Remove a file or directory on a device
+
+    --mode=MODE  Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
 
 shell [<flags>] <device>
     Start interactive shell
 
-    --[no-]p2p  Connect using WebRTC
+    --mode=MODE  Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
 
 exec [<flags>] <device> <command>...
     Run a command
 
     --[no-]p2p  Connect using WebRTC
 
-printer enable [<flags>]
-    Enable receiving print jobs on this desktop
+print [<flags>] [<target>] [<file_path>]
+    Print operations
 
-    --[no-]host-printers  Also allow remote clients to list this desktop's
-                          printers
-
-printer disable
-    Disable receiving print jobs on this desktop
-
-
-printer status
-    Show whether this desktop accepts print jobs
-
-
-printer list [<flags>] <device>
-    List printers on a device
-
-    --[no-]p2p  Connect using WebRTC
-
-printer print --printer=PRINTER [<flags>] <device> <file_path>
-    Print a local file on a device
-
-    --printer=PRINTER  Printer name
-    --[no-]p2p         Connect using WebRTC
+    --[no-]enable         Enable receiving print jobs on this desktop
+    --[no-]host-printers  Also allow remote clients to list this desktop's printers (use with --enable)
+    --[no-]disable        Disable receiving print jobs on this desktop
+    --[no-]status         Show whether this desktop accepts print jobs
+    --ls=LS               List printers on a device (device name or alias)
+    --[no-]p2p            Connect using WebRTC
 
 port forward [<flags>] <device> [<ports>]
     Forward a local port to a port on the remote device
