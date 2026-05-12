@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"text/template"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -33,80 +32,6 @@ import (
 
 var version = "v0.1.0-alpha"
 
-const printerUsageTemplate = `{{define "FormatArg" -}}
-{{if not .Hidden}} {{if not .Required}}[{{end -}}
-{{- if .PlaceHolder}}{{.PlaceHolder}}{{else}}<{{.Name}}>{{end -}}
-{{- if .Value|IsCumulative}}...{{end -}}
-{{- if not .Required}}]{{end}}{{end -}}
-{{end -}}
-
-{{define "FormatCommand" -}}
-{{if .FlagSummary}} {{.FlagSummary}}{{end -}}
-{{range .Args}}{{template "FormatArg" .}}{{end -}}
-{{end -}}
-
-{{define "FormatRestArgs" -}}
-{{$skip := true -}}
-{{range .Args -}}
-{{- if $skip}}{{$skip = false}}{{else}}{{template "FormatArg" .}}{{end -}}
-{{- end -}}
-{{end -}}
-
-{{define "FormatCommands" -}}
-{{range .FlattenedCommands -}}
-{{if not .Hidden -}}
-{{if isDeviceFirstCmd .FullCommand -}}
-  {{printerCmdUsage .FullCommand -}}
-{{- template "FormatRestArgs" .}}{{if .FlagSummary}} {{.FlagSummary}}{{end}}
-{{else -}}
-  {{.FullCommand}}{{if .Default}}*{{end}}{{template "FormatCommand" .}}
-{{end -}}
-{{.Help|Wrap 4}}
-{{end -}}
-{{end -}}
-{{end -}}
-
-{{define "FormatUsage" -}}
-{{template "FormatCommand" .}}{{if .Commands}} <command> [<args> ...]{{end}}
-{{if .Help}}
-{{.Help|Wrap 0 -}}
-{{end -}}
-
-{{end -}}
-
-{{if .Context.SelectedCommand -}}
-{{if isDeviceFirstCmd .Context.SelectedCommand.FullCommand -}}
-usage: {{.App.Name}} {{printerCmdUsage .Context.SelectedCommand.FullCommand -}}
-{{- template "FormatRestArgs" .Context.SelectedCommand -}}
-{{- if .Context.SelectedCommand.FlagSummary}} {{.Context.SelectedCommand.FlagSummary}}{{end}}
-{{if .Context.SelectedCommand.Help}}
-{{.Context.SelectedCommand.Help|Wrap 0 -}}
-{{end}}
-{{else -}}
-usage: {{.App.Name}} {{.Context.SelectedCommand}}{{template "FormatUsage" .Context.SelectedCommand}}
-{{end -}}
-{{ else -}}
-usage: {{.App.Name}}{{template "FormatUsage" .App}}
-{{end}}
-{{if .Context.Flags -}}
-Flags:
-{{.Context.Flags|FlagsToTwoColumns|FormatTwoColumns}}
-{{end -}}
-{{if .Context.Args -}}
-Args:
-{{.Context.Args|ArgsToTwoColumns|FormatTwoColumns}}
-{{end -}}
-{{if .Context.SelectedCommand -}}
-{{if len .Context.SelectedCommand.Commands -}}
-Subcommands:
-{{template "FormatCommands" .Context.SelectedCommand}}
-{{end -}}
-{{else if .App.Commands -}}
-Commands:
-{{template "FormatCommands" .App}}
-{{end -}}
-`
-
 const (
 	ModeRouted = "routed"
 	ModeP2P    = "p2p"
@@ -120,22 +45,6 @@ func main() {
 
 	versionString := fmt.Sprintf("deskconn %s", version)
 	app := kingpin.New("deskconn", "Deskconn control CLI")
-	app.UsageFuncs(template.FuncMap{
-		"isDeviceFirstCmd": func(fullCmd string) bool {
-			return fullCmd == "printer list" || fullCmd == "printer print" ||
-				fullCmd == "file pull" || fullCmd == "file push" ||
-				fullCmd == "file ls" || fullCmd == "file mv" || fullCmd == "file cp" || fullCmd == "file rm"
-		},
-		"printerCmdUsage": func(fullCmd string) string {
-			parts := strings.Fields(fullCmd)
-			if len(parts) >= 2 {
-				parent := strings.Join(parts[:len(parts)-1], " ")
-				return parent + " <device> " + parts[len(parts)-1]
-			}
-			return fullCmd
-		},
-	})
-	app.UsageTemplate(printerUsageTemplate)
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
@@ -154,46 +63,30 @@ func main() {
 	loginPasswordStdin := loginCmd.Flag("password-stdin", "Read password from stdin").Bool()
 
 	fileCmd := app.Command("file", "File operations")
-	pullCmd := fileCmd.Command("pull", "Download a file or directory from a device")
-	pullDevice := pullCmd.Arg("device", "ID, name or alias of device").Required().String()
-	pullRemote := pullCmd.Arg("remote-path", "Path on the remote device").Required().String()
-	pullLocal := pullCmd.Arg("local-path", "Local path to store the download").Required().String()
-	pullRecursive := pullCmd.Flag("recursive", "Download directories recursively").Short('r').Bool()
-	pullP2PFlag := pullCmd.Flag("p2p", "Connect using WebRTC").Bool()
-
-	pushCmd := fileCmd.Command("push", "Upload a file or directory to a device")
-	pushDevice := pushCmd.Arg("device", "ID, name or alias of device").Required().String()
-	pushLocal := pushCmd.Arg("local-path", "Local path to upload").Required().String()
-	pushRemote := pushCmd.Arg("remote-path", "Path on the remote device").Required().String()
-	pushRecursive := pushCmd.Flag("recursive", "Upload directories recursively").Short('r').Bool()
-	pushP2PFlag := pushCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
 	lsFileCmd := fileCmd.Command("ls", "List files on a device")
-	lsFileDevice := lsFileCmd.Arg("device", "ID, name or alias of device").Required().String()
-	lsFilePath := lsFileCmd.Arg("path", "Path on the remote device (default: home directory)").String()
+	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().String()
 	lsFileModeFlag := lsFileCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
-	mvDevice := mvCmd.Arg("device", "ID, name or alias of device").Required().String()
-	mvOldPath := mvCmd.Arg("old-path", "Current path on the remote device").Required().String()
-	mvNewPath := mvCmd.Arg("new-path", "New path on the remote device").Required().String()
+	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().String()
+	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().String()
 	mvModeFlag := mvCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
-	cpCmd := fileCmd.Command("cp", "Copy a file or directory on a device")
-	cpDevice := cpCmd.Arg("device", "ID, name or alias of device").Required().String()
-	cpSrcPath := cpCmd.Arg("src-path", "Source path on the remote device").Required().String()
-	cpDstPath := cpCmd.Arg("dst-path", "Destination path on the remote device").Required().String()
+	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
+	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().String()
+	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().String()
+	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
-	rmDevice := rmCmd.Arg("device", "ID, name or alias of device").Required().String()
-	rmPath := rmCmd.Arg("path", "Path on the remote device").Required().String()
+	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().String()
 	rmModeFlag := rmCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
@@ -209,20 +102,16 @@ func main() {
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 	execP2PFlag := execCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
-	printerCmd := app.Command("printer", "Printer operations")
-	printerEnableCmd := printerCmd.Command("enable", "Enable receiving print jobs on this desktop")
-	printerEnableHostPrinters := printerEnableCmd.Flag("host-printers",
-		"Also allow remote clients to list this desktop's printers").Bool()
-	printerDisableCmd := printerCmd.Command("disable", "Disable receiving print jobs on this desktop")
-	printerStatusCmd := printerCmd.Command("status", "Show whether this desktop accepts print jobs")
-	printerListCmd := printerCmd.Command("list", "List printers on a device")
-	printerListDevice := printerListCmd.Arg("device", "ID, name or alias of device").Required().String()
-	printerListP2PFlag := printerListCmd.Flag("p2p", "Connect using WebRTC").Bool()
-	printerPrintCmd := printerCmd.Command("print", "Print a local file on a device")
-	printerPrintDevice := printerPrintCmd.Arg("device", "ID, name or alias of device").Required().String()
-	printerPrintFilePath := printerPrintCmd.Arg("file_path", "Local file path").Required().String()
-	printerPrintPrinter := printerPrintCmd.Flag("printer", "Printer name").Required().String()
-	printerPrintP2PFlag := printerPrintCmd.Flag("p2p", "Connect using WebRTC").Bool()
+	printCmd := app.Command("print", "Print operations")
+	printEnableFlag := printCmd.Flag("enable", "Enable receiving print jobs on this desktop").Bool()
+	printHostPrintersFlag := printCmd.Flag("host-printers",
+		"Also allow remote clients to list this desktop's printers (use with --enable)").Bool()
+	printDisableFlag := printCmd.Flag("disable", "Disable receiving print jobs on this desktop").Bool()
+	printStatusFlag := printCmd.Flag("status", "Show whether this desktop accepts print jobs").Bool()
+	printLsDevice := printCmd.Flag("ls", "List printers on a device (device name or alias)").String()
+	printTarget := printCmd.Arg("target", "Device and printer as machine:printer (e.g. m1:HP_LaserJet)").String()
+	printFilePath := printCmd.Arg("file_path", "Local file path").String()
+	printP2PFlag := printCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
@@ -257,29 +146,6 @@ func main() {
 	if len(os.Args) == 2 && os.Args[1] == "self" {
 		app.Usage([]string{"self"})
 		return
-	}
-
-	// Rewrite "printer <device> <subcmd> ..." → "printer <subcmd> <device> ..."
-	// so that kingpin sees device as a subcommand arg, not a subcommand name.
-	if len(os.Args) > 3 && os.Args[1] == "printer" {
-		printerLocalSubs := map[string]bool{"enable": true, "disable": true, "status": true}
-		if !printerLocalSubs[os.Args[2]] {
-			rewritten := make([]string, len(os.Args))
-			copy(rewritten, os.Args)
-			rewritten[2], rewritten[3] = rewritten[3], rewritten[2]
-			os.Args = rewritten
-		}
-	}
-
-	// Rewrite "file <device> <subcmd> ..." → "file <subcmd> <device> ..."
-	if len(os.Args) > 3 && os.Args[1] == "file" {
-		fileSubcmds := map[string]bool{"pull": true, "push": true, "ls": true, "mv": true, "cp": true, "rm": true}
-		if !fileSubcmds[os.Args[2]] {
-			rewritten := make([]string, len(os.Args))
-			copy(rewritten, os.Args)
-			rewritten[2], rewritten[3] = rewritten[3], rewritten[2]
-			os.Args = rewritten
-		}
 	}
 
 	parsedCmd, parseErr := app.Parse(os.Args[1:])
@@ -329,49 +195,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
 
-	case pullCmd.FullCommand():
-		realm, err := deviceRealm(*pullDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *pullP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		if err := deskconn.PullFiles(deviceSession, *pullRemote, *pullLocal, *pullRecursive); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-
-	case pushCmd.FullCommand():
-		realm, err := deviceRealm(*pushDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *pushP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		if err := deskconn.PushFiles(deviceSession, *pushLocal, *pushRemote, *pushRecursive); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-
 	case lsFileCmd.FullCommand():
-		realm, err := deviceRealm(*lsFileDevice, cfgDirectory)
+		device, path := parseDevicePath(*lsFileTarget)
+		realm, err := deviceRealm(device, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 		args := []string{"ls"}
-		if *lsFilePath != "" {
-			args = append(args, *lsFilePath)
+		if path != "" {
+			args = append(args, path)
 		}
 		switch *lsFileModeFlag {
 		case ModeRouted:
@@ -395,36 +228,86 @@ func main() {
 		}
 
 	case mvCmd.FullCommand():
-		realm, err := deviceRealm(*mvDevice, cfgDirectory)
+		srcDevice, srcPath := parseDevicePath(*mvSrc)
+		dstDevice, dstPath := parseDevicePath(*mvDst)
+		if srcDevice != dstDevice {
+			fmt.Fprintln(os.Stderr, "cross-device move not supported")
+			return
+		}
+		realm, err := deviceRealm(srcDevice, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		payload, _ := json.Marshal(map[string]string{"old_path": *mvOldPath, "new_path": *mvNewPath})
+		payload, _ := json.Marshal(map[string]string{"old_path": srcPath, "new_path": dstPath})
 		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileRename, payload, *mvModeFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case cpCmd.FullCommand():
-		realm, err := deviceRealm(*cpDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		payload, _ := json.Marshal(map[string]string{"src": *cpSrcPath, "dst": *cpDstPath})
-		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileCopy, payload, *cpModeFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		srcRemote := isRemotePath(*cpSrc)
+		dstRemote := isRemotePath(*cpDst)
+		switch {
+		case srcRemote && dstRemote:
+			srcDevice, srcPath := parseDevicePath(*cpSrc)
+			dstDevice, dstPath := parseDevicePath(*cpDst)
+			if srcDevice != dstDevice {
+				fmt.Fprintln(os.Stderr, "cross-device copy not supported")
+				return
+			}
+			realm, err := deviceRealm(srcDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			payload, _ := json.Marshal(map[string]string{"src": srcPath, "dst": dstPath})
+			err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileCopy, payload, *cpModeFlag)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		case !srcRemote && dstRemote:
+			dstDevice, dstPath := parseDevicePath(*cpDst)
+			realm, err := deviceRealm(dstDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.PushFiles(deviceSession, *cpSrc, dstPath, *cpRecursive); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		case srcRemote && !dstRemote:
+			srcDevice, srcPath := parseDevicePath(*cpSrc)
+			realm, err := deviceRealm(srcDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.PullFiles(deviceSession, srcPath, *cpDst, *cpRecursive); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		default:
+			fmt.Fprintln(os.Stderr, "at least one of src or dst must be a remote path (device:path)")
 		}
 
 	case rmCmd.FullCommand():
-		realm, err := deviceRealm(*rmDevice, cfgDirectory)
+		device, path := parseDevicePath(*rmTarget)
+		realm, err := deviceRealm(device, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		payload, _ := json.Marshal(map[string]string{"path": *rmPath})
+		payload, _ := json.Marshal(map[string]string{"path": path})
 		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileDelete, payload, *rmModeFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -503,117 +386,119 @@ func main() {
 			}
 		}
 
-	case printerEnableCmd.FullCommand():
-		if *printerEnableHostPrinters {
-			if err := deskconn.EnablePrinterHosting(); err != nil {
+	case printCmd.FullCommand():
+		switch {
+		case *printEnableFlag:
+			if *printHostPrintersFlag {
+				if err := deskconn.EnablePrinterHosting(); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				fmt.Println("printer hosting enabled")
+			} else {
+				if err := deskconn.EnablePrinting(); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				fmt.Println("printing enabled")
+			}
+		case *printDisableFlag:
+			if err := deskconn.DisablePrinting(); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			fmt.Println("printer hosting enabled")
-		} else {
-			if err := deskconn.EnablePrinting(); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			fmt.Println("printing enabled")
-		}
-
-	case printerDisableCmd.FullCommand():
-		if err := deskconn.DisablePrinting(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		fmt.Println("printing disabled")
-
-	case printerStatusCmd.FullCommand():
-		mode, err := deskconn.CurrentPrintMode()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		switch mode {
-		case deskconn.PrintModeDisabled:
 			fmt.Println("printing disabled")
-		case deskconn.PrintModeAccept:
-			fmt.Println("printing enabled")
-		case deskconn.PrintModeHost:
-			fmt.Println("printing enabled; printer hosting enabled")
+		case *printStatusFlag:
+			mode, err := deskconn.CurrentPrintMode()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			switch mode {
+			case deskconn.PrintModeDisabled:
+				fmt.Println("printing disabled")
+			case deskconn.PrintModeAccept:
+				fmt.Println("printing enabled")
+			case deskconn.PrintModeHost:
+				fmt.Println("printing enabled; printer hosting enabled")
+			default:
+				fmt.Printf("printing mode: %s\n", mode)
+			}
+		case *printLsDevice != "":
+			realm, err := deviceRealm(*printLsDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			callResp := deviceSession.Call(deskconn.ProcedurePrinterList).Do()
+			if callResp.Err != nil {
+				fmt.Fprintln(os.Stderr, callResp.Err)
+				return
+			}
+			if len(callResp.Args()) == 0 {
+				return
+			}
+			jsonData, err := json.Marshal(callResp.Args()[0])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			var printers []deskconn.PrinterInfo
+			if err := json.Unmarshal(jsonData, &printers); err != nil {
+				fmt.Fprintln(os.Stderr, "expected a list of printers")
+				return
+			}
+			table := tablewriter.NewWriter(os.Stdout)
+			table.Header([]string{"NAME", "PPD"})
+			for _, printerInfo := range printers {
+				_ = table.Append([]any{printerInfo.Name, printerInfo.PPDModel})
+			}
+			if err = table.Render(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		case *printTarget != "":
+			device, printerName := parseDevicePath(*printTarget)
+			if printerName == "" {
+				fmt.Fprintln(os.Stderr, "invalid target: expected machine:printer (e.g. m1:HP_LaserJet)")
+				return
+			}
+			if *printFilePath == "" {
+				fmt.Fprintln(os.Stderr, "file_path required")
+				return
+			}
+			realm, err := deviceRealm(device, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			data, err := os.ReadFile(*printFilePath)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			filename := filepath.Base(*printFilePath)
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *printP2PFlag)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			callResp := deviceSession.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
+			if callResp.Err != nil {
+				fmt.Fprintln(os.Stderr, callResp.Err)
+				return
+			}
+			if len(callResp.Args()) > 0 {
+				fmt.Printf("print job queued: %v\n", callResp.Args()[0])
+			} else {
+				fmt.Println("print job queued")
+			}
 		default:
-			fmt.Printf("printing mode: %s\n", mode)
-		}
-
-	case printerListCmd.FullCommand():
-		realm, err := deviceRealm(*printerListDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *printerListP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		callResp := deviceSession.Call(deskconn.ProcedurePrinterList).Do()
-		if callResp.Err != nil {
-			fmt.Fprintln(os.Stderr, callResp.Err)
-			return
-		}
-		if len(callResp.Args()) == 0 {
-			return
-		}
-
-		jsonData, err := json.Marshal(callResp.Args()[0])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		var printers []deskconn.PrinterInfo
-		if err := json.Unmarshal(jsonData, &printers); err != nil {
-			fmt.Fprintln(os.Stderr, "expected a list of printers")
-			return
-		}
-
-		table := tablewriter.NewWriter(os.Stdout)
-		table.Header([]string{"NAME", "PPD"})
-		for _, printerInfo := range printers {
-			_ = table.Append([]any{printerInfo.Name, printerInfo.PPDModel})
-		}
-		if err = table.Render(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-
-	case printerPrintCmd.FullCommand():
-		realm, err := deviceRealm(*printerPrintDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		data, err := os.ReadFile(*printerPrintFilePath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		filename := filepath.Base(*printerPrintFilePath)
-
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *printerPrintP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		callResp := deviceSession.Call(deskconn.ProcedurePrinterPrint).Args(*printerPrintPrinter, filename, data).Do()
-		if callResp.Err != nil {
-			fmt.Fprintln(os.Stderr, callResp.Err)
-			return
-		}
-		if len(callResp.Args()) > 0 {
-			fmt.Printf("print job queued: %v\n", callResp.Args()[0])
-		} else {
-			fmt.Println("print job queued")
+			app.Usage([]string{"print"})
 		}
 
 	case portForwardCmd.FullCommand():
@@ -1473,6 +1358,18 @@ func selectOrganization(callResp xconn.CallResponse) (int, error) {
 		"id",
 		"Select organization",
 	)
+}
+
+func isRemotePath(s string) bool {
+	return strings.ContainsRune(s, ':')
+}
+
+func parseDevicePath(s string) (device, path string) {
+	idx := strings.IndexByte(s, ':')
+	if idx < 0 {
+		return s, ""
+	}
+	return s[:idx], s[idx+1:]
 }
 
 func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
