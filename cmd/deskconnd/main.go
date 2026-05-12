@@ -80,6 +80,12 @@ func main() {
 		log.Fatal(regRespExec.Err)
 	}
 
+	regRespFileOp := sess.Register(deskconn.ProcedureProxyFileOp,
+		deskconn.ProxyFileOpHandler(clientSession, cfgDirectory)).Do()
+	if regRespFileOp.Err != nil {
+		log.Fatal(regRespFileOp.Err)
+	}
+
 	regRespLogin := sess.Register(deskconn.ProcedureLogin,
 		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSession.Login()

@@ -343,7 +343,7 @@ func (d *Deskconn) handleFileUpload(ctx context.Context, inv *xconn.Invocation) 
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 			}
 
-			enc = &shellEncryption{sendKey: sendKey, receiveKey: receiveKey}
+			enc = &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey}
 			d.keys.store(callerID, enc)
 
 			if err := inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil); err != nil {

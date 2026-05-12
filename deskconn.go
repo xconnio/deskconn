@@ -273,7 +273,7 @@ func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 
-	d.keys.store(inv.Caller(), &shellEncryption{sendKey: sendKey, receiveKey: receiveKey})
+	d.keys.store(inv.Caller(), &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey})
 
 	return xconn.NewInvocationResult(serverPublicKey)
 }
