@@ -122,9 +122,7 @@ func main() {
 	app := kingpin.New("deskconn", "Deskconn control CLI")
 	app.UsageFuncs(template.FuncMap{
 		"isDeviceFirstCmd": func(fullCmd string) bool {
-			return fullCmd == "printer list" || fullCmd == "printer print" ||
-				fullCmd == "file pull" || fullCmd == "file push" ||
-				fullCmd == "file ls" || fullCmd == "file mv" || fullCmd == "file cp" || fullCmd == "file rm"
+			return fullCmd == "printer list" || fullCmd == "printer print"
 		},
 		"printerCmdUsage": func(fullCmd string) string {
 			parts := strings.Fields(fullCmd)
@@ -154,46 +152,30 @@ func main() {
 	loginPasswordStdin := loginCmd.Flag("password-stdin", "Read password from stdin").Bool()
 
 	fileCmd := app.Command("file", "File operations")
-	pullCmd := fileCmd.Command("pull", "Download a file or directory from a device")
-	pullDevice := pullCmd.Arg("device", "ID, name or alias of device").Required().String()
-	pullRemote := pullCmd.Arg("remote-path", "Path on the remote device").Required().String()
-	pullLocal := pullCmd.Arg("local-path", "Local path to store the download").Required().String()
-	pullRecursive := pullCmd.Flag("recursive", "Download directories recursively").Short('r').Bool()
-	pullP2PFlag := pullCmd.Flag("p2p", "Connect using WebRTC").Bool()
-
-	pushCmd := fileCmd.Command("push", "Upload a file or directory to a device")
-	pushDevice := pushCmd.Arg("device", "ID, name or alias of device").Required().String()
-	pushLocal := pushCmd.Arg("local-path", "Local path to upload").Required().String()
-	pushRemote := pushCmd.Arg("remote-path", "Path on the remote device").Required().String()
-	pushRecursive := pushCmd.Flag("recursive", "Upload directories recursively").Short('r').Bool()
-	pushP2PFlag := pushCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
 	lsFileCmd := fileCmd.Command("ls", "List files on a device")
-	lsFileDevice := lsFileCmd.Arg("device", "ID, name or alias of device").Required().String()
-	lsFilePath := lsFileCmd.Arg("path", "Path on the remote device (default: home directory)").String()
+	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().String()
 	lsFileModeFlag := lsFileCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
-	mvDevice := mvCmd.Arg("device", "ID, name or alias of device").Required().String()
-	mvOldPath := mvCmd.Arg("old-path", "Current path on the remote device").Required().String()
-	mvNewPath := mvCmd.Arg("new-path", "New path on the remote device").Required().String()
+	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().String()
+	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().String()
 	mvModeFlag := mvCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
-	cpCmd := fileCmd.Command("cp", "Copy a file or directory on a device")
-	cpDevice := cpCmd.Arg("device", "ID, name or alias of device").Required().String()
-	cpSrcPath := cpCmd.Arg("src-path", "Source path on the remote device").Required().String()
-	cpDstPath := cpCmd.Arg("dst-path", "Destination path on the remote device").Required().String()
+	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
+	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().String()
+	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().String()
+	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
-	rmDevice := rmCmd.Arg("device", "ID, name or alias of device").Required().String()
-	rmPath := rmCmd.Arg("path", "Path on the remote device").Required().String()
+	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().String()
 	rmModeFlag := rmCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
@@ -271,17 +253,6 @@ func main() {
 		}
 	}
 
-	// Rewrite "file <device> <subcmd> ..." → "file <subcmd> <device> ..."
-	if len(os.Args) > 3 && os.Args[1] == "file" {
-		fileSubcmds := map[string]bool{"pull": true, "push": true, "ls": true, "mv": true, "cp": true, "rm": true}
-		if !fileSubcmds[os.Args[2]] {
-			rewritten := make([]string, len(os.Args))
-			copy(rewritten, os.Args)
-			rewritten[2], rewritten[3] = rewritten[3], rewritten[2]
-			os.Args = rewritten
-		}
-	}
-
 	parsedCmd, parseErr := app.Parse(os.Args[1:])
 	if parseErr != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n\n", parseErr)
@@ -329,49 +300,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
 
-	case pullCmd.FullCommand():
-		realm, err := deviceRealm(*pullDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *pullP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		if err := deskconn.PullFiles(deviceSession, *pullRemote, *pullLocal, *pullRecursive); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-
-	case pushCmd.FullCommand():
-		realm, err := deviceRealm(*pushDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *pushP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		if err := deskconn.PushFiles(deviceSession, *pushLocal, *pushRemote, *pushRecursive); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-
 	case lsFileCmd.FullCommand():
-		realm, err := deviceRealm(*lsFileDevice, cfgDirectory)
+		device, path := parseDevicePath(*lsFileTarget)
+		realm, err := deviceRealm(device, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 		args := []string{"ls"}
-		if *lsFilePath != "" {
-			args = append(args, *lsFilePath)
+		if path != "" {
+			args = append(args, path)
 		}
 		switch *lsFileModeFlag {
 		case ModeRouted:
@@ -395,36 +333,86 @@ func main() {
 		}
 
 	case mvCmd.FullCommand():
-		realm, err := deviceRealm(*mvDevice, cfgDirectory)
+		srcDevice, srcPath := parseDevicePath(*mvSrc)
+		dstDevice, dstPath := parseDevicePath(*mvDst)
+		if srcDevice != dstDevice {
+			fmt.Fprintln(os.Stderr, "cross-device move not supported")
+			return
+		}
+		realm, err := deviceRealm(srcDevice, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		payload, _ := json.Marshal(map[string]string{"old_path": *mvOldPath, "new_path": *mvNewPath})
+		payload, _ := json.Marshal(map[string]string{"old_path": srcPath, "new_path": dstPath})
 		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileRename, payload, *mvModeFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case cpCmd.FullCommand():
-		realm, err := deviceRealm(*cpDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		payload, _ := json.Marshal(map[string]string{"src": *cpSrcPath, "dst": *cpDstPath})
-		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileCopy, payload, *cpModeFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		srcRemote := isRemotePath(*cpSrc)
+		dstRemote := isRemotePath(*cpDst)
+		switch {
+		case srcRemote && dstRemote:
+			srcDevice, srcPath := parseDevicePath(*cpSrc)
+			dstDevice, dstPath := parseDevicePath(*cpDst)
+			if srcDevice != dstDevice {
+				fmt.Fprintln(os.Stderr, "cross-device copy not supported")
+				return
+			}
+			realm, err := deviceRealm(srcDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			payload, _ := json.Marshal(map[string]string{"src": srcPath, "dst": dstPath})
+			err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileCopy, payload, *cpModeFlag)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		case !srcRemote && dstRemote:
+			dstDevice, dstPath := parseDevicePath(*cpDst)
+			realm, err := deviceRealm(dstDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.PushFiles(deviceSession, *cpSrc, dstPath, *cpRecursive); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		case srcRemote && !dstRemote:
+			srcDevice, srcPath := parseDevicePath(*cpSrc)
+			realm, err := deviceRealm(srcDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.PullFiles(deviceSession, srcPath, *cpDst, *cpRecursive); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		default:
+			fmt.Fprintln(os.Stderr, "at least one of src or dst must be a remote path (device:path)")
 		}
 
 	case rmCmd.FullCommand():
-		realm, err := deviceRealm(*rmDevice, cfgDirectory)
+		device, path := parseDevicePath(*rmTarget)
+		realm, err := deviceRealm(device, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		payload, _ := json.Marshal(map[string]string{"path": *rmPath})
+		payload, _ := json.Marshal(map[string]string{"path": path})
 		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileDelete, payload, *rmModeFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1473,6 +1461,18 @@ func selectOrganization(callResp xconn.CallResponse) (int, error) {
 		"id",
 		"Select organization",
 	)
+}
+
+func isRemotePath(s string) bool {
+	return strings.ContainsRune(s, ':')
+}
+
+func parseDevicePath(s string) (device, path string) {
+	idx := strings.IndexByte(s, ':')
+	if idx < 0 {
+		return s, ""
+	}
+	return s[:idx], s[idx+1:]
 }
 
 func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
