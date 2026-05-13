@@ -108,6 +108,7 @@ type Config struct {
 
 type ClientSessions struct {
 	deviceSessionByRealm map[string]*xconn.Session
+	connectedAtByRealm   map[string]time.Time
 	loggedIn             bool
 	sync.Mutex
 }
@@ -115,6 +116,7 @@ type ClientSessions struct {
 func NewClientSessions() *ClientSessions {
 	return &ClientSessions{
 		deviceSessionByRealm: make(map[string]*xconn.Session),
+		connectedAtByRealm:   make(map[string]time.Time),
 	}
 }
 
@@ -128,18 +130,24 @@ func (c *ClientSessions) SessionByRealm(authid string) (*xconn.Session, bool) {
 func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session) {
 	c.Lock()
 	c.deviceSessionByRealm[realm] = session
+	c.connectedAtByRealm[realm] = time.Now()
 	c.Unlock()
 }
 
-func (c *ClientSessions) DeviceSessions() map[string]*xconn.Session {
+func (c *ClientSessions) DeviceSessions() map[string]int64 {
 	c.Lock()
 	defer c.Unlock()
-	return c.deviceSessionByRealm
+	result := make(map[string]int64, len(c.connectedAtByRealm))
+	for realm, t := range c.connectedAtByRealm {
+		result[realm] = t.Unix()
+	}
+	return result
 }
 
 func (c *ClientSessions) DeleteDeviceSession(realm string) {
 	c.Lock()
 	delete(c.deviceSessionByRealm, realm)
+	delete(c.connectedAtByRealm, realm)
 	c.Unlock()
 }
 

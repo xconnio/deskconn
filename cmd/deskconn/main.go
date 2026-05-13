@@ -600,7 +600,7 @@ func main() {
 				fmt.Println("your config is invalid, refreshing from cloud")
 			}
 		}
-		tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED"}
+		tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED SINCE"}
 		if *lsDetailedFlag {
 			tableHeader = append(tableHeader, "ORGANIZATION", "REALM")
 		}
@@ -608,18 +608,14 @@ func main() {
 			table := tablewriter.NewWriter(os.Stdout)
 			table.Header(tableHeader)
 			for _, d := range devicesFromCfg {
-				_, connected := connectedDevices[d.Realm]
-				if connected {
-					d.Connected = true
-				}
 				if d.Name == "" && d.Authid == "" && d.Alias == "" {
 					continue
 				}
-
+				since := connectedSince(connectedDevices, d.Realm)
 				if *lsDetailedFlag {
-					_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
+					_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
 				} else {
-					_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+					_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since})
 				}
 			}
 
@@ -652,14 +648,14 @@ func main() {
 			}
 			if localDevice, ok := cfgMap[d.Authid]; ok {
 				devices[i].Alias = localDevice.Alias
-				devices[i].Connected = localDevice.Connected
 			}
 			d = devices[i]
 			nameCount[d.Name]++
+			since := connectedSince(connectedDevices, d.Realm)
 			if *lsDetailedFlag {
-				_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
+				_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
 			} else {
-				_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+				_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since})
 			}
 		}
 
@@ -1197,6 +1193,12 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 		}
 	}
 
+	for _, d := range devices {
+		if strings.HasPrefix(d.Authid, deviceName) {
+			return d.Realm, nil
+		}
+	}
+
 	return "", fmt.Errorf("device not found: %s", deviceName)
 }
 
@@ -1439,6 +1441,46 @@ func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, pay
 		resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, procedure, payload).Do()
 		return resp.Err
 	}
+}
+
+func shortID(id string) string {
+	if len(id) <= 6 {
+		return id
+	}
+	return id[:6]
+}
+
+func connectedSince(connectedDevices map[string]any, realm string) string {
+	v, ok := connectedDevices[realm]
+	if !ok {
+		return ""
+	}
+	var ts int64
+	switch t := v.(type) {
+	case int64:
+		ts = t
+	case float64:
+		ts = int64(t)
+	default:
+		return "connected"
+	}
+	return formatSince(time.Since(time.Unix(ts, 0)))
+}
+
+func formatSince(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh%dm", h, m)
 }
 
 func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
