@@ -617,9 +617,9 @@ func main() {
 				}
 
 				if *lsDetailedFlag {
-					_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
+					_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
 				} else {
-					_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+					_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, d.Connected})
 				}
 			}
 
@@ -657,9 +657,9 @@ func main() {
 			d = devices[i]
 			nameCount[d.Name]++
 			if *lsDetailedFlag {
-				_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
+				_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, d.Connected, d.Organization.Name, d.Realm})
 			} else {
-				_ = table.Append([]any{d.Authid, d.Name, d.Alias, d.Connected})
+				_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, d.Connected})
 			}
 		}
 
@@ -1197,6 +1197,12 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 		}
 	}
 
+	for _, d := range devices {
+		if strings.HasPrefix(d.Authid, deviceName) {
+			return d.Realm, nil
+		}
+	}
+
 	return "", fmt.Errorf("device not found: %s", deviceName)
 }
 
@@ -1439,6 +1445,13 @@ func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, pay
 		resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, procedure, payload).Do()
 		return resp.Err
 	}
+}
+
+func shortID(id string) string {
+	if len(id) <= 6 {
+		return id
+	}
+	return id[:6]
 }
 
 func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
