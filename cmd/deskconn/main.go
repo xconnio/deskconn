@@ -1459,6 +1459,8 @@ func connectedSince(connectedDevices map[string]any, realm string) string {
 	switch t := v.(type) {
 	case int64:
 		ts = t
+	case uint64:
+		ts = int64(t) // nolint: gosec
 	case float64:
 		ts = int64(t)
 	default:
