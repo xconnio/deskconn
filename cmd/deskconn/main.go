@@ -65,40 +65,48 @@ func main() {
 	fileCmd := app.Command("file", "File operations")
 
 	lsFileCmd := fileCmd.Command("ls", "List files on a device")
-	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().String()
+	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().
+		HintAction(devicePathCompletions(cfgDirectory)).String()
 	lsFileModeFlag := lsFileCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
-	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().String()
-	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().String()
+	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().
+		HintAction(devicePathCompletions(cfgDirectory)).String()
+	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().
+		HintAction(devicePathCompletions(cfgDirectory)).String()
 	mvModeFlag := mvCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
-	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().String()
-	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().String()
+	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().
+		HintAction(devicePathCompletions(cfgDirectory)).String()
+	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().
+		HintAction(devicePathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
-	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().String()
+	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
+		HintAction(devicePathCompletions(cfgDirectory)).String()
 	rmModeFlag := rmCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	shellCmd := app.Command("shell", "Start interactive shell")
-	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().String()
+	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
 	shellModeFlag := shellCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	execCmd := app.Command("exec", "Run a command")
-	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().String()
+	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 	execP2PFlag := execCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
@@ -108,14 +116,17 @@ func main() {
 		"Also allow remote clients to list this desktop's printers (use with --enable)").Bool()
 	printDisableFlag := printCmd.Flag("disable", "Disable receiving print jobs on this desktop").Bool()
 	printStatusFlag := printCmd.Flag("status", "Show whether this desktop accepts print jobs").Bool()
-	printLsDevice := printCmd.Flag("ls", "List printers on a device (device name or alias)").String()
-	printTarget := printCmd.Arg("target", "Device and printer as machine:printer (e.g. m1:HP_LaserJet)").String()
+	printLsDevice := printCmd.Flag("ls", "List printers on a device (device name or alias)").
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	printTarget := printCmd.Arg("target", "Device and printer as machine:printer (e.g. m1:HP_LaserJet)").
+		HintAction(devicePathCompletions(cfgDirectory)).String()
 	printFilePath := printCmd.Arg("file_path", "Local file path").String()
 	printP2PFlag := printCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
-	portForwardDevice := portForwardCmd.Arg("device", "ID, name or alias of device").Required().String()
+	portForwardDevice := portForwardCmd.Arg("device", "ID, name or alias of device").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
 	portForwardPorts := portForwardCmd.Arg("ports", "Port mapping as localport:remoteport").String()
 	portForwardLocalFlag := portForwardCmd.Flag("local", "Local port to listen on").Short('l').String()
 	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote device to connect to").Short('r').String()
@@ -1358,6 +1369,38 @@ func selectOrganization(callResp xconn.CallResponse) (int, error) {
 		"id",
 		"Select organization",
 	)
+}
+
+func deviceCompletions(cfgDirectory string) func() []string {
+	return func() []string {
+		devices, err := deskconn.DevicesFromCfg(cfgDirectory)
+		if err != nil {
+			return nil
+		}
+		var names []string
+		for _, d := range devices {
+			if d.Name != "" {
+				names = append(names, d.Name)
+			}
+		}
+		return names
+	}
+}
+
+func devicePathCompletions(cfgDirectory string) func() []string {
+	return func() []string {
+		devices, err := deskconn.DevicesFromCfg(cfgDirectory)
+		if err != nil {
+			return nil
+		}
+		var names []string
+		for _, d := range devices {
+			if d.Name != "" {
+				names = append(names, d.Name+":")
+			}
+		}
+		return names
+	}
 }
 
 func isRemotePath(s string) bool {
