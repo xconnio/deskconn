@@ -2,6 +2,8 @@ package deskconn
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -432,6 +434,12 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			}
 			initialArgs := append([]any(nil), inv.Args()[1:]...)
 
+			tokenBytes := make([]byte, 32)
+			if _, err := rand.Read(tokenBytes); err != nil {
+				return xconn.NewInvocationError(ErrOperationFailed, "failed to generate migration token")
+			}
+			migrationToken := hex.EncodeToString(tokenBytes)
+
 			deviceSession, upgradeCh, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
 			if err != nil {
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
@@ -452,12 +460,20 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			}
 			proxyCall.setCloseFunc(closeCloud)
 
+			firstCloudMsg := true
 			go func() {
 				callResp := deviceSession.Call(ProcedureShell).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
 						p, ok := <-cloudCh
 						if !ok {
 							return xconn.NewFinalProgress()
+						}
+						if firstCloudMsg {
+							firstCloudMsg = false
+							if p.Kwargs == nil {
+								p.Kwargs = make(map[string]any)
+							}
+							p.Kwargs["migrate-token"] = migrationToken
 						}
 						return p
 					}).
@@ -517,7 +533,10 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 						if !switched {
 							switched = true
 							p := xconn.NewProgress(initialArgs...)
-							p.Kwargs = map[string]any{"session-id": sessionID}
+							p.Kwargs = map[string]any{
+								"session-id":    sessionID,
+								"migrate-token": migrationToken,
+							}
 							return p
 						}
 						select {
