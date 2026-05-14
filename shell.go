@@ -30,17 +30,19 @@ type ptySession struct {
 }
 
 type interactiveShellSession struct {
-	ptmx     map[uint64]*os.File
-	sessions map[uint64]*ptySession
-	keys     *keyManager
+	ptmx            map[uint64]*os.File
+	sessions        map[uint64]*ptySession
+	migrationTokens map[uint64]string
+	keys            *keyManager
 	sync.Mutex
 }
 
 func newInteractiveShellSession() *interactiveShellSession {
 	return &interactiveShellSession{
-		ptmx:     make(map[uint64]*os.File),
-		sessions: make(map[uint64]*ptySession),
-		keys:     newKeyManager(),
+		ptmx:            make(map[uint64]*os.File),
+		sessions:        make(map[uint64]*ptySession),
+		migrationTokens: make(map[uint64]string),
+		keys:            newKeyManager(),
 	}
 }
 
@@ -76,6 +78,7 @@ func (p *interactiveShellSession) cleanupCaller(caller uint64) {
 		delete(p.ptmx, caller)
 	}
 	delete(p.sessions, caller)
+	delete(p.migrationTokens, caller)
 	p.Unlock()
 	p.keys.delete(caller)
 }
@@ -189,10 +192,17 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 					}
 					if !exists {
 						if oldSessionID, err := inv.KwargUInt64("session-id"); err == nil {
+							migrateToken, tokenErr := inv.KwargString("migrate-token")
 							p.Lock()
 							oldPtmx, ptmxOk := p.ptmx[oldSessionID]
 							oldPS, psOk := p.sessions[oldSessionID]
+							expectedToken, tokenOk := p.migrationTokens[oldSessionID]
+							delete(p.migrationTokens, oldSessionID)
 							if ptmxOk && psOk {
+								if tokenErr != nil || !tokenOk || migrateToken != expectedToken {
+									p.Unlock()
+									return xconn.NewInvocationError("wamp.error.not_authorized", "invalid migration token")
+								}
 								oldPS.mu.Lock()
 								oldInv := oldPS.inv
 								oldPS.inv = inv
@@ -211,6 +221,11 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 						}
 					}
 					if !exists {
+						if token, err := inv.KwargString("migrate-token"); err == nil && token != "" {
+							p.Lock()
+							p.migrationTokens[caller] = token
+							p.Unlock()
+						}
 						newPt, err := p.startPtySession(inv, enc.sendKey, "bash")
 						if err != nil {
 							return xconn.NewInvocationError("io.xconn.error", err.Error())
