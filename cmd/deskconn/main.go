@@ -1047,12 +1047,12 @@ func detach(flagUsername, flagPassword string, useStdin bool) error {
 		return err
 	}
 
-	authID, orgID, err := selectDevice(session)
+	authID, name, err := selectDevice(session)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Are you sure you want to detach desktop with ID %s from organization %s?\n(Y/n): ", authID, orgID)
+	fmt.Printf("Are you sure you want to detach desktop '%s' with ID '%s'?\n(Y/n): ", name, authID)
 
 	var confirm string
 	_, err = fmt.Scanln(&confirm)
@@ -1280,7 +1280,7 @@ func selectOption(callResp xconn.CallResponse, title string, idField string, pro
 	}
 }
 
-func selectDevice(session *xconn.Session) (authid string, organizationID string, err error) {
+func selectDevice(session *xconn.Session) (authid string, name string, err error) {
 	callResp := session.Call(deskconn.ProcedureListDesktop).Do()
 
 	if callResp.Err != nil {
@@ -1303,12 +1303,12 @@ func selectDevice(session *xconn.Session) (authid string, organizationID string,
 	if err != nil {
 		return "", "", err
 	}
-	organizationID, err = deviceDict.String("organization_id")
+	name, err = deviceDict.String("name")
 	if err != nil {
 		return "", "", err
 	}
 
-	return authid, organizationID, nil
+	return authid, name, nil
 }
 
 func deviceCompletions(cfgDirectory string) func() []string {
