@@ -24,9 +24,8 @@ func TestAdvertiseService(t *testing.T) {
 	port := 9876
 	hostname := "test-host"
 	realm := "test-realm"
-	orgID := "test-org"
 
-	server, err := deskconn.AdvertiseService(hostname, port, realm, orgID)
+	server, err := deskconn.AdvertiseService(hostname, port, realm)
 	require.NoError(t, err)
 	require.NotNil(t, server)
 

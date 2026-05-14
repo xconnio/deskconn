@@ -442,7 +442,7 @@ start:
 		}
 	}()
 
-	zeroconfServer, err := deskconn.AdvertiseService(host, port, cred.Realm, cred.OrganizationID)
+	zeroconfServer, err := deskconn.AdvertiseService(host, port, cred.Realm)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -1033,60 +1033,7 @@ func attach(flagUsername, flagPassword, name string, useStdin bool) error {
 		}
 	}
 
-	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
-	if err != nil {
-		return err
-	}
-
-	callResp := session.Call(deskconn.ProcedureDeskconnOrganizationList).Do()
-	if callResp.Err != nil {
-		return callResp.Err
-	}
-	var organizationDict xconn.Dict
-	if len(callResp.Args()) == 0 {
-		fmt.Println("No organization found.")
-
-		reader := bufio.NewReader(os.Stdin)
-
-		var orgName string
-		for {
-			fmt.Print("Enter organization name to create: ")
-
-			input, err := reader.ReadString('\n')
-			if err != nil {
-				return err
-			}
-
-			orgName = strings.TrimSpace(input)
-			if orgName == "" {
-				fmt.Println("Organization name cannot be empty.")
-				continue
-			}
-
-			break
-		}
-
-		createResp := session.Call(deskconn.ProcedureOrganizationCreate).Arg(orgName).Do()
-		if createResp.Err != nil {
-			return createResp.Err
-		}
-
-		organizationDict, err = createResp.ArgDict(0)
-		if err != nil {
-			return err
-		}
-	} else {
-		idx, err := selectOrganization(callResp)
-		if err != nil {
-			return err
-		}
-
-		organizationDict, err = callResp.ArgDict(idx)
-		if err != nil {
-			return err
-		}
-	}
-	return deskconn.Attach(session, deviceName, organizationDict.StringOr("id", ""))
+	return deskconn.Attach(username, password, deviceName)
 }
 
 func detach(flagUsername, flagPassword string, useStdin bool) error {
@@ -1362,15 +1309,6 @@ func selectDevice(session *xconn.Session) (authid string, organizationID string,
 	}
 
 	return authid, organizationID, nil
-}
-
-func selectOrganization(callResp xconn.CallResponse) (int, error) {
-	return selectOption(
-		callResp,
-		"Available organizations",
-		"id",
-		"Select organization",
-	)
 }
 
 func deviceCompletions(cfgDirectory string) func() []string {
