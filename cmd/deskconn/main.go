@@ -1033,60 +1033,7 @@ func attach(flagUsername, flagPassword, name string, useStdin bool) error {
 		}
 	}
 
-	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
-	if err != nil {
-		return err
-	}
-
-	callResp := session.Call(deskconn.ProcedureDeskconnOrganizationList).Do()
-	if callResp.Err != nil {
-		return callResp.Err
-	}
-	var organizationDict xconn.Dict
-	if len(callResp.Args()) == 0 {
-		fmt.Println("No organization found.")
-
-		reader := bufio.NewReader(os.Stdin)
-
-		var orgName string
-		for {
-			fmt.Print("Enter organization name to create: ")
-
-			input, err := reader.ReadString('\n')
-			if err != nil {
-				return err
-			}
-
-			orgName = strings.TrimSpace(input)
-			if orgName == "" {
-				fmt.Println("Organization name cannot be empty.")
-				continue
-			}
-
-			break
-		}
-
-		createResp := session.Call(deskconn.ProcedureOrganizationCreate).Arg(orgName).Do()
-		if createResp.Err != nil {
-			return createResp.Err
-		}
-
-		organizationDict, err = createResp.ArgDict(0)
-		if err != nil {
-			return err
-		}
-	} else {
-		idx, err := selectOrganization(callResp)
-		if err != nil {
-			return err
-		}
-
-		organizationDict, err = callResp.ArgDict(idx)
-		if err != nil {
-			return err
-		}
-	}
-	return deskconn.Attach(session, deviceName, organizationDict.StringOr("id", ""))
+	return deskconn.Attach(username, password, deviceName)
 }
 
 func detach(flagUsername, flagPassword string, useStdin bool) error {
@@ -1100,12 +1047,12 @@ func detach(flagUsername, flagPassword string, useStdin bool) error {
 		return err
 	}
 
-	authID, orgID, err := selectDevice(session)
+	authID, name, err := selectDevice(session)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Are you sure you want to detach desktop with ID %s from organization %s?\n(Y/n): ", authID, orgID)
+	fmt.Printf("Are you sure you want to detach desktop '%s' with ID '%s'?\n(Y/n): ", name, authID)
 
 	var confirm string
 	_, err = fmt.Scanln(&confirm)
@@ -1333,7 +1280,7 @@ func selectOption(callResp xconn.CallResponse, title string, idField string, pro
 	}
 }
 
-func selectDevice(session *xconn.Session) (authid string, organizationID string, err error) {
+func selectDevice(session *xconn.Session) (authid string, name string, err error) {
 	callResp := session.Call(deskconn.ProcedureListDesktop).Do()
 
 	if callResp.Err != nil {
@@ -1356,21 +1303,12 @@ func selectDevice(session *xconn.Session) (authid string, organizationID string,
 	if err != nil {
 		return "", "", err
 	}
-	organizationID, err = deviceDict.String("organization_id")
+	name, err = deviceDict.String("name")
 	if err != nil {
 		return "", "", err
 	}
 
-	return authid, organizationID, nil
-}
-
-func selectOrganization(callResp xconn.CallResponse) (int, error) {
-	return selectOption(
-		callResp,
-		"Available organizations",
-		"id",
-		"Select organization",
-	)
+	return authid, name, nil
 }
 
 func deviceCompletions(cfgDirectory string) func() []string {

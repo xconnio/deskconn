@@ -1,6 +1,7 @@
 package deskconn
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,13 +12,11 @@ import (
 )
 
 const (
-	Realm                             = "io.xconn.deskconn"
-	ProcedureDeskconnAttachDesktop    = "io.xconn.deskconn.desktop.attach"
-	ProcedureDeskconnDetachDesktop    = "io.xconn.deskconn.desktop.detach"
-	ProcedureDeskconnOrganizationList = "io.xconn.deskconn.organization.list"
-	ProcedureOrganizationCreate       = "io.xconn.deskconn.organization.create"
-	TopicDeskconnDesktopDetachFormat  = "io.xconn.deskconn.desktop.%s.detach"
-	MachineIDPath                     = "/etc/machine-id"
+	Realm                            = "io.xconn.deskconn"
+	ProcedureDeskconnAttachDesktop   = "io.xconn.deskconn.desktop.attach"
+	ProcedureDeskconnDetachDesktop   = "io.xconn.deskconn.desktop.detach"
+	TopicDeskconnDesktopDetachFormat = "io.xconn.deskconn.desktop.%s.detach"
+	MachineIDPath                    = "/etc/machine-id"
 )
 
 func CloudURI() string {
@@ -28,14 +27,18 @@ func CloudURI() string {
 }
 
 type Credentials struct {
-	Realm          string `json:"realm"`
-	AuthID         string `json:"authid"`
-	PublicKey      string `json:"public_key"`
-	PrivateKey     string `json:"private_key"` // #nosec
-	OrganizationID string `json:"organization_id"`
+	Realm      string `json:"realm"`
+	AuthID     string `json:"authid"`
+	PublicKey  string `json:"public_key"`
+	PrivateKey string `json:"private_key"` // #nosec
 }
 
-func Attach(session *xconn.Session, desktopName, orgID string) error {
+func Attach(username, password, desktopName string) error {
+	session, err := xconn.ConnectCRA(context.Background(), CloudURI(), Realm, username, password)
+	if err != nil {
+		return err
+	}
+
 	machineID, err := os.ReadFile(MachineIDPath)
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
@@ -47,7 +50,7 @@ func Attach(session *xconn.Session, desktopName, orgID string) error {
 		return fmt.Errorf("failed to generate cryptosign keypair: %w", err)
 	}
 
-	callResp := session.Call(ProcedureDeskconnAttachDesktop).Args(machineIDStr, publicKey, orgID, desktopName).Do()
+	callResp := session.Call(ProcedureDeskconnAttachDesktop).Args(machineIDStr, publicKey, desktopName).Do()
 	if callResp.Err != nil {
 		return fmt.Errorf("failed to attach desktop: %w", callResp.Err)
 	}
@@ -62,7 +65,7 @@ func Attach(session *xconn.Session, desktopName, orgID string) error {
 		return err
 	}
 
-	return writeCredentialsFile(id, machineIDStr, publicKey, privateKey, orgID)
+	return writeCredentialsFile(id, machineIDStr, publicKey, privateKey)
 }
 
 func Detach(session *xconn.Session, authID string) error {
@@ -74,18 +77,17 @@ func Detach(session *xconn.Session, authID string) error {
 	return nil
 }
 
-func writeCredentialsFile(realm, machineID, publicKey, privateKey, orgID string) error {
+func writeCredentialsFile(realm, machineID, publicKey, privateKey string) error {
 	credFilePath, err := CredentialsFilePath()
 	if err != nil {
 		return err
 	}
 
 	creds := Credentials{
-		Realm:          realm,
-		AuthID:         machineID,
-		PublicKey:      publicKey,
-		PrivateKey:     privateKey,
-		OrganizationID: orgID,
+		Realm:      realm,
+		AuthID:     machineID,
+		PublicKey:  publicKey,
+		PrivateKey: privateKey,
 	}
 
 	data, err := json.MarshalIndent(creds, "", "  ") // #nosec G117
