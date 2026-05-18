@@ -13,6 +13,7 @@ import (
 type ProxyCall struct {
 	progressChan chan *xconn.Progress
 	closeFunc    func()
+	closed       bool
 
 	sync.Mutex
 }
@@ -23,6 +24,10 @@ func newProxyCall() *ProxyCall {
 
 func (pc *ProxyCall) send(p *xconn.Progress) {
 	pc.Lock()
+	if pc.closed {
+		pc.Unlock()
+		return
+	}
 	ch := pc.progressChan
 	pc.Unlock()
 	ch <- p
@@ -42,6 +47,11 @@ func (pc *ProxyCall) setCloseFunc(f func()) {
 
 func (pc *ProxyCall) closeChannel() {
 	pc.Lock()
+	if pc.closed {
+		pc.Unlock()
+		return
+	}
+	pc.closed = true
 	f := pc.closeFunc
 	progressChan := pc.progressChan
 	pc.Unlock()
