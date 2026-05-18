@@ -36,6 +36,7 @@ const (
 
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
+	ErrNotAuthorized   = "wamp.error.not_authorized"
 
 	MetaTopicSessionLeave = "wamp.session.on_leave"
 )
