@@ -10,6 +10,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/phin1x/go-ipp v1.7.0
+	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/xconnio/wampproto-go v0.0.0-20251205113711-968e34250b9a
@@ -62,7 +63,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/projectdiscovery/ratelimit v0.0.82 // indirect
 	github.com/projectdiscovery/utils v0.6.0 // indirect
-	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect

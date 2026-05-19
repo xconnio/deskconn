@@ -34,6 +34,7 @@ const (
 	ProcedureProxyShell       = "io.xconn.deskconn.deskconnd.proxy.shell"
 	ProcedureProxyExec        = "io.xconn.deskconn.deskconnd.proxy.exec"
 	ProcedureProxyFileOp      = "io.xconn.deskconn.deskconnd.proxy.file.op"
+	ProcedureProxyDeviceInfo  = "io.xconn.deskconn.deskconnd.proxy.device.info"
 	ProcedureLogin            = "io.xconn.deskconn.login"
 	ProcedureLogout           = "io.xconn.deskconn.logout"
 	ProcedureConnectedDevices = "io.xconn.deskconn.connected_devices"
@@ -805,6 +806,36 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
 		return xconn.NewInvocationResult(result)
+	}
+}
+
+func ProxyDeviceInfoHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		useP2P, _ := inv.ArgBool(1)
+
+		var deviceSession *xconn.Session
+		if useP2P {
+			deviceSession, err = clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
+		} else {
+			deviceSession, _, err = clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		}
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		callResp := deviceSession.Call(ProcedureDeviceInfo).Do()
+		if callResp.Err != nil {
+			_ = deviceSession.Leave()
+			clientSessions.DeleteDeviceSession(realm)
+			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
+		}
+
+		return xconn.NewInvocationResult(callResp.Args()...)
 	}
 }
 
