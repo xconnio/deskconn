@@ -132,6 +132,14 @@ func main() {
 	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote device to connect to").Short('r').String()
 	portForwardP2PFlag := portForwardCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
+	portReverseCmd := portCmd.Command("reverse", "Reverse-forward a remote port to a local port")
+	portReverseDevice := portReverseCmd.Arg("device", "ID, name or alias of device").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	portReversePorts := portReverseCmd.Arg("ports", "Port mapping as remoteport:localport").String()
+	portReverseRemoteFlag := portReverseCmd.Flag("remote", "Port on the remote device to listen on").Short('r').String()
+	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
+	portReverseP2PFlag := portReverseCmd.Flag("p2p", "Connect using WebRTC").Bool()
+
 	lsCmd := app.Command("ls", "List devices")
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
 	lsDetailedFlag := lsCmd.Flag("detailed", "Show detailed output").Bool()
@@ -572,6 +580,65 @@ func main() {
 		select {
 		case <-sigCh:
 			fmt.Println("\nStopping port forwarding...")
+			cancel()
+		case err := <-errCh:
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		}
+
+	case portReverseCmd.FullCommand():
+		var remotePort, localPort string
+		if *portReversePorts != "" && (*portReverseRemoteFlag != "" || *portReverseLocalFlag != "") {
+			fmt.Fprintln(os.Stderr, "specify ports with either remoteport:localport or --remote and --local, not both")
+			return
+		}
+
+		if *portReversePorts != "" {
+			parts := strings.SplitN(*portReversePorts, ":", 2)
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+				fmt.Fprintln(os.Stderr, "invalid port mapping: use remoteport:localport")
+				return
+			}
+			remotePort, localPort = parts[0], parts[1]
+		} else if *portReverseRemoteFlag != "" && *portReverseLocalFlag != "" {
+			remotePort = *portReverseRemoteFlag
+			localPort = *portReverseLocalFlag
+		} else if *portReverseRemoteFlag != "" || *portReverseLocalFlag != "" {
+			fmt.Fprintln(os.Stderr, "both --remote(-r) and --local(-l) must be provided together")
+			return
+		} else {
+			fmt.Fprintln(os.Stderr, "specify ports as remoteport:localport or use --remote and --local flags")
+			return
+		}
+
+		realm, err := deviceRealm(*portReverseDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *portReverseP2PFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		fmt.Printf("Reverse forwarding %s:%s -> 127.0.0.1:%s\n", *portReverseDevice, remotePort, localPort)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- deskconn.ReverseLocalPort(ctx, deviceSession, remotePort, localPort)
+		}()
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		select {
+		case <-sigCh:
+			fmt.Println("\nStopping reverse port forwarding...")
 			cancel()
 		case err := <-errCh:
 			if err != nil {

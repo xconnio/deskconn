@@ -48,6 +48,7 @@ type Deskconn struct {
 	keys            *keyManager
 	uploads         *uploadSessions
 	forwardSessions *portForwardSessions
+	reverseSessions *portReverseSessions
 	files           *FileBrowser
 	screen          *Screen
 	mpris           *MPRIS
@@ -60,6 +61,7 @@ func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 		keys:            newKeyManager(),
 		uploads:         newUploadSessions(),
 		forwardSessions: newPortForwardSessions(),
+		reverseSessions: newPortReverseSessions(),
 		files:           NewFileBrowser(),
 		screen:          screen,
 		mpris:           mpris,
@@ -86,6 +88,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedurePrinterList:         d.printer.handleListPrinters,
 		ProcedurePrinterPrint:        d.printer.handlePrint(),
 		ProcedurePortForward:         d.handlePortForward,
+		ProcedurePortReverse:         d.handlePortReverse,
 		ProcedureDeviceInfo:          d.handleDeviceInfo,
 		ProcedureMPRISPlayers:        d.handleListPlayers,
 		ProcedureMPRISPlayPause:      d.handlePlayPause,
@@ -250,6 +253,7 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 	d.keys.delete(sessionID)
 	d.uploads.delete(sessionID)
 	d.forwardSessions.deleteCaller(sessionID)
+	d.reverseSessions.stop(sessionID)
 }
 
 func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
