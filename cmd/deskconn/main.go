@@ -150,6 +150,14 @@ func main() {
 	configUnsetDevice := configUnset.Arg("device", "ID, name or alias of device").Required().String()
 	configUnsetKey := configUnset.Arg("key", "Config key").Required().String()
 	configEdit := configCmd.Command("edit", "Edit full config")
+
+	infoCmd := app.Command("info", "Show device resource usage")
+	infoDevice := infoCmd.Arg("device", "ID, name or alias of device").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	infoModeFlag := infoCmd.Flag("mode",
+		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
+	).Enum(ModeP2P, ModeRouted)
+
 	selfCmd := app.Command("self", "Manage the installed deskconn CLI.")
 	selfVersionCmd := selfCmd.Command("version", "Show the installed deskconn version")
 	selfUpdateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
@@ -758,6 +766,72 @@ func main() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		_ = cmd.Run()
+
+	case infoCmd.FullCommand():
+		realm, err := deviceRealm(*infoDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		var callResp xconn.CallResponse
+		switch *infoModeFlag {
+		case ModeRouted:
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			callResp = deviceSession.Call(deskconn.ProcedureDeviceInfo).Do()
+		case ModeP2P:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			callResp = localSession.Call(deskconn.ProcedureProxyDeviceInfo).Args(realm, true).Do()
+		default:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			callResp = localSession.Call(deskconn.ProcedureProxyDeviceInfo).Args(realm).Do()
+		}
+
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+			return
+		}
+		rawData, err := callResp.ArgBytes(0)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		var info deskconn.DeviceInfo
+		if err := json.Unmarshal(rawData, &info); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		t := info.CPUTimes
+		fmt.Printf("CPU Model:  %s\n", info.CPUModel)
+		fmt.Printf("CPU Cores:  %d physical, %d logical\n", info.CPUPhysical, info.CPULogical)
+		const cols = 4
+		for i, usage := range info.CPUUsages {
+			fmt.Printf("  CPU%-3d %5.1f%%", i, usage)
+			if (i+1)%cols == 0 || i == len(info.CPUUsages)-1 {
+				fmt.Println()
+			}
+		}
+		fmt.Printf("%%Cpu(s):    %5.1f us, %5.1f sy, %5.1f ni, %5.1f id, %5.1f wa, %5.1f hi, %5.1f si, %5.1f st\n",
+			t.User, t.System, t.Nice, t.Idle, t.IOWait, t.IRQ, t.SoftIRQ, t.Steal)
+		fmt.Printf("MiB Mem:   %8.1f total, %8.1f free, %8.1f used, %8.1f buff/cache, %8.1f avail\n",
+			toMiB(info.RAMTotal), toMiB(info.RAMFree), toMiB(info.RAMUsed),
+			toMiB(info.RAMBuffCache), toMiB(info.RAMAvailable))
+		fmt.Printf("MiB Swap:  %8.1f total, %8.1f free, %8.1f used\n",
+			toMiB(info.SwapTotal), toMiB(info.SwapFree), toMiB(info.SwapUsed))
+		fmt.Printf("Disk (/):   %s used, %s free / %s total\n",
+			formatBytes(info.DiskUsed), formatBytes(info.DiskFree), formatBytes(info.DiskTotal))
 
 	case selfUpdateCmd.FullCommand():
 		if err := updateApp(cfgDirectory); err != nil {
@@ -1421,6 +1495,23 @@ func formatSince(d time.Duration) string {
 		return fmt.Sprintf("%dh", h)
 	}
 	return fmt.Sprintf("%dh%dm", h, m)
+}
+
+func toMiB(b uint64) float64 {
+	return float64(b) / (1024 * 1024)
+}
+
+func formatBytes(b uint64) string {
+	const unit = 1000
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := uint64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
