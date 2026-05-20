@@ -28,6 +28,7 @@ type FileEntry struct {
 	IsDir      bool      `json:"is_dir"`
 	IsSymlink  bool      `json:"is_symlink"`
 	LinkTarget string    `json:"link_target,omitempty"`
+	ItemCount  *int      `json:"item_count,omitempty"`
 }
 
 type FileBrowseResult struct {
@@ -85,7 +86,14 @@ func (f *FileBrowser) Browse(pathArg string) (*FileBrowseResult, error) {
 			return nil, err
 		}
 
-		result.Entries = append(result.Entries, buildFileEntry(entryPath, entryInfo))
+		fe := buildFileEntry(entryPath, entryInfo)
+		if fe.IsDir {
+			if subEntries, err := os.ReadDir(entryPath); err == nil {
+				n := len(subEntries)
+				fe.ItemCount = &n
+			}
+		}
+		result.Entries = append(result.Entries, fe)
 	}
 
 	sort.Slice(result.Entries, func(i, j int) bool {
