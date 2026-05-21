@@ -1,15 +1,23 @@
 package deskconn
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xconnio/xconn-go"
@@ -29,6 +37,7 @@ type FileEntry struct {
 	IsSymlink  bool      `json:"is_symlink"`
 	LinkTarget string    `json:"link_target,omitempty"`
 	ItemCount  *int      `json:"item_count,omitempty"`
+	Thumbnail  string    `json:"thumbnail,omitempty"`
 }
 
 type FileBrowseResult struct {
@@ -102,6 +111,34 @@ func (f *FileBrowser) Browse(pathArg string) (*FileBrowseResult, error) {
 		}
 		return strings.ToLower(result.Entries[i].Name) < strings.ToLower(result.Entries[j].Name)
 	})
+
+	// Generate thumbnails in parallel for image and video entries.
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+	for i := range result.Entries {
+		e := &result.Entries[i]
+		if e.IsDir || e.IsSymlink {
+			continue
+		}
+		if isImageFile(e.Name) && e.Size <= maxThumbnailSourceSize {
+			wg.Add(1)
+			go func(entry *FileEntry) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				entry.Thumbnail = generateThumbnail(entry.Path)
+			}(e)
+		} else if isVideoFile(e.Name) {
+			wg.Add(1)
+			go func(entry *FileEntry) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				entry.Thumbnail = generateVideoThumbnail(entry.Path)
+			}(e)
+		}
+	}
+	wg.Wait()
 
 	return result, nil
 }
@@ -187,6 +224,97 @@ func fileTypeFromInfo(info os.FileInfo) string {
 	default:
 		return "other"
 	}
+}
+
+const maxThumbnailSourceSize = 20 * 1024 * 1024 // 20 MB
+const thumbnailMaxDim = 160
+
+func isImageFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png", ".gif":
+		return true
+	}
+	return false
+}
+
+func isVideoFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mp4", ".webm", ".mov", ".avi", ".mkv", ".ogv", ".flv", ".wmv":
+		return true
+	}
+	return false
+}
+
+func generateThumbnail(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	src, _, err := image.Decode(f)
+	if err != nil {
+		return ""
+	}
+
+	thumb := scaledImage(src, thumbnailMaxDim)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: 75}); err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+func generateVideoThumbnail(path string) string {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return ""
+	}
+
+	cmd := exec.Command(ffmpeg,
+		"-ss", "00:00:01",
+		"-i", path,
+		"-vframes", "1",
+		"-vf", fmt.Sprintf("scale=%d:-1", thumbnailMaxDim),
+		"-f", "image2pipe",
+		"-vcodec", "mjpeg",
+		"-",
+	)
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(out)
+}
+
+func scaledImage(src image.Image, maxDim int) image.Image {
+	b := src.Bounds()
+	srcW, srcH := b.Dx(), b.Dy()
+	if srcW <= maxDim && srcH <= maxDim {
+		return src
+	}
+
+	dstW, dstH := maxDim, maxDim
+	if srcW > srcH {
+		dstH = srcH * maxDim / srcW
+	} else {
+		dstW = srcW * maxDim / srcH
+	}
+	if dstW < 1 {
+		dstW = 1
+	}
+	if dstH < 1 {
+		dstH = 1
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
+	for y := 0; y < dstH; y++ {
+		for x := 0; x < dstW; x++ {
+			dst.Set(x, y, src.At(b.Min.X+x*srcW/dstW, b.Min.Y+y*srcH/dstH))
+		}
+	}
+	return dst
 }
 
 // resolveOperationPath resolves a path and always enforces home-directory containment.
@@ -365,6 +493,7 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 
 	lowerQuery := strings.ToLower(query)
 	batch := make([]FileEntry, 0, searchBatchSize)
+	var mediaPaths []string
 
 	walkErr := filepath.WalkDir(resolvedPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -385,6 +514,12 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 				return infoErr
 			}
 			batch = append(batch, buildFileEntry(path, info))
+			if !d.IsDir() {
+				name := d.Name()
+				if (isImageFile(name) && info.Size() <= maxThumbnailSourceSize) || isVideoFile(name) {
+					mediaPaths = append(mediaPaths, path)
+				}
+			}
 			if len(batch) >= searchBatchSize {
 				if sendErr := sendSearchBatch(inv, sendKey, batch); sendErr != nil {
 					return sendErr
@@ -398,13 +533,70 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 		return walkErr
 	}
 	if len(batch) > 0 {
-		return sendSearchBatch(inv, sendKey, batch)
+		if err := sendSearchBatch(inv, sendKey, batch); err != nil {
+			return err
+		}
 	}
+
+	if len(mediaPaths) == 0 {
+		return nil
+	}
+
+	type thumbResult struct {
+		path  string
+		thumb string
+	}
+	results := make(chan thumbResult, len(mediaPaths))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+
+	for _, p := range mediaPaths {
+		wg.Add(1)
+		go func(entryPath string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			name := filepath.Base(entryPath)
+			var thumb string
+			if isImageFile(name) {
+				thumb = generateThumbnail(entryPath)
+			} else {
+				thumb = generateVideoThumbnail(entryPath)
+			}
+			if thumb != "" {
+				results <- thumbResult{path: entryPath, thumb: thumb}
+			}
+		}(p)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for tr := range results {
+		if err := sendSearchThumbnail(inv, sendKey, tr.path, tr.thumb); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func sendSearchBatch(inv *xconn.Invocation, sendKey []byte, entries []FileEntry) error {
 	plaintext, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	encrypted, err := EncryptPayload(plaintext, sendKey)
+	if err != nil {
+		return err
+	}
+	return inv.SendProgress([]any{encrypted}, nil)
+}
+
+func sendSearchThumbnail(inv *xconn.Invocation, sendKey []byte, path, thumb string) error {
+	plaintext, err := json.Marshal(map[string]string{"path": path, "thumbnail": thumb})
 	if err != nil {
 		return err
 	}
