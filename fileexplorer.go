@@ -350,6 +350,109 @@ func copyDir(src, dst string) error {
 	return nil
 }
 
+const searchBatchSize = 50
+
+func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []byte, inv *xconn.Invocation) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home dir: %w", err)
+	}
+
+	resolvedPath, err := resolveBrowsePath(homeDir, pathArg)
+	if err != nil {
+		return err
+	}
+
+	lowerQuery := strings.ToLower(query)
+	batch := make([]FileEntry, 0, searchBatchSize)
+
+	walkErr := filepath.WalkDir(resolvedPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == resolvedPath {
+			return nil
+		}
+		if !showHidden && strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.Contains(strings.ToLower(d.Name()), lowerQuery) {
+			info, infoErr := d.Info()
+			if infoErr != nil {
+				return infoErr
+			}
+			batch = append(batch, buildFileEntry(path, info))
+			if len(batch) >= searchBatchSize {
+				if sendErr := sendSearchBatch(inv, sendKey, batch); sendErr != nil {
+					return sendErr
+				}
+				batch = batch[:0]
+			}
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return walkErr
+	}
+	if len(batch) > 0 {
+		return sendSearchBatch(inv, sendKey, batch)
+	}
+	return nil
+}
+
+func sendSearchBatch(inv *xconn.Invocation, sendKey []byte, entries []FileEntry) error {
+	plaintext, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	encrypted, err := EncryptPayload(plaintext, sendKey)
+	if err != nil {
+		return err
+	}
+	return inv.SendProgress([]any{encrypted}, nil)
+}
+
+func (d *Deskconn) handleFileSearch(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, ok := d.keys.fetch(inv.Caller())
+	if !ok {
+		return xconn.NewInvocationError(ErrInvalidArgument, "no session keys found, call key exchange first")
+	}
+
+	encrypted, err := inv.ArgBytes(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	plaintext, err := DecryptPayload(encrypted, enc.receiveKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	var args struct {
+		Path       string `json:"path"`
+		Query      string `json:"query"`
+		ShowHidden bool   `json:"show_hidden"`
+	}
+	if err := json.Unmarshal(plaintext, &args); err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	if strings.TrimSpace(args.Query) == "" {
+		return xconn.NewInvocationResult()
+	}
+
+	if err := d.files.Search(args.Path, args.Query, args.ShowHidden, enc.sendKey, inv); err != nil {
+		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	return xconn.NewInvocationResult()
+}
+
 func (d *Deskconn) handleFileRename(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
