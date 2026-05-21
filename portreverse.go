@@ -230,7 +230,8 @@ func (d *Deskconn) handlePortReverse(_ context.Context, inv *xconn.Invocation) *
 							pf.close()
 							return
 						}
-						if sendErr := inv.SendProgress([]any{msgData, connID, encrypted}, nil); sendErr != nil {
+						seq := pf.nextSendSeq()
+						if sendErr := inv.SendProgress([]any{msgData, connID, seq, encrypted}, nil); sendErr != nil {
 							pf.close()
 							return
 						}
@@ -256,7 +257,11 @@ func (d *Deskconn) handlePortReverse(_ context.Context, inv *xconn.Invocation) *
 		if !ok {
 			return xconn.NewInvocationError(xconn.ErrNoResult)
 		}
-		encrypted, err := inv.ArgBytes(2)
+		seq, err := inv.ArgUInt64(2)
+		if err != nil {
+			return xconn.NewInvocationError(xconn.ErrNoResult)
+		}
+		encrypted, err := inv.ArgBytes(3)
 		if err != nil {
 			return xconn.NewInvocationError(xconn.ErrNoResult)
 		}
@@ -264,7 +269,7 @@ func (d *Deskconn) handlePortReverse(_ context.Context, inv *xconn.Invocation) *
 		if err != nil {
 			return xconn.NewInvocationError(xconn.ErrNoResult)
 		}
-		if _, writeErr := pf.conn.Write(plaintext); writeErr != nil {
+		if writeErr := pf.deliver(seq, plaintext); writeErr != nil {
 			_ = pf.conn.Close()
 		}
 
@@ -411,8 +416,9 @@ func ReverseLocalPort(ctx context.Context, session *xconn.Session, remotePort, l
 									pf.close()
 									return
 								}
+								seq := pf.nextSendSeq()
 								select {
-								case outCh <- outMsg{[]any{msgData, connID, encrypted}}:
+								case outCh <- outMsg{[]any{msgData, connID, seq, encrypted}}:
 								case <-done:
 									return
 								case <-pf.done:
@@ -445,7 +451,11 @@ func ReverseLocalPort(ctx context.Context, session *xconn.Session, remotePort, l
 				if !ok {
 					return
 				}
-				encrypted, err := result.ArgBytes(2)
+				seq, err := result.ArgUInt64(2)
+				if err != nil {
+					return
+				}
+				encrypted, err := result.ArgBytes(3)
 				if err != nil {
 					return
 				}
@@ -453,7 +463,7 @@ func ReverseLocalPort(ctx context.Context, session *xconn.Session, remotePort, l
 				if err != nil {
 					return
 				}
-				_, _ = pf.conn.Write(plaintext)
+				_ = pf.deliver(seq, plaintext)
 
 			case msgClose:
 				connID, err := result.ArgUInt64(1)
