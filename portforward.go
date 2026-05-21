@@ -42,6 +42,10 @@ type portForwardConn struct {
 	wg         sync.WaitGroup
 	sendKey    []byte
 	receiveKey []byte
+	sendSeq    atomic.Uint64
+	recvNext   uint64
+	recvBuf    map[uint64][]byte
+	recvMu     sync.Mutex
 }
 
 func newPortForwardConn(conn net.Conn, sendKey, receiveKey []byte) *portForwardConn {
@@ -50,6 +54,7 @@ func newPortForwardConn(conn net.Conn, sendKey, receiveKey []byte) *portForwardC
 		done:       make(chan struct{}),
 		sendKey:    sendKey,
 		receiveKey: receiveKey,
+		recvBuf:    make(map[uint64][]byte),
 	}
 }
 
@@ -59,6 +64,32 @@ func (c *portForwardConn) close() {
 		close(c.done)
 		c.conn.Close()
 	})
+}
+
+func (c *portForwardConn) nextSendSeq() uint64 {
+	return c.sendSeq.Add(1)
+}
+
+func (c *portForwardConn) deliver(seq uint64, plaintext []byte) error {
+	c.recvMu.Lock()
+	defer c.recvMu.Unlock()
+
+	c.recvBuf[seq] = plaintext
+	if c.recvNext == 0 {
+		c.recvNext = 1
+	}
+
+	for {
+		chunk, ok := c.recvBuf[c.recvNext]
+		if !ok {
+			return nil
+		}
+		if _, err := c.conn.Write(chunk); err != nil {
+			return err
+		}
+		delete(c.recvBuf, c.recvNext)
+		c.recvNext++
+	}
 }
 
 type portForwardSessions struct {
@@ -199,7 +230,8 @@ func (d *Deskconn) handlePortForward(_ context.Context, inv *xconn.Invocation) *
 							pf.close()
 							return
 						}
-						if sendErr := inv.SendProgress([]any{msgData, connID, encrypted}, nil); sendErr != nil {
+						seq := pf.nextSendSeq()
+						if sendErr := inv.SendProgress([]any{msgData, connID, seq, encrypted}, nil); sendErr != nil {
 							pf.close()
 							return
 						}
@@ -222,7 +254,11 @@ func (d *Deskconn) handlePortForward(_ context.Context, inv *xconn.Invocation) *
 		if !ok {
 			return xconn.NewInvocationError(xconn.ErrNoResult)
 		}
-		encrypted, err := inv.ArgBytes(2)
+		seq, err := inv.ArgUInt64(2)
+		if err != nil {
+			return xconn.NewInvocationError(xconn.ErrNoResult)
+		}
+		encrypted, err := inv.ArgBytes(3)
 		if err != nil {
 			return xconn.NewInvocationError(xconn.ErrNoResult)
 		}
@@ -230,7 +266,7 @@ func (d *Deskconn) handlePortForward(_ context.Context, inv *xconn.Invocation) *
 		if err != nil {
 			return xconn.NewInvocationError(xconn.ErrNoResult)
 		}
-		if _, writeErr := pf.conn.Write(plaintext); writeErr != nil {
+		if writeErr := pf.deliver(seq, plaintext); writeErr != nil {
 			_ = pf.conn.Close()
 		}
 
@@ -273,6 +309,7 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 	defer localConn.Close()
 
 	connID := counter.Add(1)
+	stream := newPortForwardConn(localConn, nil, nil)
 
 	// Generate a per-connection X25519 keypair.
 	clientPubKey, clientPrivKey, err := CreateX25519KeyPair()
@@ -356,8 +393,9 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 					closeDone()
 					return &xconn.Progress{Args: []any{connID}}
 				}
+				seq := stream.nextSendSeq()
 				return &xconn.Progress{
-					Args:    []any{msgData, connID, encrypted},
+					Args:    []any{msgData, connID, seq, encrypted},
 					Options: map[string]any{wampproto.OptionProgress: true},
 				}
 			}
@@ -394,7 +432,11 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 				if len(result.Args()) < 3 {
 					return
 				}
-				encrypted, err := result.ArgBytes(2)
+				seq, err := result.ArgUInt64(2)
+				if err != nil {
+					return
+				}
+				encrypted, err := result.ArgBytes(3)
 				if err != nil {
 					return
 				}
@@ -402,7 +444,7 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 				if err != nil {
 					return
 				}
-				_, _ = localConn.Write(plaintext)
+				_ = stream.deliver(seq, plaintext)
 
 			case msgClose:
 				closeDone()

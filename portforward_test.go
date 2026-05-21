@@ -197,7 +197,7 @@ func TestPortForwardDataExchange(t *testing.T) {
 					cbErr = encErr
 					return xconn.NewFinalProgress(connID)
 				}
-				return xconn.NewProgress("D", connID, encrypted)
+				return xconn.NewProgress("D", connID, uint64(1), encrypted)
 			}
 			// Block until the echo arrives, then close.
 			select {
@@ -238,7 +238,7 @@ func TestPortForwardDataExchange(t *testing.T) {
 				}
 				close(keyReady)
 			case "D":
-				encrypted, _ := pr.ArgBytes(2)
+				encrypted, _ := pr.ArgBytes(3)
 				plaintext, _ := deskconn.DecryptPayload(encrypted, receiveKey)
 				select {
 				case echoCh <- plaintext:
