@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -35,6 +36,7 @@ const (
 	ProcedureProxyExec        = "io.xconn.deskconn.deskconnd.proxy.exec"
 	ProcedureProxyFileOp      = "io.xconn.deskconn.deskconnd.proxy.file.op"
 	ProcedureProxyDeviceInfo  = "io.xconn.deskconn.deskconnd.proxy.device.info"
+	ProcedureProxyLogs        = "io.xconn.deskconn.deskconnd.proxy.logs"
 	ProcedureLogin            = "io.xconn.deskconn.login"
 	ProcedureLogout           = "io.xconn.deskconn.logout"
 	ProcedureConnectedDevices = "io.xconn.deskconn.connected_devices"
@@ -836,6 +838,67 @@ func ProxyDeviceInfoHandler(clientSessions *ClientSessions, cfgDirectory string)
 		}
 
 		return xconn.NewInvocationResult(callResp.Args()...)
+	}
+}
+
+// ProxyLogsHandler proxies ProcedureLogs using a cloud-first session with async WebRTC upgrade.
+func ProxyLogsHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
+	cfgDirectory string) xconn.InvocationHandler {
+	var logStreamCounter atomic.Uint64
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		caller := inv.Caller()
+
+		if !inv.Progress() {
+			if proxyCall, exists := proxyCalls.Fetch(caller); exists {
+				proxyCall.send(xconn.NewFinalProgress(proxyCall.streamID))
+				proxyCall.closeChannel()
+				proxyCalls.Delete(caller)
+			}
+			return xconn.NewInvocationResult()
+		}
+
+		proxyCall, exists := proxyCalls.Fetch(caller)
+		if !exists {
+			proxyCall = newProxyCall()
+			proxyCall.streamID = logStreamCounter.Add(1)
+			proxyCalls.Store(caller, proxyCall)
+
+			realm, err := inv.ArgString(0)
+			if err != nil {
+				proxyCalls.Delete(caller)
+				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+			}
+
+			deviceSession, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+			if err != nil {
+				proxyCalls.Delete(caller)
+				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+			}
+
+			ch := proxyCall.progressChan
+			go func() {
+				callResp := deviceSession.Call(ProcedureLogs).
+					ProgressSender(func(ctx context.Context) *xconn.Progress {
+						p, ok := <-ch
+						if !ok {
+							return xconn.NewFinalProgress()
+						}
+						return p
+					}).
+					ProgressReceiver(func(pr *xconn.ProgressResult) {
+						_ = inv.SendProgress(pr.Args(), nil)
+					}).Do()
+				if callResp.Err != nil {
+					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error() + "\n")}, nil)
+				}
+				_ = inv.SendProgress(nil, nil)
+			}()
+		}
+
+		args := append([]any(nil), inv.Args()[1:]...)
+		args = append(args, proxyCall.streamID)
+		proxyCall.send(xconn.NewProgress(args...))
+		return xconn.NewInvocationError(xconn.ErrNoResult)
 	}
 }
 

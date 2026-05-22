@@ -28,6 +28,7 @@ const (
 	ProcedureFileCopy            = "io.xconn.deskconn.deskconnd.file.copy"
 	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
 	ProcedureDeviceInfo          = "io.xconn.deskconn.deskconnd.device.info"
+	ProcedureLogs                = "io.xconn.deskconn.deskconnd.logs"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
@@ -53,6 +54,7 @@ type Deskconn struct {
 	screen          *Screen
 	mpris           *MPRIS
 	printer         *Printer
+	logs            *logSessions
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
@@ -66,6 +68,7 @@ func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 		screen:          screen,
 		mpris:           mpris,
 		printer:         NewPrinter(),
+		logs:            newLogSessions(),
 	}
 }
 
@@ -96,6 +99,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureMPRISPause:          d.handlePause,
 		ProcedureMPRISNext:           d.handleNext,
 		ProcedureMPRISPrevious:       d.handlePrevious,
+		ProcedureLogs:                d.handleLogs,
 	} {
 		response := session.Register(uri, handler).Invoke(wampproto.InvokeLast).Do()
 		if response.Err != nil {
@@ -254,6 +258,7 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 	d.uploads.delete(sessionID)
 	d.forwardSessions.deleteCaller(sessionID)
 	d.reverseSessions.stop(sessionID)
+	d.logs.killAndDeleteByCaller(sessionID)
 }
 
 func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {

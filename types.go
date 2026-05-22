@@ -14,6 +14,7 @@ type ProxyCall struct {
 	progressChan chan *xconn.Progress
 	closeFunc    func()
 	closed       bool
+	streamID     uint64
 
 	sync.Mutex
 }

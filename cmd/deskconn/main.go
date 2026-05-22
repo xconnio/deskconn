@@ -166,6 +166,16 @@ func main() {
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
+	logsCmd := app.Command("logs", "Stream logs from a device")
+	logsDevice := logsCmd.Arg("device", "ID, name or alias of device").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	logsSource := logsCmd.Arg("source",
+		"Service name (e.g. nginx) or file path (e.g. /var/log/syslog); omit for system journal").String()
+	logsFollow := logsCmd.Flag("follow", "Follow log output").Short('f').Bool()
+	logsTail := logsCmd.Flag("tail", "Number of lines to show from the end (-1 = default)").Short('n').
+		Default("-1").Int64()
+	logsSince := logsCmd.Flag("since", "Show entries since duration ago (e.g. 1h, 30m)").String()
+
 	selfCmd := app.Command("self", "Manage the installed deskconn CLI.")
 	selfVersionCmd := selfCmd.Command("version", "Show the installed deskconn version")
 	selfUpdateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
@@ -899,6 +909,25 @@ func main() {
 			toMiB(info.SwapTotal), toMiB(info.SwapFree), toMiB(info.SwapUsed))
 		fmt.Printf("Disk (/):   %s used, %s free / %s total\n",
 			formatBytes(info.DiskUsed), formatBytes(info.DiskFree), formatBytes(info.DiskTotal))
+
+	case logsCmd.FullCommand():
+		realm, err := deviceRealm(*logsDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		source := ""
+		if logsSource != nil {
+			source = *logsSource
+		}
+		if err := deskconn.StreamLogs(localSession, realm, source, *logsFollow, *logsTail, *logsSince); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 
 	case selfUpdateCmd.FullCommand():
 		if err := updateApp(cfgDirectory); err != nil {
