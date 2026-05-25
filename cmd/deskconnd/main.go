@@ -92,6 +92,12 @@ func main() {
 		log.Fatal(regRespDeviceInfo.Err)
 	}
 
+	regRespLogs := sess.Register(deskconn.ProcedureProxyLogs,
+		deskconn.ProxyLogsHandler(proxyCalls, clientSession, cfgDirectory)).Do()
+	if regRespLogs.Err != nil {
+		log.Fatal(regRespLogs.Err)
+	}
+
 	regRespLogin := sess.Register(deskconn.ProcedureLogin,
 		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSession.Login()
