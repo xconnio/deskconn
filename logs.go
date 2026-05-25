@@ -390,3 +390,23 @@ func nthLineFromEnd(path string, n int64) (int64, error) {
 	}
 	return 0, nil
 }
+
+func formatEntry(tsUsec uint64, fields map[string]string) string {
+	ts := time.UnixMicro(int64(tsUsec)).Local() //nolint:gosec
+	hostname := fields["_HOSTNAME"]
+	ident := fields["SYSLOG_IDENTIFIER"]
+	if ident == "" {
+		ident = fields["_COMM"]
+	}
+	pid := fields["_PID"]
+	msg := fields["MESSAGE"]
+
+	tsStr := ts.Format("Jan 02 15:04:05.000000")
+	if pid != "" {
+		return fmt.Sprintf("%s %s %s[%s]: %s\n", tsStr, hostname, ident, pid, msg)
+	}
+	if ident != "" {
+		return fmt.Sprintf("%s %s %s: %s\n", tsStr, hostname, ident, msg)
+	}
+	return fmt.Sprintf("%s %s: %s\n", tsStr, hostname, msg)
+}
