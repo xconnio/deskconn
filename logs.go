@@ -220,7 +220,7 @@ func (d *Deskconn) streamJournalLogs(ls *logSession, streamID uint64, inv *xconn
 			n = 10
 		}
 		if seekErr := j.seekTail(); seekErr == nil && n > 0 {
-			j.previousSkip(uint64(n))
+			j.previousSkip(uint64(n + 1))
 		}
 	}
 
@@ -365,6 +365,13 @@ func nthLineFromEnd(path string, n int64) (int64, error) {
 	}
 
 	size := info.Size()
+
+	// Don't count a trailing newline as its own line boundary.
+	last := make([]byte, 1)
+	if _, readErr := f.ReadAt(last, size-1); readErr == nil && last[0] == '\n' {
+		size--
+	}
+
 	buf := make([]byte, 4096)
 	linesFound := int64(0)
 	pos := size
