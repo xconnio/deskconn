@@ -15,7 +15,7 @@ import (
 )
 
 // collectLogs streams non-follow logs from source and returns all received bytes.
-func collectLogs(t *testing.T, caller *xconn.Session, source string, tailN int64, since string) ([]byte, error) {
+func collectLogs(t *testing.T, caller *xconn.Session, source string, tailN int64) ([]byte, error) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -29,7 +29,7 @@ func collectLogs(t *testing.T, caller *xconn.Session, source string, tailN int64
 		ProgressSender(func(ctx context.Context) *xconn.Progress {
 			if !sent {
 				sent = true
-				return xconn.NewProgress(source, false, tailN, since)
+				return xconn.NewProgress(source, false, tailN)
 			}
 			select {
 			case <-done:
@@ -77,7 +77,7 @@ func TestLogsInvalidSince(t *testing.T) {
 // TestLogsFileNotFound verifies that streaming a non-existent file sends an error message.
 func TestLogsFileNotFound(t *testing.T) {
 	_, caller := setupDeskconn(t)
-	data, err := collectLogs(t, caller, "/nonexistent/path/file.log", -1, "")
+	data, err := collectLogs(t, caller, "/nonexistent/path/file.log", -1)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "error:")
 }
@@ -91,7 +91,7 @@ func TestLogsFileEmpty(t *testing.T) {
 	f.Close()
 	t.Cleanup(func() { os.Remove(f.Name()) })
 
-	data, err := collectLogs(t, caller, f.Name(), -1, "")
+	data, err := collectLogs(t, caller, f.Name(), -1)
 	require.NoError(t, err)
 	require.Equal(t, "-- No entries --\n", string(data))
 }
@@ -109,7 +109,7 @@ func TestLogsFileContent(t *testing.T) {
 	t.Cleanup(func() { os.Remove(f.Name()) })
 
 	// tailN=0 reads from the beginning of the file.
-	data, err := collectLogs(t, caller, f.Name(), 0, "")
+	data, err := collectLogs(t, caller, f.Name(), 0)
 	require.NoError(t, err)
 	require.Equal(t, content, string(data))
 }
@@ -126,7 +126,7 @@ func TestLogsFileTailN(t *testing.T) {
 	f.Close()
 	t.Cleanup(func() { os.Remove(f.Name()) })
 
-	data, err := collectLogs(t, caller, f.Name(), 2, "")
+	data, err := collectLogs(t, caller, f.Name(), 2)
 	require.NoError(t, err)
 	got := string(data)
 	require.Contains(t, got, "delta\n")
@@ -195,7 +195,7 @@ func TestLogsFileFollow(t *testing.T) {
 func TestLogsJournalNoEntries(t *testing.T) {
 	_, caller := setupDeskconn(t)
 
-	data, err := collectLogs(t, caller, "", 0, "")
+	data, err := collectLogs(t, caller, "", 0)
 	require.NoError(t, err)
 	got := string(data)
 	require.True(t,
@@ -208,7 +208,7 @@ func TestLogsJournalNoEntries(t *testing.T) {
 func TestLogsJournalFakeService(t *testing.T) {
 	_, caller := setupDeskconn(t)
 
-	data, err := collectLogs(t, caller, "nonexistent-service-xyz123abc", 0, "")
+	data, err := collectLogs(t, caller, "nonexistent-service-xyz123abc", 0)
 	require.NoError(t, err)
 	got := string(data)
 	require.True(t,
