@@ -46,6 +46,9 @@ jobs:
           git tag "$TAG_NAME"
           git push origin "$TAG_NAME"
 
+      - name: Install arm64 cross-compiler
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
