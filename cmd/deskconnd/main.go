@@ -216,6 +216,7 @@ start:
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	deskconnApis.StartIndexer(ctx)
 	defer cancel()
 
 	detachChan := make(chan struct{}, 1)

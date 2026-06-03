@@ -29,6 +29,7 @@ const (
 	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
 	ProcedureDeviceInfo          = "io.xconn.deskconn.deskconnd.device.info"
 	ProcedureLogs                = "io.xconn.deskconn.deskconnd.logs"
+	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
@@ -55,10 +56,11 @@ type Deskconn struct {
 	mpris           *MPRIS
 	printer         *Printer
 	logs            *logSessions
+	indexer         *IndexService
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
-	return &Deskconn{
+	d := &Deskconn{
 		shellSession:    newInteractiveShellSession(),
 		keys:            newKeyManager(),
 		uploads:         newUploadSessions(),
@@ -69,6 +71,28 @@ func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 		mpris:           mpris,
 		printer:         NewPrinter(),
 		logs:            newLogSessions(),
+	}
+
+	cfgDir, err := CfgDirectory()
+	if err != nil {
+		log.Printf("fileindex: failed to get config directory: %v", err)
+		return d
+	}
+
+	indexer, err := NewIndexService(cfgDir)
+	if err != nil {
+		log.Printf("fileindex: failed to create index service: %v", err)
+		return d
+	}
+
+	d.indexer = indexer
+	return d
+}
+
+// StartIndexer starts the background file indexer.
+func (d *Deskconn) StartIndexer(ctx context.Context) {
+	if d.indexer != nil {
+		d.indexer.Start(ctx)
 	}
 }
 
@@ -100,6 +124,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureMPRISNext:           d.handleNext,
 		ProcedureMPRISPrevious:       d.handlePrevious,
 		ProcedureLogs:                d.handleLogs,
+		ProcedureIndexQuery:          d.handleIndexQuery,
 	} {
 		response := session.Register(uri, handler).Invoke(wampproto.InvokeLast).Do()
 		if response.Err != nil {
@@ -290,6 +315,49 @@ func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *
 	d.keys.store(inv.Caller(), &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey})
 
 	return xconn.NewInvocationResult(serverPublicKey)
+}
+
+func (d *Deskconn) handleIndexQuery(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	if d.indexer == nil {
+		return xconn.NewInvocationError(ErrOperationFailed, "index service unavailable")
+	}
+
+	enc, ok := d.keys.fetch(inv.Caller())
+	if !ok {
+		return xconn.NewInvocationError(ErrInvalidArgument, "no session keys found, call key exchange first")
+	}
+
+	encrypted, err := inv.ArgBytes(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	plaintext, err := DecryptPayload(encrypted, enc.receiveKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	var args struct {
+		Category string `json:"category"`
+	}
+	if err := json.Unmarshal(plaintext, &args); err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	result, err := d.indexer.Query(args.Category)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	encryptedResult, err := EncryptPayload(resultBytes, enc.sendKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	return xconn.NewInvocationResult(encryptedResult)
 }
 
 func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
