@@ -140,6 +140,11 @@ func main() {
 	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
 	portReverseP2PFlag := portReverseCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
+	pingCmd := app.Command("ping", "Ping a device and measure round-trip time")
+	pingDevice := pingCmd.Arg("device", "ID, name or alias of device").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	pingCount := pingCmd.Flag("count", "Number of pings to send (0 = infinite)").Short('c').Default("0").Int()
+
 	connectCmd := app.Command("connect", "Establish a persistent connection to a device")
 	connectDevice := connectCmd.Arg("device", "ID, name or alias of device").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
@@ -802,6 +807,71 @@ func main() {
 		callResp := session.Call(deskconn.ProcedureLogout).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
+		}
+
+	case pingCmd.FullCommand():
+		realm, err := deviceRealm(*pingDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		fmt.Printf("PING %s\n", *pingDevice)
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+		var sent, received int
+		var totalMs int64
+		var minMs, maxMs int64 = 1 << 62, 0
+
+		for seq := 1; *pingCount == 0 || seq <= *pingCount; seq++ {
+			select {
+			case <-sigCh:
+				goto pingDone
+			default:
+			}
+
+			callResp := localSession.Call(deskconn.ProcedureProxyPing).Args(realm).Do()
+			sent++
+			if callResp.Err != nil {
+				fmt.Fprintf(os.Stderr, "seq=%d error: %v\n", seq, callResp.Err)
+			} else {
+				ms, _ := callResp.ArgInt64(0)
+				received++
+				totalMs += ms
+				if ms < minMs {
+					minMs = ms
+				}
+				if ms > maxMs {
+					maxMs = ms
+				}
+				fmt.Printf("seq=%d time=%dms\n", seq, ms)
+			}
+
+			if *pingCount == 0 || seq < *pingCount {
+				select {
+				case <-sigCh:
+					goto pingDone
+				case <-time.After(time.Second):
+				}
+			}
+		}
+
+	pingDone:
+		loss := 0
+		if sent > 0 {
+			loss = (sent - received) * 100 / sent
+		}
+		fmt.Printf("\n--- %s ping statistics ---\n", *pingDevice)
+		fmt.Printf("%d packets transmitted, %d received, %d%% packet loss\n", sent, received, loss)
+		if received > 0 {
+			fmt.Printf("rtt min/avg/max = %d/%d/%d ms\n", minMs, totalMs/int64(received), maxMs)
 		}
 
 	case connectCmd.FullCommand():

@@ -37,6 +37,7 @@ const (
 	ProcedureProxyFileOp      = "io.xconn.deskconn.deskconnd.proxy.file.op"
 	ProcedureProxyDeviceInfo  = "io.xconn.deskconn.deskconnd.proxy.device.info"
 	ProcedureProxyLogs        = "io.xconn.deskconn.deskconnd.proxy.logs"
+	ProcedureProxyPing        = "io.xconn.deskconn.deskconnd.proxy.ping"
 	ProcedureLogin            = "io.xconn.deskconn.login"
 	ProcedureLogout           = "io.xconn.deskconn.logout"
 	ProcedureConnect          = "io.xconn.deskconn.connect"
@@ -841,6 +842,30 @@ func ProxyDeviceInfoHandler(clientSessions *ClientSessions, cfgDirectory string)
 		}
 
 		return xconn.NewInvocationResult(callResp.Args()...)
+	}
+}
+
+func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		deviceSession, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		start := time.Now()
+		callResp := deviceSession.Call(ProcedurePing).Do()
+		if callResp.Err != nil {
+			_ = deviceSession.Leave()
+			clientSessions.DeleteDeviceSession(realm)
+			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
+		}
+
+		return xconn.NewInvocationResult(time.Since(start).Milliseconds())
 	}
 }
 

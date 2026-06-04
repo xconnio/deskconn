@@ -29,6 +29,7 @@ const (
 	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
 	ProcedureDeviceInfo          = "io.xconn.deskconn.deskconnd.device.info"
 	ProcedureLogs                = "io.xconn.deskconn.deskconnd.logs"
+	ProcedurePing                = "io.xconn.deskconn.deskconnd.ping"
 	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
@@ -125,6 +126,9 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureMPRISPrevious:       d.handlePrevious,
 		ProcedureLogs:                d.handleLogs,
 		ProcedureIndexQuery:          d.handleIndexQuery,
+		ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			return xconn.NewInvocationResult()
+		},
 	} {
 		response := session.Register(uri, handler).Invoke(wampproto.InvokeLast).Do()
 		if response.Err != nil {
