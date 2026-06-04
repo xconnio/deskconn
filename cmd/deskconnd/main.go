@@ -117,6 +117,44 @@ func main() {
 		log.Fatal(regRespLogout.Err)
 	}
 
+	regRespConnect := sess.Register(deskconn.ProcedureConnect,
+		func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+			realm, err := inv.ArgString(0)
+			if err != nil {
+				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
+			}
+			_, err = clientSession.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
+			if err != nil {
+				return xconn.NewInvocationError(deskconn.ErrOperationFailed, err.Error())
+			}
+			return xconn.NewInvocationResult()
+		}).Do()
+	if regRespConnect.Err != nil {
+		log.Fatal(regRespConnect.Err)
+	}
+
+	regRespDisconnect := sess.Register(deskconn.ProcedureDisconnect,
+		func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+			realm, err := inv.ArgString(0)
+			if err != nil {
+				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
+			}
+			clientSession.Disconnect(realm)
+			return xconn.NewInvocationResult()
+		}).Do()
+	if regRespDisconnect.Err != nil {
+		log.Fatal(regRespDisconnect.Err)
+	}
+
+	regRespDisconnectAll := sess.Register(deskconn.ProcedureDisconnectAll,
+		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			clientSession.DisconnectAll()
+			return xconn.NewInvocationResult()
+		}).Do()
+	if regRespDisconnectAll.Err != nil {
+		log.Fatal(regRespDisconnectAll.Err)
+	}
+
 	regRespConnectedDevices := sess.Register(deskconn.ProcedureConnectedDevices,
 		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult(clientSession.DeviceSessions())

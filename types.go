@@ -2,6 +2,7 @@ package deskconn
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -160,6 +161,33 @@ func (c *ClientSessions) DeleteDeviceSession(realm string) {
 	delete(c.deviceSessionByRealm, realm)
 	delete(c.connectedAtByRealm, realm)
 	c.Unlock()
+}
+
+func (c *ClientSessions) Disconnect(realm string) {
+	c.Lock()
+	session := c.deviceSessionByRealm[realm]
+	delete(c.deviceSessionByRealm, realm)
+	delete(c.connectedAtByRealm, realm)
+	c.Unlock()
+
+	fmt.Println("disconnecting from ", realm)
+	if session != nil {
+		err := session.Leave()
+		fmt.Println(err)
+	}
+	fmt.Println("disconnected from ", realm)
+}
+
+func (c *ClientSessions) DisconnectAll() {
+	c.Lock()
+	sessions := c.deviceSessionByRealm
+	c.deviceSessionByRealm = make(map[string]*xconn.Session)
+	c.connectedAtByRealm = make(map[string]time.Time)
+	c.Unlock()
+
+	for _, session := range sessions {
+		_ = session.Leave()
+	}
 }
 
 // EnsureDeviceSessionWithUpgrade is like EnsureDeviceSession but also returns a channel
