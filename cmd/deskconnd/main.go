@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -461,10 +462,14 @@ start:
 	defer zeroconfServer.Shutdown()
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	select {
 	case <-sigChan:
+		cancel()
+		clientSession.Logout()
+		router.Close()
+		localRouter.Close()
 	case <-detachChan:
 		cancel()
 		_ = os.Remove(filepath.Join(cfgDirectory, "credentials.json"))
