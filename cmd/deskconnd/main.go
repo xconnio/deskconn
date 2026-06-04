@@ -99,6 +99,12 @@ func main() {
 		log.Fatal(regRespLogs.Err)
 	}
 
+	regRespPing := sess.Register(deskconn.ProcedureProxyPing,
+		deskconn.ProxyPingHandler(clientSession, cfgDirectory)).Do()
+	if regRespPing.Err != nil {
+		log.Fatal(regRespPing.Err)
+	}
+
 	regRespLogin := sess.Register(deskconn.ProcedureLogin,
 		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSession.Login()
