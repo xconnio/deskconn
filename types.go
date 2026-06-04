@@ -162,6 +162,30 @@ func (c *ClientSessions) DeleteDeviceSession(realm string) {
 	c.Unlock()
 }
 
+func (c *ClientSessions) Disconnect(realm string) {
+	c.Lock()
+	session := c.deviceSessionByRealm[realm]
+	delete(c.deviceSessionByRealm, realm)
+	delete(c.connectedAtByRealm, realm)
+	c.Unlock()
+
+	if session != nil {
+		_ = session.Leave()
+	}
+}
+
+func (c *ClientSessions) DisconnectAll() {
+	c.Lock()
+	sessions := c.deviceSessionByRealm
+	c.deviceSessionByRealm = make(map[string]*xconn.Session)
+	c.connectedAtByRealm = make(map[string]time.Time)
+	c.Unlock()
+
+	for _, session := range sessions {
+		_ = session.Leave()
+	}
+}
+
 // EnsureDeviceSessionWithUpgrade is like EnsureDeviceSession but also returns a channel
 // that receives the WebRTC session when the background upgrade completes. If a connected
 // session is already cached the channel is closed immediately.

@@ -140,6 +140,15 @@ func main() {
 	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
 	portReverseP2PFlag := portReverseCmd.Flag("p2p", "Connect using WebRTC").Bool()
 
+	connectCmd := app.Command("connect", "Establish a persistent connection to a device")
+	connectDevice := connectCmd.Arg("device", "ID, name or alias of device").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
+
+	disconnectCmd := app.Command("disconnect", "Disconnect a persistent connection")
+	disconnectDevice := disconnectCmd.Arg("device", "ID, name or alias of device").
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	disconnectAllFlag := disconnectCmd.Flag("all", "Disconnect all devices").Bool()
+
 	lsCmd := app.Command("ls", "List devices")
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
 	lsDetailedFlag := lsCmd.Flag("detailed", "Show detailed output").Bool()
@@ -794,6 +803,55 @@ func main() {
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
+
+	case connectCmd.FullCommand():
+		realm, err := deviceRealm(*connectDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		callResp := session.Call(deskconn.ProcedureConnect).Args(realm).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+			return
+		}
+		fmt.Printf("connected to %s\n", *connectDevice)
+
+	case disconnectCmd.FullCommand():
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if *disconnectAllFlag {
+			callResp := session.Call(deskconn.ProcedureDisconnectAll).Do()
+			if callResp.Err != nil {
+				fmt.Fprintln(os.Stderr, callResp.Err)
+				return
+			}
+			fmt.Println("disconnected all devices")
+			return
+		}
+		if *disconnectDevice == "" {
+			fmt.Fprintln(os.Stderr, "specify a device or use --all")
+			return
+		}
+		realm, err := deviceRealm(*disconnectDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		callResp := session.Call(deskconn.ProcedureDisconnect).Args(realm).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+			return
+		}
+		fmt.Printf("disconnected %s\n", *disconnectDevice)
 
 	case configShow.FullCommand():
 		data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))

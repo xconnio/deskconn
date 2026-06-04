@@ -39,6 +39,9 @@ const (
 	ProcedureProxyLogs        = "io.xconn.deskconn.deskconnd.proxy.logs"
 	ProcedureLogin            = "io.xconn.deskconn.login"
 	ProcedureLogout           = "io.xconn.deskconn.logout"
+	ProcedureConnect          = "io.xconn.deskconn.connect"
+	ProcedureDisconnect       = "io.xconn.deskconn.disconnect"
+	ProcedureDisconnectAll    = "io.xconn.deskconn.disconnect_all"
 	ProcedureConnectedDevices = "io.xconn.deskconn.connected_devices"
 
 	ProcedureListDesktop = "io.xconn.deskconn.desktop.list"
