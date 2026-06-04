@@ -2,7 +2,6 @@ package deskconn
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -170,12 +169,9 @@ func (c *ClientSessions) Disconnect(realm string) {
 	delete(c.connectedAtByRealm, realm)
 	c.Unlock()
 
-	fmt.Println("disconnecting from ", realm)
 	if session != nil {
-		err := session.Leave()
-		fmt.Println(err)
+		_ = session.Leave()
 	}
-	fmt.Println("disconnected from ", realm)
 }
 
 func (c *ClientSessions) DisconnectAll() {
