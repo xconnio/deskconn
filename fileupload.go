@@ -183,6 +183,15 @@ func (s *uploadState) processFrames() {
 		flush()
 	}
 	flush()
+
+	// Frames left in pending never reached nextSeq (e.g. the client aborted
+	// mid-stream). Unblock their handlers so the invocation goroutines waiting
+	// on respCh don't leak.
+	for seq, frame := range pending {
+		frame.respCh <- fmt.Errorf("upload session closed")
+		close(frame.respCh)
+		delete(pending, seq)
+	}
 }
 
 func (s *uploadState) processFrame(frame *uploadFrame) error {
