@@ -293,7 +293,7 @@ start:
 				Authenticator:     crytosignAuthenticator,
 			}
 
-			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), cred.Realm)
+			cloudYamuxSess, err := xconnClient.ConnectYamux(ctx, deskconn.CloudYamuxAddress(), cred.Realm)
 			if err != nil {
 				if err.Error() == "wamp.error.no_such_realm" {
 					select {
@@ -311,8 +311,12 @@ start:
 				time.Sleep(retryDelay)
 				continue
 			}
+			cloudSession := cloudYamuxSess.Session
 
 			log.Println("connected successfully to cloud")
+
+			// Accept streams opened by the router (relayed from CLI file-transfer requests).
+			go deskconnApis.AcceptYamuxStreams(cloudYamuxSess)
 
 			if err := deskconnApis.Register(cloudSession); err != nil {
 				// exponential backoff
@@ -321,7 +325,7 @@ start:
 					retryDelay = maxDelay
 				}
 				log.Printf("failed to register procedures on cloud, will retry in %v: %v", retryDelay, err)
-				_ = cloudSession.Leave()
+				_ = cloudYamuxSess.Close()
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -361,7 +365,7 @@ start:
 					retryDelay = maxDelay
 				}
 				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
-				_ = cloudSession.Leave()
+				_ = cloudYamuxSess.Close()
 				time.Sleep(retryDelay)
 				continue
 			}

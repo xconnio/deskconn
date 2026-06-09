@@ -26,6 +26,13 @@ func CloudURI() string {
 	return "wss://api.deskconn.com/ws"
 }
 
+func CloudYamuxAddress() string {
+	if v, ok := os.LookupEnv("DESKCONN_CLOUD_YAMUX_ADDRESS"); ok {
+		return v
+	}
+	return "api.deskconn.com:8081"
+}
+
 type Credentials struct {
 	Realm      string `json:"realm"`
 	AuthID     string `json:"authid"`

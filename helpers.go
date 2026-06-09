@@ -280,6 +280,22 @@ func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P 
 	return ConnectWebrtc(ctx, session, realm, authid, privKey, cfgDirectory)
 }
 
+func ConnectDeviceRealmYamux(ctx context.Context, realm, cfgDirectory string) (*xconn.YamuxSession, error) {
+	authid, privKey, err := ReadCredentials(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authenticator: %w", err)
+	}
+
+	return xconn.DialYamux(ctx, CloudYamuxAddress(), realm, &xconn.YamuxDialerConfig{
+		Authenticator: authenticator,
+	})
+}
+
 func ConnectWebrtc(ctx context.Context, session *xconn.Session, realm, authid, privateKey,
 	cfgDirectory string) (*xconn.Session, error) {
 	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})

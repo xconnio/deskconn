@@ -35,6 +35,7 @@ var version = "v0.1.0-alpha"
 const (
 	ModeRouted = "routed"
 	ModeP2P    = "p2p"
+	ModeYamux  = "yamux"
 )
 
 func main() {
@@ -87,8 +88,8 @@ func main() {
 		HintAction(devicePathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'p2p' uses WebRTC, 'routed' uses WAMP router, 'yamux' relays via cloud router streams",
+	).Enum(ModeP2P, ModeRouted, ModeYamux)
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
 	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
@@ -324,13 +325,25 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			if err := deskconn.PushFiles(deviceSession, *cpSrc, dstPath, *cpRecursive); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+			if *cpModeFlag == ModeYamux {
+				yamuxSess, err := deskconn.ConnectDeviceRealmYamux(context.Background(), realm, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				defer yamuxSess.Close()
+				if err := deskconn.PushFilesYamux(yamuxSess, *cpSrc, dstPath, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
+			} else {
+				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				if err := deskconn.PushFiles(deviceSession, *cpSrc, dstPath, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
 			}
 		case srcRemote && !dstRemote:
 			srcDevice, srcPath := parseDevicePath(*cpSrc)
@@ -339,13 +352,25 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			if err := deskconn.PullFiles(deviceSession, srcPath, *cpDst, *cpRecursive); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+			if *cpModeFlag == ModeYamux {
+				yamuxSess, err := deskconn.ConnectDeviceRealmYamux(context.Background(), realm, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				defer yamuxSess.Close()
+				if err := deskconn.PullFilesYamux(yamuxSess, srcPath, *cpDst, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
+			} else {
+				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				if err := deskconn.PullFiles(deviceSession, srcPath, *cpDst, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
 			}
 		default:
 			fmt.Fprintln(os.Stderr, "at least one of src or dst must be a remote path (device:path)")

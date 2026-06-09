@@ -14,7 +14,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/xconnio/wampproto-go v0.0.0-20251205113711-968e34250b9a
-	github.com/xconnio/xconn-go v0.1.1-0.20260413134126-500053d9c099
+	github.com/xconnio/xconn-go v0.1.1-0.20260608144341-36e5dbeba4aa
 	github.com/xconnio/xconn-webrtc-go v0.0.0-20260604105404-c57dd5bc04c2
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.43.0
@@ -38,6 +38,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-immutable-radix/v2 v2.1.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
