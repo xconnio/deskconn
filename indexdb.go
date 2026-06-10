@@ -1,7 +1,11 @@
 package deskconn
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -29,7 +33,12 @@ func newIndexDB(cfgDirectory string) (*indexDB, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &indexDB{db: db}, nil
+	idb := &indexDB{db: db}
+	if err := idb.ensureOrderIndexes(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return idb, nil
 }
 
 func (d *indexDB) isIndexingComplete() bool {
@@ -54,6 +63,15 @@ func (d *indexDB) addEntry(entry IndexEntry) error {
 	}
 	entry.Thumbnail = ""
 	return d.db.Update(func(tx *bolt.Tx) error {
+		order := tx.Bucket(orderBucketName(bucket))
+		if old, found := readEntry(tx, bucket, entry.Path); found {
+			if err := order.Delete(orderKey(old)); err != nil {
+				return err
+			}
+		}
+		if err := order.Put(orderKey(entry), []byte(entry.Path)); err != nil {
+			return err
+		}
 		return updateEntry(tx, bucket, entry)
 	})
 }
@@ -101,20 +119,94 @@ func (d *indexDB) removeStaleEntries() {
 	log.Printf("fileindex: pruned %d stale entries", len(stale))
 }
 
-func (d *indexDB) entries(targetBuckets [][]byte) ([]IndexEntry, error) {
-	var entries []IndexEntry
-	err := d.db.View(func(tx *bolt.Tx) error {
+// orderCursor tracks the current position of one category's order-index cursor
+// during a k-way merge.
+type orderCursor struct {
+	cursor *bolt.Cursor
+	key    []byte
+	val    []byte
+}
+
+// queryEntries returns up to limit entries across targetBuckets, sorted by
+// modification time (newest first), merging the per-category order indexes.
+// cursor (if non-empty) resumes iteration from the position returned as
+// nextCursor by a previous call. hasMore reports whether further entries
+// remain.
+func (d *indexDB) queryEntries(targetBuckets [][]byte, cursor map[string]string, limit int) (
+	entries []IndexEntry, nextCursor map[string]string, hasMore bool, err error,
+) {
+	nextCursor = make(map[string]string)
+
+	err = d.db.View(func(tx *bolt.Tx) error {
 		thumbs := tx.Bucket([]byte(bucketThumbnails))
+		cursors := make(map[string]*orderCursor, len(targetBuckets))
+
 		for _, bname := range targetBuckets {
-			b := tx.Bucket(bname)
-			if b == nil {
+			ob := tx.Bucket(orderBucketName(bname))
+			if ob == nil {
 				continue
 			}
-			entries = append(entries, scanBucket(b, thumbs)...)
+			c := ob.Cursor()
+			var k, v []byte
+			if last, ok := cursor[string(bname)]; ok && last != "" {
+				lastKey, derr := base64.StdEncoding.DecodeString(last)
+				if derr != nil {
+					return derr
+				}
+				// lastKey points at the next unconsumed item; if it was
+				// removed since the previous page, Seek lands on the item
+				// that took its place.
+				k, v = c.Seek(lastKey)
+			} else {
+				k, v = c.First()
+			}
+			if k != nil {
+				cursors[string(bname)] = &orderCursor{
+					cursor: c,
+					key:    append([]byte(nil), k...),
+					val:    append([]byte(nil), v...),
+				}
+			}
+		}
+
+		for len(entries) < limit {
+			var bestCat string
+			var best *orderCursor
+			for cat, oc := range cursors {
+				if best == nil || bytes.Compare(oc.key, best.key) < 0 {
+					best = oc
+					bestCat = cat
+				}
+			}
+			if best == nil {
+				break
+			}
+
+			if e, found := readEntry(tx, []byte(bestCat), string(best.val)); found {
+				if thumbs != nil {
+					if thumb := thumbs.Get(best.val); len(thumb) > 0 {
+						e.Thumbnail = string(thumb)
+					}
+				}
+				entries = append(entries, e)
+			}
+
+			if k, v := best.cursor.Next(); k != nil {
+				best.key = append(best.key[:0], k...)
+				best.val = append(best.val[:0], v...)
+			} else {
+				delete(cursors, bestCat)
+			}
+		}
+
+		for cat, oc := range cursors {
+			nextCursor[cat] = base64.StdEncoding.EncodeToString(oc.key)
+			hasMore = true
 		}
 		return nil
 	})
-	return entries, err
+
+	return entries, nextCursor, hasMore, err
 }
 
 func initBuckets(tx *bolt.Tx) error {
@@ -149,6 +241,9 @@ func readEntry(tx *bolt.Tx, bucket []byte, path string) (IndexEntry, bool) {
 func deleteEntry(tx *bolt.Tx, path string) {
 	key := []byte(path)
 	for _, bname := range buckets() {
+		if old, found := readEntry(tx, bname, path); found {
+			_ = tx.Bucket(orderBucketName(bname)).Delete(orderKey(old))
+		}
 		_ = tx.Bucket(bname).Delete(key)
 	}
 	_ = tx.Bucket([]byte(bucketThumbnails)).Delete(key)
@@ -173,21 +268,54 @@ func deleteKeys(tx *bolt.Tx, keys [][]byte) {
 	}
 }
 
-func scanBucket(b, thumbs *bolt.Bucket) []IndexEntry {
-	var entries []IndexEntry
-	_ = b.ForEach(func(k, v []byte) error {
-		var entry IndexEntry
-		if json.Unmarshal(v, &entry) == nil {
-			if thumbs != nil {
-				if thumb := thumbs.Get(k); len(thumb) > 0 {
-					entry.Thumbnail = string(thumb)
-				}
+// mtimeKey returns an 8-byte big-endian key that sorts in descending order
+// of modification time (newest first) when compared lexicographically.
+func mtimeKey(modTime time.Time) []byte {
+	inverted := int64(math.MaxInt64) - modTime.UnixNano()
+	if inverted < 0 {
+		inverted = 0
+	}
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, uint64(inverted)) //nolint:gosec // inverted is non-negative by construction
+	return buf
+}
+
+// orderKey returns the key used in a category's order index for entry,
+// composed of its mtime key followed by its path (for stable tie-breaking).
+func orderKey(entry IndexEntry) []byte {
+	return append(mtimeKey(entry.ModTime), []byte(entry.Path)...)
+}
+
+// orderBucketName returns the name of the order-index bucket paired with
+// the given category bucket.
+func orderBucketName(category []byte) []byte {
+	return []byte(string(category) + "_order")
+}
+
+// ensureOrderIndexes builds the order-index bucket for any category whose
+// index is empty but whose entries are not, populating it from the existing
+// entries. This migrates databases created before order indexes existed.
+func (d *indexDB) ensureOrderIndexes() error {
+	return d.db.Update(func(tx *bolt.Tx) error {
+		for _, bname := range buckets() {
+			ob := tx.Bucket(orderBucketName(bname))
+			if ob.Stats().KeyN > 0 {
+				continue
 			}
-			entries = append(entries, entry)
+			b := tx.Bucket(bname)
+			err := b.ForEach(func(_, v []byte) error {
+				var e IndexEntry
+				if json.Unmarshal(v, &e) != nil {
+					return nil //nolint:nilerr // skip entries we can't decode, continue migrating
+				}
+				return ob.Put(orderKey(e), []byte(e.Path))
+			})
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	})
-	return entries
 }
 
 func bucketForCategory(cat string) []byte {
@@ -217,7 +345,14 @@ func buckets() [][]byte {
 }
 
 func allBuckets() [][]byte {
-	return append(buckets(), []byte(bucketThumbnails), []byte(bucketMeta))
+	bs := buckets()
+	all := make([][]byte, 0, len(bs)*2+2)
+	all = append(all, bs...)
+	all = append(all, []byte(bucketThumbnails), []byte(bucketMeta))
+	for _, b := range bs {
+		all = append(all, orderBucketName(b))
+	}
+	return all
 }
 
 func (d *indexDB) close() {

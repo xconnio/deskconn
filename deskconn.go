@@ -341,13 +341,15 @@ func (d *Deskconn) handleIndexQuery(_ context.Context, inv *xconn.Invocation) *x
 	}
 
 	var args struct {
-		Category string `json:"category"`
+		Categories []string          `json:"categories"`
+		Cursor     map[string]string `json:"cursor"`
+		Limit      int               `json:"limit"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
 		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 	}
 
-	result, err := d.indexer.Query(args.Category)
+	result, err := d.indexer.Query(args.Categories, args.Cursor, args.Limit)
 	if err != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
