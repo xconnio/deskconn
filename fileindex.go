@@ -27,6 +27,10 @@ const (
 	// How many files to process before sleeping to keep CPU usage low.
 	indexBatchSize  = 10
 	indexBatchSleep = 100 * time.Millisecond
+
+	// Pagination defaults for Query.
+	defaultIndexLimit = 100
+	maxIndexLimit     = 500
 	// Extra pause after each thumbnail generation (ffmpeg/decode can be heavy).
 	thumbIndexSleep = 150 * time.Millisecond
 )
@@ -41,8 +45,10 @@ type IndexEntry struct {
 }
 
 type IndexQueryResult struct {
-	Status  string       `json:"status"`
-	Entries []IndexEntry `json:"entries,omitempty"`
+	Status     string            `json:"status"`
+	Entries    []IndexEntry      `json:"entries,omitempty"`
+	NextCursor map[string]string `json:"next_cursor,omitempty"`
+	HasMore    bool              `json:"has_more"`
 }
 
 type IndexService struct {
@@ -102,27 +108,47 @@ func (s *IndexService) Close() {
 	s.db.close()
 }
 
-// Query returns all indexed entries for the given category.
-// If indexing is still in progress it returns {status:"indexing"} with no entries.
-// category may be one of the Category* constants or "all" (empty string also means all).
-func (s *IndexService) Query(category string) (*IndexQueryResult, error) {
+// Query returns a page of indexed entries across the given categories,
+// sorted by modification time (newest first). If categories is empty, all
+// categories are queried. If indexing is still in progress it returns
+// {status:"indexing"} with no entries.
+//
+// cursor resumes iteration from a previous call's NextCursor. limit caps the
+// number of entries returned; values <= 0 or > maxIndexLimit fall back to
+// defaultIndexLimit.
+func (s *IndexService) Query(categories []string, cursor map[string]string, limit int) (*IndexQueryResult, error) {
 	if !s.ready.Load() {
 		return &IndexQueryResult{Status: indexStatusIndexing}, nil
 	}
 
-	result := &IndexQueryResult{Status: indexStatusReady}
+	if limit <= 0 || limit > maxIndexLimit {
+		limit = defaultIndexLimit
+	}
 
 	var targetBuckets [][]byte
-	switch category {
-	case CategoryImages, CategoryVideos, CategoryPDFs, CategoryTexts, CategoryDocuments:
-		targetBuckets = [][]byte{bucketForCategory(category)}
-	default:
+	for _, category := range categories {
+		if b := bucketForCategory(category); b != nil {
+			targetBuckets = append(targetBuckets, b)
+		}
+	}
+	if len(targetBuckets) == 0 {
 		targetBuckets = buckets()
 	}
 
-	entries, err := s.db.entries(targetBuckets)
-	result.Entries = entries
-	return result, err
+	entries, nextCursor, hasMore, err := s.db.queryEntries(targetBuckets, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &IndexQueryResult{
+		Status:  indexStatusReady,
+		Entries: entries,
+		HasMore: hasMore,
+	}
+	if hasMore {
+		result.NextCursor = nextCursor
+	}
+	return result, nil
 }
 
 // indexRoots returns the subset of the five well-known user folders that
