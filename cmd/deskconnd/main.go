@@ -253,7 +253,9 @@ start:
 
 	screen := deskconn.NewScreen(sessionBus, systemBus)
 	mpris := deskconn.NewMPRIS(sessionBus)
-	deskconnApis := deskconn.NewDeskconn(screen, mpris)
+	audio := deskconn.NewAudio()
+	defer audio.Close()
+	deskconnApis := deskconn.NewDeskconn(screen, mpris, audio)
 
 	if err := deskconnApis.Register(localSession); err != nil {
 		log.Fatal(err)

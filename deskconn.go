@@ -39,6 +39,11 @@ const (
 	ProcedureMPRISNext      = "io.xconn.deskconn.deskconnd.mpris.next"
 	ProcedureMPRISPrevious  = "io.xconn.deskconn.deskconnd.mpris.previous"
 
+	ProcedureAudioMute       = "io.xconn.deskconn.deskconnd.audio.mute"
+	ProcedureAudioUnmute     = "io.xconn.deskconn.deskconnd.audio.unmute"
+	ProcedureAudioToggleMute = "io.xconn.deskconn.deskconnd.audio.togglemute"
+	ProcedureAudioIsMuted    = "io.xconn.deskconn.deskconnd.audio.ismuted"
+
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
 	ErrNotAuthorized   = "wamp.error.not_authorized"
@@ -55,12 +60,13 @@ type Deskconn struct {
 	files           *FileBrowser
 	screen          *Screen
 	mpris           *MPRIS
+	audio           *Audio
 	printer         *Printer
 	logs            *logSessions
 	indexer         *IndexService
 }
 
-func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
+func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio) *Deskconn {
 	d := &Deskconn{
 		shellSession:    newInteractiveShellSession(),
 		keys:            newKeyManager(),
@@ -70,6 +76,7 @@ func NewDeskconn(screen *Screen, mpris *MPRIS) *Deskconn {
 		files:           NewFileBrowser(),
 		screen:          screen,
 		mpris:           mpris,
+		audio:           audio,
 		printer:         NewPrinter(),
 		logs:            newLogSessions(),
 	}
@@ -124,6 +131,10 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureMPRISPause:          d.handlePause,
 		ProcedureMPRISNext:           d.handleNext,
 		ProcedureMPRISPrevious:       d.handlePrevious,
+		ProcedureAudioMute:           d.handleAudioMute,
+		ProcedureAudioUnmute:         d.handleAudioUnmute,
+		ProcedureAudioToggleMute:     d.handleAudioToggleMute,
+		ProcedureAudioIsMuted:        d.handleAudioIsMuted,
 		ProcedureLogs:                d.handleLogs,
 		ProcedureIndexQuery:          d.handleIndexQuery,
 		ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
@@ -276,6 +287,36 @@ func (d *Deskconn) handlePrevious(_ context.Context, inv *xconn.Invocation) *xco
 	}
 
 	return xconn.NewInvocationResult()
+}
+
+func (d *Deskconn) handleAudioMute(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	if err := d.audio.Mute(); err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult()
+}
+
+func (d *Deskconn) handleAudioUnmute(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	if err := d.audio.Unmute(); err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult()
+}
+
+func (d *Deskconn) handleAudioToggleMute(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	muted, err := d.audio.ToggleMute()
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(muted)
+}
+
+func (d *Deskconn) handleAudioIsMuted(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	muted, err := d.audio.IsMuted()
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(muted)
 }
 
 func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
