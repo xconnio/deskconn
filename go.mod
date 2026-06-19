@@ -8,6 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/godbus/dbus/v5 v5.2.0
 	github.com/grandcat/zeroconf v1.0.0
+	github.com/jfreymuth/pulse v0.1.1
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/phin1x/go-ipp v1.7.0
 	github.com/shirou/gopsutil v3.21.11+incompatible
