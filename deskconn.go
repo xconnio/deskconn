@@ -31,6 +31,7 @@ const (
 	ProcedureLogs                = "io.xconn.deskconn.deskconnd.logs"
 	ProcedurePing                = "io.xconn.deskconn.deskconnd.ping"
 	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
+	ProcedureWallpaperGet        = "io.xconn.deskconn.deskconnd.wallpaper.get"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
@@ -64,6 +65,7 @@ type Deskconn struct {
 	printer         *Printer
 	logs            *logSessions
 	indexer         *IndexService
+	wallpaper       *Wallpaper
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio) *Deskconn {
@@ -79,6 +81,9 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio) *Deskconn {
 		audio:           audio,
 		printer:         NewPrinter(),
 		logs:            newLogSessions(),
+	}
+	if screen != nil {
+		d.wallpaper = NewWallpaper(screen.SessionBus())
 	}
 
 	cfgDir, err := CfgDirectory()
@@ -137,6 +142,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureAudioIsMuted:        d.handleAudioIsMuted,
 		ProcedureLogs:                d.handleLogs,
 		ProcedureIndexQuery:          d.handleIndexQuery,
+		ProcedureWallpaperGet:        d.wallpaper.HandleGet,
 		ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},

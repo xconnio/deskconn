@@ -231,7 +231,7 @@ const thumbnailMaxDim = 160
 
 func isImageFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
-	case ".jpg", ".jpeg", ".png", ".gif":
+	case extJpg, extJpeg, extPng, extGif:
 		return true
 	}
 	return false
