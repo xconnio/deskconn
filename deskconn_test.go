@@ -33,7 +33,7 @@ func TestBrightnessGetSet(t *testing.T) {
 	require.NoError(t, err)
 	sessionConn, err := dbus.ConnectSessionBus()
 	require.NoError(t, err)
-	screen := deskconn.NewScreen(sessionConn, conn)
+	screen := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 	mpris := deskconn.NewMPRIS(sessionConn)
 	audio := deskconn.NewAudio()
 	defer audio.Close()

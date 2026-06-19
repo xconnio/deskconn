@@ -112,9 +112,14 @@ type PrintingConfig struct {
 	Mode PrintMode `yaml:"mode,omitempty"`
 }
 
+type ScreenshotConfig struct {
+	Enabled bool `yaml:"enabled,omitempty"`
+}
+
 type Config struct {
-	Devices  []Device       `yaml:"devices"`
-	Printing PrintingConfig `yaml:"printing,omitempty"`
+	Devices    []Device         `yaml:"devices"`
+	Printing   PrintingConfig   `yaml:"printing,omitempty"`
+	Screenshot ScreenshotConfig `yaml:"screenshot,omitempty"`
 }
 
 type ClientSessions struct {

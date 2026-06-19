@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
+	"github.com/godbus/dbus/v5"
 	"github.com/olekukonko/tablewriter"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
@@ -196,6 +197,10 @@ func main() {
 	logsTail := logsCmd.Flag("tail", "Number of lines to show from the end (-1 = default)").Short('n').
 		Default("-1").Int64()
 	logsSince := logsCmd.Flag("since", "Show entries since duration ago (e.g. 1h, 30m)").String()
+
+	screenshotCmd := app.Command("screenshot", "Screenshot settings")
+	screenshotEnableCmd := screenshotCmd.Command("enable", "Allow remote screenshot access")
+	screenshotDisableCmd := screenshotCmd.Command("disable", "Deny remote screenshot access")
 
 	selfCmd := app.Command("self", "Manage the installed deskconn CLI.")
 	selfVersionCmd := selfCmd.Command("version", "Show the installed deskconn version")
@@ -1100,6 +1105,87 @@ func main() {
 		if err := deskconn.StreamLogs(localSession, realm, source, *logsFollow, *logsTail, *logsSince); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
+
+	case screenshotEnableCmd.FullCommand():
+		fmt.Print("Deskconn will take a screenshot to verify screenshot permission. Allow? (y/n): ")
+		reader := bufio.NewReader(os.Stdin)
+		text, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		switch strings.ToLower(strings.TrimSpace(text)) {
+		case "y", "yes":
+		default:
+			fmt.Fprintln(os.Stderr, "screenshot enable cancelled")
+			return
+		}
+
+		homedir, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		credFilePath := filepath.Join(homedir, ".deskconn/credentials.json")
+		if _, err := os.Stat(credFilePath); err != nil {
+			fmt.Fprintln(os.Stderr, "device is not attached to any account")
+			return
+		}
+
+		data, err := os.ReadFile(credFilePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		var creds deskconn.Credentials
+		if err := json.Unmarshal(data, &creds); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		session, err := deskconn.ConnectDeviceRealm(context.Background(), creds.Realm, cfgDirectory, false)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		callResp := session.Call(deskconn.ProcedureScreenshotPermission).Do()
+		if callResp.Err != nil {
+			fmt.Fprintln(os.Stderr, callResp.Err)
+			sessionBus, err := dbus.ConnectSessionBus()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			_ = deskconn.RevokeScreenshotPermission(sessionBus)
+			return
+		}
+		if err := deskconn.EnableScreenshot(cfgDirectory); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		fmt.Println("screenshot enabled")
+
+	case screenshotDisableCmd.FullCommand():
+		sessionBus, err := dbus.ConnectSessionBus()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		defer sessionBus.Close()
+		var disableErr error
+		if err := deskconn.RevokeScreenshotPermission(sessionBus); err != nil {
+			disableErr = errors.Join(disableErr, fmt.Errorf("revoke screenshot permission: %w", err))
+		}
+		if err := deskconn.DisableScreenshot(cfgDirectory); err != nil {
+			disableErr = errors.Join(disableErr, err)
+		}
+		if disableErr != nil {
+			fmt.Fprintln(os.Stderr, disableErr)
+			return
+		}
+		fmt.Println("screenshot disabled")
 
 	case selfUpdateCmd.FullCommand():
 		if err := updateApp(cfgDirectory); err != nil {

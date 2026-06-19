@@ -257,7 +257,7 @@ start:
 	}
 	defer sessionBus.Close()
 
-	screen := deskconn.NewScreen(sessionBus, systemBus)
+	screen := deskconn.NewScreen(sessionBus, systemBus, cfgDirectory)
 	mpris := deskconn.NewMPRIS(sessionBus)
 	audio := deskconn.NewAudio()
 	defer audio.Close()
