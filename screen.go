@@ -52,6 +52,8 @@ type Screen struct {
 	brightnessDeviceExists bool
 }
 
+func (s *Screen) SessionBus() *dbus.Conn { return s.sessionBus }
+
 func NewScreen(sessionBus, systemBus *dbus.Conn) *Screen {
 	s := &Screen{
 		sessionBus: sessionBus,

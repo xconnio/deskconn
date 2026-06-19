@@ -15,6 +15,13 @@ import (
 )
 
 const (
+	extJpg  = ".jpg"
+	extJpeg = ".jpeg"
+	extPng  = ".png"
+	extGif  = ".gif"
+	extBmp  = ".bmp"
+	extWebp = ".webp"
+
 	CategoryImages    = "images"
 	CategoryVideos    = "videos"
 	CategoryPDFs      = "pdfs"
@@ -387,7 +394,7 @@ func (s *IndexService) storeThumbnailSlow(path, category string, size int64) {
 
 func fileCategory(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {
-	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".heic", ".heif":
+	case extJpg, extJpeg, extPng, extGif, extBmp, extWebp, ".ico", ".tiff", ".tif", ".heic", ".heif":
 		return CategoryImages
 	case ".mp4", ".webm", ".mov", ".avi", ".mkv", ".ogv", ".flv", ".wmv", ".m4v", ".3gp":
 		return CategoryVideos
