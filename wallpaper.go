@@ -2,7 +2,9 @@ package deskconn
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
@@ -327,16 +329,32 @@ func wallpaperMimeType(path string) string {
 	}
 }
 
-func (w *Wallpaper) HandleGet(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+func (w *Wallpaper) load() (string, []byte, error) {
 	path, err := w.path()
 	if err != nil {
-		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		return "", nil, err
 	}
 
 	data, err := os.ReadFile(path)
+
+	return path, data, err
+}
+
+func (w *Wallpaper) HandleGet(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	path, data, err := w.load()
 	if err != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 
 	return xconn.NewInvocationResult(wallpaperMimeType(path), data)
+}
+
+func (w *Wallpaper) HandleChecksum(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	_, data, err := w.load()
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	sum := sha256.Sum256(data)
+	return xconn.NewInvocationResult(hex.EncodeToString(sum[:]))
 }

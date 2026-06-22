@@ -32,6 +32,7 @@ const (
 	ProcedurePing                = "io.xconn.deskconn.deskconnd.ping"
 	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
 	ProcedureWallpaperGet        = "io.xconn.deskconn.deskconnd.wallpaper.get"
+	ProcedureWallpaperChecksum   = "io.xconn.deskconn.deskconnd.wallpaper.checksum"
 
 	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
@@ -143,6 +144,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureLogs:                d.handleLogs,
 		ProcedureIndexQuery:          d.handleIndexQuery,
 		ProcedureWallpaperGet:        d.wallpaper.HandleGet,
+		ProcedureWallpaperChecksum:   d.wallpaper.HandleChecksum,
 		ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
