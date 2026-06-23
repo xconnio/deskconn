@@ -14,9 +14,9 @@ require (
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
-	github.com/xconnio/wampproto-go v0.0.0-20251205113711-968e34250b9a
-	github.com/xconnio/xconn-go v0.1.1-0.20260413134126-500053d9c099
-	github.com/xconnio/xconn-webrtc-go v0.0.0-20260604105404-c57dd5bc04c2
+	github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318
+	github.com/xconnio/xconn-go v0.1.1-0.20260623101916-a2ee1d584214
+	github.com/xconnio/xconn-webrtc-go v0.0.0-20260623102520-82019a286eeb
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.43.0
 	golang.org/x/term v0.36.0
