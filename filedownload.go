@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/xconnio/xconn-go"
@@ -33,7 +35,7 @@ type fileHeaderMsg struct {
 	IsDir   bool   `json:"is_dir"`
 }
 
-func (d *Deskconn) handleFileDownload(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleFileDownload(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 	remotePath, err := inv.ArgString(0)
 	if err != nil {
 		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
@@ -91,9 +93,9 @@ func (d *Deskconn) handleFileDownload(_ context.Context, inv *xconn.Invocation) 
 
 	var streamErr error
 	if info.IsDir() {
-		streamErr = dlStreamDir(inv, resolvedPath, basePath, sendKey)
+		streamErr = dlStreamDir(ctx, inv, resolvedPath, basePath, sendKey)
 	} else {
-		streamErr = dlStreamFile(inv, resolvedPath, basePath, sendKey)
+		streamErr = dlStreamFile(ctx, inv, resolvedPath, basePath, sendKey)
 	}
 	if streamErr != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, streamErr.Error())
@@ -121,7 +123,7 @@ func dlSendProgress(inv *xconn.Invocation, sendKey []byte, msgType string, paylo
 	return inv.SendProgress([]any{msgType, encrypted}, nil)
 }
 
-func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string, sendKey []byte) error {
+func dlStreamDir(ctx context.Context, inv *xconn.Invocation, dirPath, basePath string, sendKey []byte) error {
 	info, err := os.Lstat(dirPath)
 	if err != nil {
 		return err
@@ -145,13 +147,16 @@ func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string, sendKey []byte
 	}
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		entryPath := filepath.Join(dirPath, entry.Name())
 		if entry.IsDir() {
-			if err := dlStreamDir(inv, entryPath, basePath, sendKey); err != nil {
+			if err := dlStreamDir(ctx, inv, entryPath, basePath, sendKey); err != nil {
 				return err
 			}
 		} else {
-			if err := dlStreamFile(inv, entryPath, basePath, sendKey); err != nil {
+			if err := dlStreamFile(ctx, inv, entryPath, basePath, sendKey); err != nil {
 				return err
 			}
 		}
@@ -160,7 +165,7 @@ func dlStreamDir(inv *xconn.Invocation, dirPath, basePath string, sendKey []byte
 	return nil
 }
 
-func dlStreamFile(inv *xconn.Invocation, filePath, basePath string, sendKey []byte) error {
+func dlStreamFile(ctx context.Context, inv *xconn.Invocation, filePath, basePath string, sendKey []byte) error {
 	info, err := os.Lstat(filePath)
 	if err != nil {
 		return err
@@ -189,6 +194,9 @@ func dlStreamFile(inv *xconn.Invocation, filePath, basePath string, sendKey []by
 
 	buf := make([]byte, fileChunkSize)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		n, readErr := f.Read(buf)
 		if n > 0 {
 			chunk := make([]byte, n)
@@ -211,6 +219,18 @@ func dlStreamFile(inv *xconn.Invocation, filePath, basePath string, sendKey []by
 func PullFiles(session *xconn.Session, remotePath, localPath string, recursive bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Cancel the call if the user presses Ctrl+C or the process receives SIGTERM.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	go func() {
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 
 	publicKey, privateKey, err := CreateX25519KeyPair()
 	if err != nil {
