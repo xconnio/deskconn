@@ -3,14 +3,22 @@ package deskconn
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"time"
 
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/mem"
+	psnet "github.com/shirou/gopsutil/net"
 
 	"github.com/xconnio/xconn-go"
 )
+
+type NetworkInterface struct {
+	Name        string  `json:"name"`
+	BytesSentPS float64 `json:"bytes_sent_ps"`
+	BytesRecvPS float64 `json:"bytes_recv_ps"`
+}
 
 type CPUTimes struct {
 	User    float64 `json:"user"`
@@ -43,6 +51,8 @@ type DeviceInfo struct {
 	DiskUsed  uint64 `json:"disk_used"`
 	DiskFree  uint64 `json:"disk_free"`
 	DiskTotal uint64 `json:"disk_total"`
+
+	NetworkInterfaces []NetworkInterface `json:"network_interfaces"`
 }
 
 func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
@@ -60,12 +70,16 @@ func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xco
 		cpuModel = infos[0].ModelName
 	}
 
-	// Two readings 200ms apart to measure actual current CPU activity.
+	// Two readings 200ms apart to measure actual current CPU and network activity.
 	perCPU1, err := cpu.Times(true)
 	if err != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 	agg1, err := cpu.Times(false)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	netStats1, err := psnet.IOCounters(true)
 	if err != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
@@ -75,6 +89,10 @@ func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xco
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 	agg2, err := cpu.Times(false)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	netStats2, err := psnet.IOCounters(true)
 	if err != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
@@ -138,6 +156,30 @@ func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xco
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 
+	physicalNames, err := physicalInterfaces()
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	netMap := make(map[string]psnet.IOCountersStat, len(netStats1))
+	for _, s := range netStats1 {
+		netMap[s.Name] = s
+	}
+	var netInterfaces []NetworkInterface
+	for _, s2 := range netStats2 {
+		if _, ok := physicalNames[s2.Name]; !ok {
+			continue
+		}
+		s1, ok := netMap[s2.Name]
+		if !ok {
+			continue
+		}
+		netInterfaces = append(netInterfaces, NetworkInterface{
+			Name:        s2.Name,
+			BytesSentPS: float64(s2.BytesSent-s1.BytesSent) / 0.2,
+			BytesRecvPS: float64(s2.BytesRecv-s1.BytesRecv) / 0.2,
+		})
+	}
+
 	info := &DeviceInfo{
 		CPUModel:    cpuModel,
 		CPUPhysical: physical,
@@ -158,6 +200,8 @@ func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xco
 		DiskUsed:  diskStat.Total - diskStat.Free,
 		DiskFree:  diskStat.Free,
 		DiskTotal: diskStat.Total,
+
+		NetworkInterfaces: netInterfaces,
 	}
 
 	data, err := json.Marshal(info)
@@ -166,4 +210,23 @@ func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xco
 	}
 
 	return xconn.NewInvocationResult(data)
+}
+
+// physicalInterfaces returns a set of interface names that correspond to real hardware (ethernet, WiFi).
+func physicalInterfaces() (map[string]struct{}, error) {
+	ifaces, err := psnet.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]struct{}, len(ifaces))
+	for _, iface := range ifaces {
+		if iface.HardwareAddr == "" {
+			continue
+		}
+		if _, err := os.Lstat("/sys/class/net/" + iface.Name + "/device"); err == nil {
+			names[iface.Name] = struct{}{}
+		}
+	}
+
+	return names, nil
 }
