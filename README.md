@@ -1,7 +1,7 @@
 # Deskconn
 
-Deskconn is a desktop management suite.
-It consists of two main tools: a desktop daemon and a command-line client.
+A split operating system where the runtime lives on your computer, the interface lives on any device, and applications
+can execute locally or in the cloud.
 
 ## Installation
 ```bash
