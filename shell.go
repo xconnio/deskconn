@@ -81,19 +81,7 @@ func (p *interactiveShellSession) shellIDForInv(inv *xconn.Invocation) string {
 // as the raw key and would break if extra bytes were added).
 func (p *interactiveShellSession) setupEncryption(inv *xconn.Invocation, clientPublicKey []byte,
 	shellID string, embedShellID bool) (*encryptionKeys, *xconn.InvocationResult) {
-	serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
-	if err != nil {
-		return nil, xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-	sharedSecret, err := PerformKeyExchange(serverPrivateKey, clientPublicKey)
-	if err != nil {
-		return nil, xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-	sendKey, err := DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
-	if err != nil {
-		return nil, xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-	receiveKey, err := DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
+	serverPublicKey, sendKey, receiveKey, err := ServerKeyExchange(clientPublicKey)
 	if err != nil {
 		return nil, xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
@@ -573,17 +561,8 @@ func StartInteractiveCommand(session *xconn.Session, realm, procedureName string
 				} else {
 					serverPublicKey = rest
 				}
-				sharedSecret, err := PerformKeyExchange(privateKey, serverPublicKey)
-				if err != nil {
-					close(progressChan)
-					return
-				}
-				sendKey, err = DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
-				if err != nil {
-					close(progressChan)
-					return
-				}
-				receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+				var err error
+				sendKey, receiveKey, err = ClientKeyExchangeKeys(privateKey, serverPublicKey)
 				if err != nil {
 					close(progressChan)
 					return

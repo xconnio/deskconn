@@ -63,6 +63,41 @@ func DeriveKeyHKDF(sharedSecret, info []byte) ([]byte, error) {
 	return key, nil
 }
 
+// ServerKeyExchange generates an ephemeral key pair, performs X25519 with the client's
+// public key, and derives sendKey ("backendToFrontend") and receiveKey ("frontendToBackend").
+// Returns the server's public key so the caller can forward it to the client.
+func ServerKeyExchange(clientPublicKey []byte) (serverPublicKey, sendKey, receiveKey []byte, err error) {
+	serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
+	if err != nil {
+		return
+	}
+	sharedSecret, err := PerformKeyExchange(serverPrivateKey, clientPublicKey)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sendKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
+	return
+}
+
+// ClientKeyExchangeKeys derives sendKey ("frontendToBackend") and receiveKey ("backendToFrontend")
+// from the client's private key and the server's public key.
+func ClientKeyExchangeKeys(privateKey, serverPublicKey []byte) (sendKey, receiveKey []byte, err error) {
+	sharedSecret, err := PerformKeyExchange(privateKey, serverPublicKey)
+	if err != nil {
+		return
+	}
+	sendKey, err = DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
+	if err != nil {
+		return
+	}
+	receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+	return
+}
+
 func EncryptChaCha20Poly1305(plaintext, key []byte) ([]byte, []byte, error) {
 	aead, err := chacha20poly1305.New(key)
 	if err != nil {
