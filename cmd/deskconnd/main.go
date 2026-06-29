@@ -105,6 +105,12 @@ func main() {
 		log.Fatal(regRespPing.Err)
 	}
 
+	regRespCat := sess.Register(deskconn.ProcedureProxyCat,
+		deskconn.ProxyCatHandler(clientSession, cfgDirectory)).Do()
+	if regRespCat.Err != nil {
+		log.Fatal(regRespCat.Err)
+	}
+
 	regRespLogin := sess.Register(deskconn.ProcedureLogin,
 		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSession.Login()

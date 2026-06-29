@@ -125,6 +125,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureFileCopy:            d.handleFileCopy,
 		ProcedureFileDownload:        d.handleFileDownload,
 		ProcedureFileUpload:          d.handleFileUpload,
+		ProcedureFileCat:             d.handleFileCat,
 		ProcedureFileSearch:          d.handleFileSearch,
 		ProcedurePrinterList:         d.printer.handleListPrinters,
 		ProcedurePrinterPrint:        d.printer.handlePrint(),
