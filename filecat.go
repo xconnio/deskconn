@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/xconnio/xconn-go"
@@ -21,49 +20,15 @@ func (d *Deskconn) handleFileCat(ctx context.Context, inv *xconn.Invocation) *xc
 		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 	}
 
-	clientPublicKey, err := inv.ArgBytes(1)
-	if err != nil || len(clientPublicKey) != 32 {
-		return xconn.NewInvocationError(ErrInvalidArgument, "client public key is required")
+	enc, invErr := serverStreamKeyExchange(inv, 1)
+	if invErr != nil {
+		return invErr
 	}
+	sendKey := enc.sendKey
 
-	serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
-	if err != nil {
-		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-
-	sharedSecret, err := PerformKeyExchange(serverPrivateKey, clientPublicKey)
-	if err != nil {
-		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-
-	sendKey, err := DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
-	if err != nil {
-		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-
-	if err := inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil); err != nil {
-		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-
-	var resolvedPath string
-	if filepath.IsAbs(remotePath) {
-		resolvedPath = filepath.Clean(remotePath)
-	} else {
-		resolvedPath = filepath.Clean(filepath.Join(homeDir, remotePath))
-	}
-
-	info, err := os.Lstat(resolvedPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return xconn.NewInvocationError(ErrInvalidArgument,
-				fmt.Sprintf("%s: no such file or directory", remotePath))
-		}
-		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	resolvedPath, info, pathErr := resolveAndStatPath(remotePath)
+	if pathErr != nil {
+		return pathErr
 	}
 
 	if info.IsDir() {
@@ -159,15 +124,10 @@ func streamCat(session *xconn.Session, procedure string, p2p bool, prefixArgs ..
 					cancel()
 					return
 				}
-				sharedSecret, err := PerformKeyExchange(privateKey, data[4:])
+				var err error
+				_, receiveKey, err = ClientKeyExchangeKeys(privateKey, data[4:])
 				if err != nil {
 					transferErr = fmt.Errorf("key exchange failed: %w", err)
-					cancel()
-					return
-				}
-				receiveKey, err = DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
-				if err != nil {
-					transferErr = fmt.Errorf("key derivation failed: %w", err)
 					cancel()
 					return
 				}

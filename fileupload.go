@@ -210,17 +210,13 @@ func (s *uploadState) processFrame(frame *uploadFrame) error {
 		}
 
 		remotePath := initMsg.RemotePath
-		homeDir, err := os.UserHomeDir()
+		resolvedRemotePath, err := resolvePath(remotePath)
 		if err != nil {
 			return err
 		}
 
 		s.destIsFile = false
-		if filepath.IsAbs(remotePath) {
-			s.destRoot = filepath.Clean(remotePath)
-		} else {
-			s.destRoot = filepath.Clean(filepath.Join(homeDir, remotePath))
-		}
+		s.destRoot = resolvedRemotePath
 
 		if !initMsg.SourceIsDir {
 			if initMsg.TargetIsDirHint {
@@ -327,37 +323,12 @@ func (d *Deskconn) handleFileUpload(ctx context.Context, inv *xconn.Invocation) 
 					"first upload progress must perform key exchange")
 			}
 
-			clientPublicKey, err := inv.ArgBytes(1)
-			if err != nil {
-				return xconn.NewInvocationError(ErrInvalidArgument, "invalid client public key: "+err.Error())
+			var invErr *xconn.InvocationResult
+			enc, invErr = serverStreamKeyExchange(inv, 1)
+			if invErr != nil {
+				return invErr
 			}
-
-			serverPublicKey, serverPrivateKey, err := CreateX25519KeyPair()
-			if err != nil {
-				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-			}
-
-			sharedSecret, err := PerformKeyExchange(serverPrivateKey, clientPublicKey)
-			if err != nil {
-				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-			}
-
-			sendKey, err := DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
-			if err != nil {
-				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-			}
-
-			receiveKey, err := DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
-			if err != nil {
-				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-			}
-
-			enc = &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey}
 			d.keys.store(callerID, enc)
-
-			if err := inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil); err != nil {
-				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-			}
 			return xconn.NewInvocationError(xconn.ErrNoResult)
 		}
 
@@ -542,16 +513,10 @@ func PushFiles(session *xconn.Session, localPath, remotePath string, recursive b
 					return
 				}
 
-				serverPublicKey := data[4:]
-				sharedSecret, err := PerformKeyExchange(clientPrivateKey, serverPublicKey)
+				var err error
+				sendKey, _, err = ClientKeyExchangeKeys(clientPrivateKey, data[4:])
 				if err != nil {
 					keyExchangeResult <- fmt.Errorf("key exchange failed: %w", err)
-					cancel()
-					return
-				}
-				sendKey, err = DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
-				if err != nil {
-					keyExchangeResult <- fmt.Errorf("key derivation failed: %w", err)
 					cancel()
 					return
 				}

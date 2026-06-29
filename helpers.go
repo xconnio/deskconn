@@ -722,17 +722,7 @@ func clientKeyExchange(session *xconn.Session) (*encryptionKeys, error) {
 		return nil, err
 	}
 
-	sharedSecret, err := PerformKeyExchange(privateKey, serverPublicKey)
-	if err != nil {
-		return nil, err
-	}
-
-	sendKey, err := DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
-	if err != nil {
-		return nil, err
-	}
-
-	receiveKey, err := DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
+	sendKey, receiveKey, err := ClientKeyExchangeKeys(privateKey, serverPublicKey)
 	if err != nil {
 		return nil, err
 	}
