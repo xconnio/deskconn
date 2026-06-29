@@ -759,6 +759,37 @@ func encryptedCall(session *xconn.Session, procedure string, payload []byte, enc
 	return DecryptPayload(encResult, enc.receiveKey)
 }
 
+func ensureDeviceSession(ctx context.Context, clientSessions *ClientSessions, realm, cfgDirectory string,
+	p2p bool) (*xconn.Session, error) {
+	if p2p {
+		return clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
+	}
+	sess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+	return sess, err
+}
+
+func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessions *ClientSessions,
+	cfgDirectory string) (strArg string, bytesArg []byte, sess *xconn.Session, invErr *xconn.InvocationResult) {
+	realm, err := inv.ArgString(0)
+	if err != nil {
+		return "", nil, nil, xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	strArg, err = inv.ArgString(1)
+	if err != nil {
+		return "", nil, nil, xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	bytesArg, err = inv.ArgBytes(2)
+	if err != nil {
+		return "", nil, nil, xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	useP2P, _ := inv.ArgBool(3)
+	sess, err = ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, useP2P)
+	if err != nil {
+		return "", nil, nil, xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return strArg, bytesArg, sess, nil
+}
+
 func CallFileOp(deviceSession *xconn.Session, procedure string, payload []byte) ([]byte, error) {
 	enc, err := clientKeyExchange(deviceSession)
 	if err != nil {
@@ -772,35 +803,14 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 	km := newKeyManager()
 
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		realm, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		procedure, err := inv.ArgString(1)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		payload, err := inv.ArgBytes(2)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		useP2P, _ := inv.ArgBool(3)
-
-		var deviceSession *xconn.Session
-		if useP2P {
-			deviceSession, err = clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
-		} else {
-			deviceSession, _, err = clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
-		}
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		procedure, payload, deviceSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
+		if invErr != nil {
+			return invErr
 		}
 
 		enc, ok := km.fetch(deviceSession.ID())
 		if !ok {
+			var err error
 			enc, err = clientKeyExchange(deviceSession)
 			if err != nil {
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
@@ -824,13 +834,7 @@ func ProxyDeviceInfoHandler(clientSessions *ClientSessions, cfgDirectory string)
 		}
 
 		useP2P, _ := inv.ArgBool(1)
-
-		var deviceSession *xconn.Session
-		if useP2P {
-			deviceSession, err = clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
-		} else {
-			deviceSession, _, err = clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
-		}
+		deviceSession, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, useP2P)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
@@ -853,7 +857,7 @@ func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
 
-		deviceSession, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		deviceSession, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, false)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
@@ -898,7 +902,7 @@ func ProxyLogsHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 			}
 
-			deviceSession, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+			deviceSession, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, false)
 			if err != nil {
 				proxyCalls.Delete(caller)
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
@@ -933,31 +937,9 @@ func ProxyLogsHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 
 func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		realm, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		remotePath, err := inv.ArgString(1)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		publicKey, err := inv.ArgBytes(2)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		useP2P, _ := inv.ArgBool(3)
-
-		var deviceSession *xconn.Session
-		if useP2P {
-			deviceSession, err = clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
-		} else {
-			deviceSession, _, err = clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
-		}
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		remotePath, publicKey, deviceSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
+		if invErr != nil {
+			return invErr
 		}
 
 		callResp := deviceSession.Call(ProcedureFileCat).
