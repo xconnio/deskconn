@@ -97,6 +97,13 @@ func main() {
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
+	catCmd := fileCmd.Command("cat", "Print the contents of a file on a device")
+	catTarget := catCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
+		HintAction(devicePathCompletions(cfgDirectory)).String()
+	catModeFlag := catCmd.Flag("mode",
+		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
+	).Enum(ModeP2P, ModeRouted)
+
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
@@ -362,6 +369,38 @@ func main() {
 		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileDelete, payload, *rmModeFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case catCmd.FullCommand():
+		device, path := parseDevicePath(*catTarget)
+		if path == "" {
+			fmt.Fprintln(os.Stderr, "path is required")
+			return
+		}
+		realm, err := deviceRealm(device, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		switch *catModeFlag {
+		case ModeRouted:
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.CatFile(deviceSession, path); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		default:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.CatFileViaProxy(localSession, realm, path, *catModeFlag == ModeP2P); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		}
 
 	case shellCmd.FullCommand():

@@ -38,6 +38,7 @@ const (
 	ProcedureProxyDeviceInfo  = "io.xconn.deskconn.deskconnd.proxy.device.info"
 	ProcedureProxyLogs        = "io.xconn.deskconn.deskconnd.proxy.logs"
 	ProcedureProxyPing        = "io.xconn.deskconn.deskconnd.proxy.ping"
+	ProcedureProxyCat         = "io.xconn.deskconn.deskconnd.proxy.file.cat"
 	ProcedureLogin            = "io.xconn.deskconn.login"
 	ProcedureLogout           = "io.xconn.deskconn.logout"
 	ProcedureConnect          = "io.xconn.deskconn.connect"
@@ -927,6 +928,49 @@ func ProxyLogsHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 		args = append(args, proxyCall.streamID)
 		proxyCall.send(xconn.NewProgress(args...))
 		return xconn.NewInvocationError(xconn.ErrNoResult)
+	}
+}
+
+func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		remotePath, err := inv.ArgString(1)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		publicKey, err := inv.ArgBytes(2)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		useP2P, _ := inv.ArgBool(3)
+
+		var deviceSession *xconn.Session
+		if useP2P {
+			deviceSession, err = clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
+		} else {
+			deviceSession, _, err = clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		}
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		callResp := deviceSession.Call(ProcedureFileCat).
+			ProgressReceiver(func(pr *xconn.ProgressResult) {
+				_ = inv.SendProgress(pr.Args(), nil)
+			}).
+			Args(remotePath, publicKey).
+			DoContext(ctx)
+
+		if callResp.Err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
+		}
+		return xconn.NewInvocationResult()
 	}
 }
 
