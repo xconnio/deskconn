@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,6 +60,8 @@ const (
 
 	StunServerURL = "stun:stun.l.google.com:19302"
 )
+
+var ErrKeyExpired = errors.New("authentication key expired, please login again")
 
 func EnsureCredentials() (*Credentials, error) {
 	credFilePath, err := CredentialsFilePath()
@@ -162,12 +165,21 @@ func Login(session *xconn.Session, username string) error {
 		return fmt.Errorf("failed to create principal: %w", callResp.Err)
 	}
 
+	principal, err := callResp.ArgDict(0)
+	if err != nil {
+		return fmt.Errorf("unexpected response from principal create: %w", err)
+	}
+	expiresAtStr, err := principal.String("expires_at")
+	if err != nil {
+		return fmt.Errorf("missing expires_at in principal response from create principal: %w", err)
+	}
+
 	accountGetResp := session.Call(ProcedureAccountGet).Do()
 	if accountGetResp.Err != nil {
-		return fmt.Errorf("failed to create principal: %w", callResp.Err)
+		return fmt.Errorf("failed to create principal: %w", accountGetResp.Err)
 	}
 	name := accountGetResp.Args()[0].(map[string]any)["name"].(string)
-	if err = os.WriteFile(privPath, []byte(priv+" "+username+"\n"), 0600); err != nil {
+	if err = os.WriteFile(privPath, []byte(priv+" "+username+" "+expiresAtStr+"\n"), 0600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -190,8 +202,16 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 	}
 
 	credentials := strings.Split(string(credentialsStr), " ")
-	authid := strings.TrimSpace(credentials[1])
 	privKey := strings.TrimSpace(credentials[0])
+	authid := strings.TrimSpace(credentials[1])
+
+	if len(credentials) >= 3 {
+		expiresAtStr := strings.TrimSpace(credentials[2])
+		expiresAt, err := time.Parse(time.RFC3339Nano, expiresAtStr)
+		if err == nil && time.Now().After(expiresAt) {
+			return "", "", fmt.Errorf("%w", ErrKeyExpired)
+		}
+	}
 
 	return authid, privKey, nil
 }

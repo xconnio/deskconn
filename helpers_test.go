@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -127,6 +128,39 @@ func TestReadCredentialsLineEnding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "myauthid", authid)
 	require.Equal(t, "myprivkey", privKey)
+}
+
+func TestReadCredentialsValidExpiry(t *testing.T) {
+	tmpDir := t.TempDir()
+	expiresAt := time.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339Nano)
+	err := os.WriteFile(filepath.Join(tmpDir, "id_ed25519"), []byte("myprivatekey myauthid "+expiresAt+"\n"), 0600)
+	require.NoError(t, err)
+
+	authid, privKey, err := deskconn.ReadCredentials(tmpDir)
+	require.NoError(t, err)
+	require.Equal(t, "myauthid", authid)
+	require.Equal(t, "myprivatekey", privKey)
+}
+
+func TestReadCredentialsExpired(t *testing.T) {
+	tmpDir := t.TempDir()
+	expiresAt := time.Now().Add(-1 * time.Hour).Format(time.RFC3339Nano)
+	err := os.WriteFile(filepath.Join(tmpDir, "id_ed25519"), []byte("myprivatekey myauthid "+expiresAt+"\n"), 0600)
+	require.NoError(t, err)
+
+	_, _, err = deskconn.ReadCredentials(tmpDir)
+	require.ErrorIs(t, err, deskconn.ErrKeyExpired)
+}
+
+func TestReadCredentialsLegacyNoExpiry(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := os.WriteFile(filepath.Join(tmpDir, "id_ed25519"), []byte("myprivatekey myauthid\n"), 0600)
+	require.NoError(t, err)
+
+	authid, privKey, err := deskconn.ReadCredentials(tmpDir)
+	require.NoError(t, err)
+	require.Equal(t, "myauthid", authid)
+	require.Equal(t, "myprivatekey", privKey)
 }
 
 func TestRemoveCredentialsFilesRemovesAll(t *testing.T) {
