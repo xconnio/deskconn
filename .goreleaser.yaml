@@ -22,19 +22,12 @@ builds:
     main: ./cmd/deskconnd
     binary: deskconnd
     env:
-      - CGO_ENABLED=1
-      - CC=gcc
+      - CGO_ENABLED=0
     goos:
       - linux
     goarch:
       - amd64
       - arm64
-    overrides:
-      - goos: linux
-        goarch: arm64
-        env:
-          - CGO_ENABLED=1
-          - CC=aarch64-linux-gnu-gcc
 
 archives:
   - id: release-bundle

@@ -46,26 +46,6 @@ jobs:
           git tag "$TAG_NAME"
           git push origin "$TAG_NAME"
 
-      - name: Install cross-compilation dependencies
-        run: |
-          sudo dpkg --add-architecture arm64
-          # Restrict existing sources to amd64 (Ubuntu 24.04 DEB822 format)
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i '/^Architectures:/d' /etc/apt/sources.list.d/ubuntu.sources
-            sudo sed -i 's/^Types: deb/Types: deb\nArchitectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources
-          fi
-          # Restrict old sources.list format (Ubuntu 22.04)
-          if [ -s /etc/apt/sources.list ]; then
-            sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
-          fi
-          # Add arm64 packages from ports.ubuntu.com
-          CODENAME=$(. /etc/os-release && echo $VERSION_CODENAME)
-          printf 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports %s main restricted universe multiverse\n' \
-            "$CODENAME" "${CODENAME}-updates" "${CODENAME}-security" \
-            | sudo tee /etc/apt/sources.list.d/arm64-ports.list
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libsystemd-dev libsystemd-dev:arm64
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

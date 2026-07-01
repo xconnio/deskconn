@@ -1,11 +1,16 @@
 package deskconn
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -133,7 +138,7 @@ func StreamLogs(session *xconn.Session, realm, source string, follow bool, tailN
 	return callResp.Err
 }
 
-func (d *Deskconn) handleLogs(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleLogs(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 	callerID := inv.Caller()
 
 	if !inv.Progress() {
@@ -172,13 +177,13 @@ func (d *Deskconn) handleLogs(_ context.Context, inv *xconn.Invocation) *xconn.I
 	if strings.HasPrefix(source, "/") {
 		go d.streamFileLogs(ls, streamID, inv, source, follow, tailN)
 	} else {
-		go d.streamJournalLogs(ls, streamID, inv, source, follow, tailN, since)
+		go d.streamJournalLogs(ctx, ls, streamID, inv, source, follow, tailN, since)
 	}
 
 	return xconn.NewInvocationError(xconn.ErrNoResult)
 }
 
-func (d *Deskconn) streamJournalLogs(ls *logSession, streamID uint64, inv *xconn.Invocation,
+func (d *Deskconn) streamJournalLogs(ctx context.Context, ls *logSession, streamID uint64, inv *xconn.Invocation,
 	service string, follow bool, tailN int64, since string) {
 	defer func() {
 		d.logs.deleteIfSame(streamID, ls)
@@ -188,69 +193,84 @@ func (d *Deskconn) streamJournalLogs(ls *logSession, streamID uint64, inv *xconn
 			_ = inv.SendProgress(nil, nil)
 		}
 	}()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	j, err := openJournal()
+	go func() {
+		select {
+		case <-ls.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	args := journalctlArgs(service, follow, tailN, since)
+	cmd := exec.CommandContext(ctx, "journalctl", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error opening journal: %s\n", err.Error()))}, nil)
+		_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error: %s\n", err.Error()))}, nil)
 		return
 	}
-	defer j.close()
 
-	if service != "" {
-		unitName := service
-		if !strings.HasSuffix(unitName, ".service") {
-			unitName += ".service"
-		}
-		if matchErr := j.addMatch("_SYSTEMD_UNIT=" + unitName); matchErr != nil {
-			_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error: %s\n", matchErr.Error()))}, nil)
-			return
-		}
-	}
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
-	if since != "" {
-		dur := parseSinceDuration(since)
-		seekTime := time.Now().Add(-dur)
-		if seekErr := j.seekRealtimeUsec(uint64(seekTime.UnixMicro())); seekErr != nil {
-			_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error seeking: %s\n", seekErr.Error()))}, nil)
-			return
-		}
-	} else {
-		n := tailN
-		if n < 0 {
-			n = 10
-		}
-		if seekErr := j.seekTail(); seekErr == nil && n > 0 {
-			j.previousSkip(uint64(n + 1))
-		}
+	if err := cmd.Start(); err != nil {
+		_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error: %s\n", err.Error()))}, nil)
+		return
 	}
 
 	sent := false
-	for {
-		select {
-		case <-ls.stop:
+	for scanner.Scan() {
+		if ctx.Err() != nil {
 			return
-		default:
+		}
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
 		}
 
-		count, nextErr := j.next()
-		if nextErr != nil {
-			return
-		}
-		if count == 0 {
-			if !follow {
-				if !sent {
-					_ = inv.SendProgress([]any{[]byte("-- No entries --\n")}, nil)
-				}
-				return
-			}
-			j.wait(300 * time.Millisecond)
+		tsUsec, fields, parseErr := parseJournalctlEntry(line)
+		if parseErr != nil {
 			continue
 		}
 
 		sent = true
-		tsUsec := j.realtimeUsec()
-		fields := j.fields()
 		_ = inv.SendProgress([]any{[]byte(formatEntry(tsUsec, fields))}, nil)
+	}
+
+	waitErr := cmd.Wait()
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := scanner.Err(); err != nil {
+		if stderr.Len() > 0 {
+			_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error: %s\n", strings.TrimSpace(stderr.String())))}, nil)
+			return
+		}
+		_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error: %s\n", err.Error()))}, nil)
+		return
+	}
+
+	if !sent {
+		if stderr.Len() > 0 {
+			_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error: %s\n", strings.TrimSpace(stderr.String())))}, nil)
+			return
+		}
+		if waitErr != nil {
+			_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error: %s\n", waitErr.Error()))}, nil)
+			return
+		}
+		_ = inv.SendProgress([]any{[]byte("-- No entries --\n")}, nil)
+		return
+	}
+
+	if waitErr != nil && stderr.Len() > 0 && ctx.Err() == nil {
+		_ = inv.SendProgress([]any{[]byte(fmt.Sprintf("error: %s\n", strings.TrimSpace(stderr.String())))}, nil)
 	}
 }
 
@@ -416,4 +436,59 @@ func formatEntry(tsUsec uint64, fields map[string]string) string {
 		return fmt.Sprintf("%s %s %s: %s\n", tsStr, hostname, ident, msg)
 	}
 	return fmt.Sprintf("%s %s: %s\n", tsStr, hostname, msg)
+}
+
+func journalctlArgs(service string, follow bool, tailN int64, since string) []string {
+	args := []string{"--no-pager", "--output=json"}
+
+	if service != "" {
+		unitName := service
+		if !strings.HasSuffix(unitName, ".service") {
+			unitName += ".service"
+		}
+		args = append(args, "--unit="+unitName)
+	}
+
+	if since != "" {
+		dur := parseSinceDuration(since)
+		args = append(args, "--since="+time.Now().Add(-dur).Format(time.RFC3339Nano))
+	} else if follow {
+		if tailN > 0 {
+			args = append(args, fmt.Sprintf("--lines=%d", tailN))
+		} else {
+			args = append(args, "--since="+time.Now().Format(time.RFC3339Nano))
+		}
+	} else {
+		if tailN < 0 {
+			tailN = 10
+		}
+		args = append(args, fmt.Sprintf("--lines=%d", tailN))
+	}
+
+	if follow {
+		args = append(args, "--follow")
+	}
+
+	return args
+}
+
+func parseJournalctlEntry(line []byte) (uint64, map[string]string, error) {
+	var fields map[string]string
+	if err := json.Unmarshal(line, &fields); err != nil {
+		return 0, nil, err
+	}
+
+	tsUsec := parseJournalTimestamp(fields)
+	return tsUsec, fields, nil
+}
+
+func parseJournalTimestamp(fields map[string]string) uint64 {
+	for _, key := range []string{"__REALTIME_TIMESTAMP", "_SOURCE_REALTIME_TIMESTAMP"} {
+		if raw := fields[key]; raw != "" {
+			if ts, err := strconv.ParseUint(raw, 10, 64); err == nil {
+				return ts
+			}
+		}
+	}
+	return 0
 }
