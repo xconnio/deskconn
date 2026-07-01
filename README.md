@@ -3,162 +3,203 @@
 A split operating system where the runtime lives on your computer, the interface lives on any device, and applications
 can execute locally or in the cloud.
 
+It lets you control Linux desktops remotely (run shells, transfer files, forward ports and more) from any device on your
+account. Connections are routed through the [Deskconn cloud router](https://github.com/xconnio/deskconn-router) and can
+transparently upgrade to direct WebRTC P2P links for lower latency.
+
+## Components
+
+The Deskconn ecosystem consists of five pieces. This repository contains the two that run on the managed desktop:
+
+| Component                                                                                                                               | Role                                                                                                                          |
+|-----------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| [deskconnd](https://github.com/xconnio/deskconn)                                                                                        | Desktop daemon. Registers and exposes desktop APIs over WAMP. Runs as a systemd user service.                                 |
+| [deskconn](https://github.com/xconnio/deskconn)                                                                                         | Control CLI. Attach desktops, manage files, open shells, forward ports, and more.                                             |
+| [deskconn-router](https://github.com/xconnio/deskconn-router)                                                                           | Cloud WAMP router. The central hub — every component (CLI, daemon, account service, web app, mobile app) connects through it. |
+| [deskconn-account-service](https://github.com/xconnio/deskconn-account-service)                                                         | Manages user accounts, organizations, and per-device CryptoSign principals.                                                   |
+| [deskconn-web-app](https://github.com/xconnio/deskconn-web-app) / [deskconn-mobile-app](https://github.com/xconnio/deskconn-mobile-app) | Web and mobile interfaces.                                                                                                    |
+
+### How a command reaches your desktop
+
+```
+deskconn CLI
+    │  (Unix socket — ~/.deskconn/deskconn.sock)
+    ▼
+deskconnd (local proxy)
+    │  (WebSocket — wss://api.deskconn.com/ws or WebRTC P2P)
+    ▼
+deskconnd (target device)
+```
+
+The local `deskconnd` maintains a persistent session to the cloud router per target device. The shell command starts
+over the routed path and migrates transparently to a direct WebRTC connection in the background once the P2P handshake
+completes.
+
+### Authentication
+
+All cloud connections use CryptoSign (Ed25519). `deskconn login` generates a keypair, registers the public key with the
+account service, and stores the private key in `~/.deskconn/id_ed25519`.
+
 ## Installation
+
 ```bash
 curl -fsSL https://get.deskconn.com | sh
 ```
 
-## deskconnd
+This installs `deskconn` and `deskconnd` to `~/.local/bin` and registers `deskconnd` as a systemd user service that
+starts automatically.
 
-The desktop daemon responsible for registering and exposing desktop APIs to the Deskconn ecosystem. It runs in the
-background and enables remote management and control of the desktop.
+## Getting started
 
-### Run
+### 1. Create an account
+
+Sign up at [deskconn.com](https://deskconn.com) or via the mobile app.
+
+### 2. Attach the desktop to the cloud
 
 ```bash
-make run-deskconnd
+deskconn attach --username <email> --password <password>
+# or read the password from stdin
+echo "$PASSWORD" | deskconn attach --username <email> --password-stdin
 ```
 
-## deskconn
+This creates a realm for the desktop under your account and writes credentials to `~/.deskconn/credentials.json`. The
+daemon picks these up automatically and connects to the cloud router.
 
-A command-line tool used to manage desktops. It can attach a desktop to the cloud, execute commands, transfer files,
-manage printers, and perform other administrative tasks.
+### 3. Log in from the CLI
+
+```bash
+deskconn login --username <email> --password <password>
+```
+
+Generates an Ed25519 keypair, registers it with the account service, and stores it locally. You only need to do this
+once per machine; the key is valid for 30 days and is renewed on the next login.
+
+### 4. List your devices
+
+```bash
+deskconn ls
+deskconn ls --refresh    # fetch the current list from the cloud
+deskconn ls --detailed   # show realm, ID, and organisation
+```
+
+### 5. Open a shell
+
+```bash
+deskconn shell <device>
+deskconn shell <device> --mode p2p      # force WebRTC
+deskconn shell <device> --mode routed   # force cloud router
+```
+
+## CLI reference
+
+### Account
+
+```
+deskconn login    [--username] [--password] [--password-stdin]
+deskconn logout
+deskconn whoami
+deskconn attach   [--name] [--username] [--password] [--password-stdin]
+deskconn detach   [--username] [--password] [--password-stdin]
+```
+
+### Devices
+
+```
+deskconn ls [--refresh] [--detailed]
+deskconn ping <device> [--count N]
+```
+
+### Shell & exec
+
+```
+deskconn shell <device> [--mode p2p|routed]
+deskconn exec  <device> <command...> [--p2p]
+```
+
+### File operations
+
+All file commands accept `device:path` for remote paths and a bare `/path` for local paths.
+
+```
+deskconn file ls  <device:path> [--mode p2p|routed]
+deskconn file mv  <src> <dst>   [--mode p2p|routed]
+deskconn file cp  <src> <dst>   [-r] [--mode p2p|routed]
+deskconn file rm  <target>      [--mode p2p|routed]
+deskconn file cat <device:path> [--mode p2p|routed]
+```
+
+### Port forwarding
+
+```
+# Forward local:remote — traffic on localhost:LOCAL goes to REMOTE on the device
+deskconn port forward <device> [-l LOCAL] [-r REMOTE] [--p2p]
+
+# Reverse — the device listens on REMOTE and forwards to localhost:LOCAL
+deskconn port reverse <device> [-r REMOTE] [-l LOCAL] [--p2p]
+```
+
+### Printing
+
+```
+deskconn print --enable [--host-printers]   # allow this desktop to receive print jobs
+deskconn print --disable
+deskconn print --status
+deskconn print --ls <device>                # list printers on a device
+deskconn print <device:printer> <file>      # send a print job
+```
+
+### Configuration
+
+```
+deskconn config show
+deskconn config set <device> alias <value>
+deskconn config unset <device> alias
+deskconn config edit
+```
+
+### Self-update
+
+```
+deskconn self version
+deskconn self update
+```
+
+## Development
 
 ### Build
 
 ```bash
-make build-deskconn
+make build-deskconnd   # builds ./deskconnd
+make build-deskconn    # builds ./deskconn
 ```
 
-### Run
-
-Run the resulting binary to see available commands and help:
+Override the cloud endpoint for local development:
 
 ```bash
-./deskconn
+export DESKCONN_CLOUD_URI=ws://localhost:8080/ws
 ```
 
-### Supported commands
+### Test
 
-Command line interface looks like this:
-
-```text
-usage: deskconn <command> [<args> ...]
-
-Deskconn control CLI
-
-Flags:
-  --[no-]help  Show context-sensitive help (also try --help-long and --help-man).
-
-Commands:
-help [<command>...]
-    Show help.
-
-
-attach [<flags>]
-    Attach a device
-
-    -n, --name=NAME            Device name
-    -u, --username=USERNAME    Username
-    -p, --password=PASSWORD    Password
-        --[no-]password-stdin  Read password from stdin
-
-detach [<flags>]
-    Detach device
-
-    -u, --username=USERNAME    Username
-    -p, --password=PASSWORD    Password
-        --[no-]password-stdin  Read password from stdin
-
-login [<flags>]
-    Login and store credentials
-
-    -u, --username=USERNAME    Username
-    -p, --password=PASSWORD    Password
-        --[no-]password-stdin  Read password from stdin
-
-file ls [<flags>] <target>
-    List files on a device
-
-    --mode=MODE  Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
-
-file mv [<flags>] <src> <dst>
-    Move or rename a file or directory on a device
-
-    --mode=MODE  Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
-
-file cp [<flags>] <src> <dst>
-    Copy files to/from/between devices
-
-    -r, --[no-]recursive  Copy directories recursively
-        --mode=MODE       Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
-
-file rm [<flags>] <target>
-    Remove a file or directory on a device
-
-    --mode=MODE  Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
-
-shell [<flags>] <device>
-    Start interactive shell
-
-    --mode=MODE  Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p
-
-exec [<flags>] <device> <command>...
-    Run a command
-
-    --[no-]p2p  Connect using WebRTC
-
-print [<flags>] [<target>] [<file_path>]
-    Print operations
-
-    --[no-]enable         Enable receiving print jobs on this desktop
-    --[no-]host-printers  Also allow remote clients to list this desktop's printers (use with --enable)
-    --[no-]disable        Disable receiving print jobs on this desktop
-    --[no-]status         Show whether this desktop accepts print jobs
-    --ls=LS               List printers on a device (device name or alias)
-    --[no-]p2p            Connect using WebRTC
-
-port forward [<flags>] <device> [<ports>]
-    Forward a local port to a port on the remote device
-
-    -l, --local=LOCAL    Local port to listen on
-    -r, --remote=REMOTE  Port on the remote device to connect to
-        --[no-]p2p       Connect using WebRTC
-
-ls [<flags>]
-    List devices
-
-    --[no-]refresh   Refresh device list from cloud
-    --[no-]detailed  Show detailed output
-
-whoami
-    Show current user
-
-
-logout
-    Logout
-
-
-config show
-    Show config
-
-
-config set <device> <key> <value>
-    Set device alias
-
-
-config unset <device> <key>
-    Unset device alias
-
-
-config edit
-    Edit full config
-
-
-self version
-    Show the installed deskconn version
-
-
-self update
-    Check for updates and install the latest release
+```bash
+make test
 ```
+
+## Credential files
+
+All credentials and configuration are stored under `~/.deskconn/`:
+
+| File                    | Contents                                                               |
+|-------------------------|------------------------------------------------------------------------|
+| `credentials.json`      | Device attach credentials (realm, authid, keypair) used by `deskconnd` |
+| `id_ed25519`            | CLI private key, username, and key expiry                              |
+| `id_ed25519.pub`        | CLI public key, username, and account name                             |
+| `config.yml`            | Device list and aliases                                                |
+| `principals.json`       | Local CryptoSign principals (used by the local WAMP router)            |
+| `turn_credentials.json` | Cached TURN server credentials for WebRTC                              |
+| `deskconn.sock`         | Unix socket for local CLI–daemon communication                         |
+
+## License
+
+See [LICENSE](LICENSE).
