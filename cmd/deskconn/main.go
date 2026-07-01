@@ -236,8 +236,13 @@ func main() {
 
 	case loginCmd.FullCommand():
 		if _, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519")); err == nil {
-			fmt.Fprintln(os.Stderr, "you are already logged in, please logout first")
-			return
+			_, _, credErr := deskconn.ReadCredentials(cfgDirectory)
+			if errors.Is(credErr, deskconn.ErrKeyExpired) {
+				_ = deskconn.RemoveCredentialsFiles(cfgDirectory)
+			} else {
+				fmt.Fprintln(os.Stderr, "you are already logged in, please logout first")
+				return
+			}
 		}
 
 		if err := login(*loginUsername, *loginPassword, *loginPasswordStdin); err != nil {
@@ -1423,7 +1428,8 @@ func login(flagUsername, flagPassword string, useStdin bool) error {
 func logout(cfgDirectory string) error {
 	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
-		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) {
+		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) ||
+			errors.Is(err, deskconn.ErrKeyExpired) {
 			return deskconn.RemoveCredentialsFiles(cfgDirectory)
 		}
 		return err
