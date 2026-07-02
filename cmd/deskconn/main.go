@@ -82,9 +82,9 @@ func main() {
 
 	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
 	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(cpPathCompletions(cfgDirectory)).String()
 	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(cpPathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
@@ -1277,10 +1277,11 @@ func installCompletions(deskconnBin string) error {
 	if err != nil {
 		return fmt.Errorf("generating bash completion: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(bashDir, "deskconn"), bashOut, 0644); err != nil { // nolint: gosec
+	bashScript := fixBashCompletionSpacing(fixBashCompletionWordBreaks(string(bashOut)))
+	if err := os.WriteFile(filepath.Join(bashDir, "deskconn"), []byte(bashScript), 0644); err != nil { // nolint: gosec
 		return fmt.Errorf("writing bash completion: %w", err)
 	}
-	deskBash := strings.Replace(string(bashOut),
+	deskBash := strings.Replace(bashScript,
 		"complete -F _deskconn_bash_autocomplete -o default deskconn",
 		"complete -F _deskconn_bash_autocomplete -o default desk", 1)
 	if err := os.WriteFile(filepath.Join(bashDir, "desk"), []byte(deskBash), 0644); err != nil { // nolint: gosec
@@ -1300,6 +1301,26 @@ func installCompletions(deskconnBin string) error {
 	}
 
 	return nil
+}
+
+// fixBashCompletionWordBreaks clears ':' from COMP_WORDBREAKS so bash
+// completes "device:path" as one word instead of splitting at the colon.
+func fixBashCompletionWordBreaks(script string) string {
+	const marker = "_deskconn_bash_autocomplete() {\n"
+	return strings.Replace(script, marker, marker+"    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}\n", 1)
+}
+
+// fixBashCompletionSpacing makes path completions behave like "cd": the menu shows only the last
+// path segment (-o filenames), and no trailing space is added after directories/"device:" prefixes.
+// Leaf files are left to bash's default space-append.
+func fixBashCompletionSpacing(script string) string {
+	const marker = `    COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )` + "\n"
+	const replacement = marker +
+		"    compopt -o filenames 2>/dev/null || true\n" +
+		`    if [ "${#COMPREPLY[@]}" -eq 1 ] && [[ "${COMPREPLY[0]}" == */ || "${COMPREPLY[0]}" == *: ]]; then` + "\n" +
+		"        compopt -o nospace 2>/dev/null || true\n" +
+		"    fi\n"
+	return strings.Replace(script, marker, replacement, 1)
 }
 
 func installBinaryFromReader(src io.Reader, dst string, mode os.FileMode) error {
@@ -1684,6 +1705,79 @@ func devicePathCompletions(cfgDirectory string) func() []string {
 		}
 		return names
 	}
+}
+
+// cpPathCompletions falls back to local filename completion when no
+// "device:" prefix is typed, and browses the remote directory once one is.
+func cpPathCompletions(cfgDirectory string) func() []string {
+	return func() []string {
+		current := currentCompletionArg()
+		if !isRemotePath(current) {
+			return devicePathCompletions(cfgDirectory)()
+		}
+		return remoteDevicePathCompletions(cfgDirectory, current)
+	}
+}
+
+// currentCompletionArg returns the partial word under the cursor, passed as
+// the last arg when kingpin's generated script re-invokes the binary with
+// "--completion-bash".
+func currentCompletionArg() string {
+	if len(os.Args) == 0 {
+		return ""
+	}
+	return os.Args[len(os.Args)-1]
+}
+
+// remoteDevicePathCompletions lists entries of the directory being typed in current.
+func remoteDevicePathCompletions(cfgDirectory, current string) []string {
+	device, path := parseDevicePath(current)
+	realm, err := deviceRealm(device, cfgDirectory)
+	if err != nil {
+		return nil
+	}
+
+	dir, prefix := "", path
+	if idx := strings.LastIndexByte(path, '/'); idx >= 0 {
+		dir, prefix = path[:idx+1], path[idx+1:]
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
+	localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = localSession.Leave() }()
+
+	resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, deskconn.ProcedureFileBrowse, []byte(dir)).Do()
+	if resp.Err != nil {
+		return nil
+	}
+	result, err := resp.ArgBytes(0)
+	if err != nil {
+		return nil
+	}
+
+	var browsed deskconn.FileBrowseResult
+	if err := json.Unmarshal(result, &browsed); err != nil {
+		return nil
+	}
+
+	var out []string
+	for _, entry := range browsed.Entries {
+		if !strings.HasPrefix(entry.Name, prefix) {
+			continue
+		}
+		completion := device + ":" + dir + entry.Name
+		if entry.IsDir {
+			completion += "/"
+		}
+		out = append(out, completion)
+	}
+	return out
 }
 
 func isRemotePath(s string) bool {
