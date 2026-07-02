@@ -1752,6 +1752,11 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 	}
 	defer func() { _ = localSession.Leave() }()
 
+	if !deviceHasPersistentSession(localSession, realm) {
+		_ = localSession.Call(deskconn.ProcedureConnect).Args(realm).Do()
+		return nil
+	}
+
 	resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, deskconn.ProcedureFileBrowse, []byte(dir)).Do()
 	if resp.Err != nil {
 		return nil
@@ -1778,6 +1783,19 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 		out = append(out, completion)
 	}
 	return out
+}
+
+func deviceHasPersistentSession(localSession *xconn.Session, realm string) bool {
+	resp := localSession.Call(deskconn.ProcedureConnectedDevices).Do()
+	if resp.Err != nil || len(resp.Args()) == 0 {
+		return false
+	}
+	connected, ok := resp.Args()[0].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = connected[realm]
+	return ok
 }
 
 func isRemotePath(s string) bool {
