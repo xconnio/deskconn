@@ -11,12 +11,13 @@ require (
 	github.com/jfreymuth/pulse v0.1.1
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/phin1x/go-ipp v1.7.0
+	github.com/pion/webrtc/v4 v4.1.6
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318
 	github.com/xconnio/xconn-go v0.1.1-0.20260623101916-a2ee1d584214
-	github.com/xconnio/xconn-webrtc-go v0.0.0-20260623102520-82019a286eeb
+	github.com/xconnio/xconn-webrtc-go v0.0.0-20260703110302-20da93c3f208
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.43.0
 	golang.org/x/term v0.36.0
@@ -47,7 +48,7 @@ require (
 	github.com/olekukonko/errors v1.1.0 // indirect
 	github.com/olekukonko/ll v0.1.4-0.20260115111900-9e59c2286df0 // indirect
 	github.com/pion/datachannel v1.5.10 // indirect
-	github.com/pion/dtls/v3 v3.0.7 // indirect
+	github.com/pion/dtls/v3 v3.1.1 // indirect
 	github.com/pion/ice/v4 v4.0.10 // indirect
 	github.com/pion/interceptor v0.1.41 // indirect
 	github.com/pion/logging v0.2.4 // indirect
@@ -60,8 +61,8 @@ require (
 	github.com/pion/srtp/v3 v3.0.8 // indirect
 	github.com/pion/stun/v3 v3.0.1 // indirect
 	github.com/pion/transport/v3 v3.0.8 // indirect
+	github.com/pion/transport/v4 v4.0.1 // indirect
 	github.com/pion/turn/v4 v4.1.2 // indirect
-	github.com/pion/webrtc/v4 v4.1.6 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/projectdiscovery/ratelimit v0.0.82 // indirect
 	github.com/projectdiscovery/utils v0.6.0 // indirect
