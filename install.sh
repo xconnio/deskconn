@@ -63,6 +63,27 @@ ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
 mkdir -p "$BASH_COMP_DIR" "$ZSH_COMP_DIR"
 
 "$BIN_DIR/deskconn" --completion-script-bash > "$BASH_COMP_DIR/deskconn"
+# ':' is in COMP_WORDBREAKS by default, which splits "device:path" at the colon.
+sed -i '/_deskconn_bash_autocomplete() {/a\    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}' "$BASH_COMP_DIR/deskconn"
+
+# Make path completions behave like "cd": show only the last path segment
+# in the menu, and don't add a trailing space after directories/"device:".
+AWK_SCRIPT="$(mktemp)"
+cat > "$AWK_SCRIPT" << 'AWKEOF'
+{
+    print
+    if ($0 == "    COMPREPLY=( $(compgen -W \"${opts}\" -- ${cur}) )") {
+        print "    compopt -o filenames 2>/dev/null || true"
+        print "    if [ \"${#COMPREPLY[@]}\" -eq 1 ] && [[ \"${COMPREPLY[0]}\" == */ || \"${COMPREPLY[0]}\" == *: ]]; then"
+        print "        compopt -o nospace 2>/dev/null || true"
+        print "    fi"
+    }
+}
+AWKEOF
+awk -f "$AWK_SCRIPT" "$BASH_COMP_DIR/deskconn" > "$BASH_COMP_DIR/deskconn.tmp"
+mv "$BASH_COMP_DIR/deskconn.tmp" "$BASH_COMP_DIR/deskconn"
+rm -f "$AWK_SCRIPT"
+
 sed 's/complete -F _deskconn_bash_autocomplete -o default deskconn/complete -F _deskconn_bash_autocomplete -o default desk/' \
     "$BASH_COMP_DIR/deskconn" > "$BASH_COMP_DIR/desk"
 
