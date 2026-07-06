@@ -35,6 +35,7 @@ type interactiveShellSession struct {
 	migrationTokens map[string]string
 	encKeys         map[string]*encryptionKeys
 	invShellIDs     map[*xconn.Invocation]string // fast-path: inv pointer → shell ID
+	pids            map[string]int               // shell ID → PTY child PID, for /proc cwd lookups
 	sync.Mutex
 }
 
@@ -45,6 +46,7 @@ func newInteractiveShellSession() *interactiveShellSession {
 		migrationTokens: make(map[string]string),
 		encKeys:         make(map[string]*encryptionKeys),
 		invShellIDs:     make(map[*xconn.Invocation]string),
+		pids:            make(map[string]int),
 	}
 }
 
@@ -108,17 +110,46 @@ func (p *interactiveShellSession) cleanupShell(shellID string, inv *xconn.Invoca
 	delete(p.migrationTokens, shellID)
 	delete(p.encKeys, shellID)
 	delete(p.invShellIDs, inv)
+	delete(p.pids, shellID)
 	p.Unlock()
+}
+
+// cwdForShell reads the live working directory of an existing shell straight from
+// the OS, so a new tab can start.
+func (p *interactiveShellSession) cwdForShell(shellID string) (string, error) {
+	p.Lock()
+	pid, ok := p.pids[shellID]
+	p.Unlock()
+	if !ok {
+		return "", fmt.Errorf("no such shell: %s", shellID)
+	}
+	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+}
+
+// resolveStartDir picks the start dir: "prev-shell" kwarg's live cwd, or home.
+func (p *interactiveShellSession) resolveStartDir(inv *xconn.Invocation) (string, error) {
+	if prevShellID := inv.KwargStringOr("prev-shell", ""); prevShellID != "" {
+		if dir, err := p.cwdForShell(prevShellID); err == nil {
+			return dir, nil
+		}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home dir: %w", err)
+	}
+	return homeDir, nil
 }
 
 func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey []byte,
 	shellID string, command string, args ...string) (*os.File, error) {
 	cmd := exec.Command(command, args...)
-	homeDir, err := os.UserHomeDir()
+
+	dir, err := p.resolveStartDir(inv)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get home dir: %w", err)
+		return nil, err
 	}
-	cmd.Dir = homeDir
+	cmd.Dir = dir
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -130,6 +161,7 @@ func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey
 	p.ptmx[shellID] = ptmx
 	p.sessions[shellID] = ps
 	p.invShellIDs[inv] = shellID
+	p.pids[shellID] = cmd.Process.Pid
 	p.Unlock()
 
 	go p.startOutputReader(ptmx, ps, shellID)
@@ -144,6 +176,7 @@ func (p *interactiveShellSession) startOutputReader(ptmx *os.File, ps *ptySessio
 		delete(p.ptmx, shellID)
 		delete(p.sessions, shellID)
 		delete(p.encKeys, shellID)
+		delete(p.pids, shellID)
 		p.Unlock()
 		if shouldClose {
 			if err := ptmx.Close(); err != nil {
