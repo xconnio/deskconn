@@ -374,6 +374,8 @@ start:
 				continue
 			}
 
+			webRtcManager.OnDataChannel(deskconnApis.HandleFileStreamChannel)
+
 			go func(initialExpiresAt int64) {
 				currentExpiresAt := initialExpiresAt
 				const turnCredentialRefreshBuffer = 5 * time.Minute
