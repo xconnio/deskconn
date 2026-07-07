@@ -46,6 +46,9 @@ const (
 	ProcedureAudioToggleMute = "io.xconn.deskconn.deskconnd.audio.togglemute"
 	ProcedureAudioIsMuted    = "io.xconn.deskconn.deskconnd.audio.ismuted"
 
+	ProcedureScreenshot           = "io.xconn.deskconn.deskconnd.screenshot"
+	ProcedureScreenshotPermission = "io.xconn.deskconn.deskconnd.screenshot.permission"
+
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
 	ErrNotAuthorized   = "wamp.error.not_authorized"
@@ -112,40 +115,42 @@ func (d *Deskconn) StartIndexer(ctx context.Context) {
 
 func (d *Deskconn) Register(session *xconn.Session) error {
 	for uri, handler := range map[string]xconn.InvocationHandler{
-		ProcedureKeyExchange:         d.handleKeyExchange,
-		ProcedureScreenBrightnessGet: d.brightnessGetHandler,
-		ProcedureScreenBrightnessSet: d.brightnessSetHandler,
-		ProcedureScreenLock:          d.lockScreenLockHandler,
-		ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
-		ProcedureShell:               d.shellSession.handleShell(),
-		ProcedureExec:                d.shellSession.handleExec(),
-		ProcedureFileBrowse:          d.handleFileBrowse,
-		ProcedureFileRename:          d.handleFileRename,
-		ProcedureFileDelete:          d.handleFileDelete,
-		ProcedureFileCopy:            d.handleFileCopy,
-		ProcedureFileDownload:        d.handleFileDownload,
-		ProcedureFileUpload:          d.handleFileUpload,
-		ProcedureFileCat:             d.handleFileCat,
-		ProcedureFileSearch:          d.handleFileSearch,
-		ProcedurePrinterList:         d.printer.handleListPrinters,
-		ProcedurePrinterPrint:        d.printer.handlePrint(),
-		ProcedurePortForward:         d.handlePortForward,
-		ProcedurePortReverse:         d.handlePortReverse,
-		ProcedureDeviceInfo:          d.handleDeviceInfo,
-		ProcedureMPRISPlayers:        d.handleListPlayers,
-		ProcedureMPRISPlayPause:      d.handlePlayPause,
-		ProcedureMPRISPlay:           d.handlePlay,
-		ProcedureMPRISPause:          d.handlePause,
-		ProcedureMPRISNext:           d.handleNext,
-		ProcedureMPRISPrevious:       d.handlePrevious,
-		ProcedureAudioMute:           d.handleAudioMute,
-		ProcedureAudioUnmute:         d.handleAudioUnmute,
-		ProcedureAudioToggleMute:     d.handleAudioToggleMute,
-		ProcedureAudioIsMuted:        d.handleAudioIsMuted,
-		ProcedureLogs:                d.handleLogs,
-		ProcedureIndexQuery:          d.handleIndexQuery,
-		ProcedureWallpaperGet:        d.wallpaper.HandleGet,
-		ProcedureWallpaperChecksum:   d.wallpaper.HandleChecksum,
+		ProcedureKeyExchange:          d.handleKeyExchange,
+		ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
+		ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
+		ProcedureScreenLock:           d.lockScreenLockHandler,
+		ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
+		ProcedureShell:                d.shellSession.handleShell(),
+		ProcedureExec:                 d.shellSession.handleExec(),
+		ProcedureFileBrowse:           d.handleFileBrowse,
+		ProcedureFileRename:           d.handleFileRename,
+		ProcedureFileDelete:           d.handleFileDelete,
+		ProcedureFileCopy:             d.handleFileCopy,
+		ProcedureFileDownload:         d.handleFileDownload,
+		ProcedureFileUpload:           d.handleFileUpload,
+		ProcedureFileCat:              d.handleFileCat,
+		ProcedureFileSearch:           d.handleFileSearch,
+		ProcedurePrinterList:          d.printer.handleListPrinters,
+		ProcedurePrinterPrint:         d.printer.handlePrint(),
+		ProcedurePortForward:          d.handlePortForward,
+		ProcedurePortReverse:          d.handlePortReverse,
+		ProcedureDeviceInfo:           d.handleDeviceInfo,
+		ProcedureMPRISPlayers:         d.handleListPlayers,
+		ProcedureMPRISPlayPause:       d.handlePlayPause,
+		ProcedureMPRISPlay:            d.handlePlay,
+		ProcedureMPRISPause:           d.handlePause,
+		ProcedureMPRISNext:            d.handleNext,
+		ProcedureMPRISPrevious:        d.handlePrevious,
+		ProcedureAudioMute:            d.handleAudioMute,
+		ProcedureAudioUnmute:          d.handleAudioUnmute,
+		ProcedureAudioToggleMute:      d.handleAudioToggleMute,
+		ProcedureAudioIsMuted:         d.handleAudioIsMuted,
+		ProcedureScreenshot:           d.handleScreenshot,
+		ProcedureScreenshotPermission: d.handleScreenShotPermission,
+		ProcedureLogs:                 d.handleLogs,
+		ProcedureIndexQuery:           d.handleIndexQuery,
+		ProcedureWallpaperGet:         d.wallpaper.HandleGet,
+		ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
 		ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
@@ -326,6 +331,24 @@ func (d *Deskconn) handleAudioIsMuted(_ context.Context, _ *xconn.Invocation) *x
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 	return xconn.NewInvocationResult(muted)
+}
+
+func (d *Deskconn) handleScreenshot(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	data, err := d.screen.Screenshot()
+	if err != nil {
+		log.WithError(err).Error("screenshot failed")
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(data)
+}
+
+func (d *Deskconn) handleScreenShotPermission(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	_, err := CaptureScreenshot(d.screen.sessionBus)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	return xconn.NewInvocationResult()
 }
 
 func (d *Deskconn) handleSessionLeave(event *xconn.Event) {

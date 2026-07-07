@@ -54,7 +54,7 @@ func TestNewBrightnessDeviceFound(t *testing.T) {
 	require.NoError(t, err)
 	sessionConn, err := dbus.ConnectSessionBus()
 	require.NoError(t, err)
-	b := deskconn.NewScreen(sessionConn, conn)
+	b := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 
 	brightness, err := b.GetBrightness()
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestNewBrightnessNoDevice(t *testing.T) {
 	require.NoError(t, err)
 	sessionConn, err := dbus.ConnectSessionBus()
 	require.NoError(t, err)
-	b := deskconn.NewScreen(sessionConn, conn)
+	b := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 
 	err = b.SetBrightness(70)
 	require.EqualError(t, err, "brightness device not available")
@@ -87,7 +87,7 @@ func TestGetBrightness(t *testing.T) {
 	require.NoError(t, err)
 	sessionConn, err := dbus.ConnectSessionBus()
 	require.NoError(t, err)
-	b := deskconn.NewScreen(sessionConn, conn)
+	b := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 	value, err := b.GetBrightness()
 	require.NoError(t, err)
 	require.Equal(t, 20, value)
@@ -106,7 +106,7 @@ func TestGetBrightnessFileError(t *testing.T) {
 	require.NoError(t, err)
 	sessionConn, err := dbus.ConnectSessionBus()
 	require.NoError(t, err)
-	b := deskconn.NewScreen(sessionConn, conn)
+	b := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 
 	_, err = b.GetBrightness()
 	require.Error(t, err)
