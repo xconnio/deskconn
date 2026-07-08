@@ -312,7 +312,7 @@ func kdeWallpaperPath() string {
 	return ""
 }
 
-func wallpaperMimeType(path string) string {
+func imageMimeTypeByExt(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case extPng:
 		return "image/png"
@@ -346,7 +346,7 @@ func (w *Wallpaper) HandleGet(_ context.Context, _ *xconn.Invocation) *xconn.Inv
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 
-	return xconn.NewInvocationResult(wallpaperMimeType(path), data)
+	return xconn.NewInvocationResult(imageMimeTypeByExt(path), data)
 }
 
 func (w *Wallpaper) HandleChecksum(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
