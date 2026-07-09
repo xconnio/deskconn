@@ -122,72 +122,102 @@ type Config struct {
 	Screenshot ScreenshotConfig `yaml:"screenshot,omitempty"`
 }
 
+type deviceSession struct {
+	session     *xconn.Session
+	connectedAt time.Time
+	ctx         context.Context
+	cancel      context.CancelFunc
+}
+
 type ClientSessions struct {
-	deviceSessionByRealm map[string]*xconn.Session
-	connectedAtByRealm   map[string]time.Time
-	loggedIn             bool
+	sessions map[string]*deviceSession
+	loggedIn bool
 	sync.Mutex
 }
 
 func NewClientSessions() *ClientSessions {
 	return &ClientSessions{
-		deviceSessionByRealm: make(map[string]*xconn.Session),
-		connectedAtByRealm:   make(map[string]time.Time),
+		sessions: make(map[string]*deviceSession),
 	}
 }
 
-func (c *ClientSessions) SessionByRealm(authid string) (*xconn.Session, bool) {
+func (c *ClientSessions) SessionByRealm(realm string) (*xconn.Session, bool) {
 	c.Lock()
 	defer c.Unlock()
-	session, ok := c.deviceSessionByRealm[authid]
-	return session, ok
+	session, ok := c.sessions[realm]
+	if !ok {
+		return nil, false
+	}
+	return session.session, true
 }
 
-func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session) {
+func (c *ClientSessions) SessionContext(realm string) (context.Context, bool) {
 	c.Lock()
-	c.deviceSessionByRealm[realm] = session
-	c.connectedAtByRealm[realm] = time.Now()
+	defer c.Unlock()
+	session, ok := c.sessions[realm]
+	if !ok {
+		return nil, false
+	}
+	return session.ctx, true
+}
+
+func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session,
+	ctx context.Context, cancel context.CancelFunc) {
+	c.Lock()
+	if old, ok := c.sessions[realm]; ok {
+		old.cancel()
+	}
+	c.sessions[realm] = &deviceSession{
+		session:     session,
+		connectedAt: time.Now(),
+		ctx:         ctx,
+		cancel:      cancel,
+	}
 	c.Unlock()
 }
 
 func (c *ClientSessions) DeviceSessions() map[string]int64 {
 	c.Lock()
 	defer c.Unlock()
-	result := make(map[string]int64, len(c.connectedAtByRealm))
-	for realm, t := range c.connectedAtByRealm {
-		result[realm] = t.Unix()
+	result := make(map[string]int64, len(c.sessions))
+	for realm, session := range c.sessions {
+		result[realm] = session.connectedAt.Unix()
 	}
 	return result
 }
 
 func (c *ClientSessions) DeleteDeviceSession(realm string) {
 	c.Lock()
-	delete(c.deviceSessionByRealm, realm)
-	delete(c.connectedAtByRealm, realm)
+	if session, ok := c.sessions[realm]; ok {
+		session.cancel()
+		delete(c.sessions, realm)
+	}
 	c.Unlock()
 }
 
 func (c *ClientSessions) Disconnect(realm string) {
 	c.Lock()
-	session := c.deviceSessionByRealm[realm]
-	delete(c.deviceSessionByRealm, realm)
-	delete(c.connectedAtByRealm, realm)
+	session, ok := c.sessions[realm]
+	if ok {
+		session.cancel()
+		delete(c.sessions, realm)
+	}
 	c.Unlock()
 
-	if session != nil {
-		_ = session.Leave()
+	if ok {
+		_ = session.session.Leave()
 	}
 }
 
 func (c *ClientSessions) DisconnectAll() {
 	c.Lock()
-	sessions := c.deviceSessionByRealm
-	c.deviceSessionByRealm = make(map[string]*xconn.Session)
-	c.connectedAtByRealm = make(map[string]time.Time)
+	sessions := c.sessions
+	c.sessions = make(map[string]*deviceSession)
 	c.Unlock()
 
-	for _, session := range sessions {
-		_ = session.Leave()
+	for _, entry := range sessions {
+		entry.cancel()
+		_ = entry.session.Leave()
 	}
 }
 
@@ -231,13 +261,16 @@ func (c *ClientSessions) EnsureDeviceSessionWithUpgrade(ctx context.Context, rea
 // returns the WebRTC session. Returns nil on failure.
 func (c *ClientSessions) upgradeToWebRTC(cloudSession *xconn.Session, authid, privateKey, realm,
 	cfgDirectory string) *xconn.Session {
-	webrtcSession, err := ConnectWebrtc(context.Background(), cloudSession, realm, authid, privateKey, cfgDirectory)
+	ctx, cancel := context.WithCancel(context.Background())
+	webrtcSession, err := ConnectWebrtc(context.Background(), cloudSession, realm, authid, privateKey,
+		cfgDirectory, cancel)
 	if err != nil {
 		log.Printf("webrtc upgrade: failed to connect: %v", err)
+		cancel()
 		return nil
 	}
 
-	c.StoreDeviceSession(realm, webrtcSession)
+	c.StoreDeviceSession(realm, webrtcSession, ctx, cancel)
 
 	log.Printf("webrtc upgrade: session for %s upgraded to WebRTC", realm)
 	go c.reconnectLoop(webrtcSession, authid, privateKey, realm, cfgDirectory) //nolint
@@ -265,13 +298,15 @@ func (c *ClientSessions) EnsureP2PDeviceSession(ctx context.Context, realm,
 		return nil, err
 	}
 
-	webrtcSession, err := ConnectWebrtc(ctx, cloudSession, realm, authid, privateKey, cfgDirectory)
+	sessionCtx, cancel := context.WithCancel(context.Background())
+	webrtcSession, err := ConnectWebrtc(ctx, cloudSession, realm, authid, privateKey, cfgDirectory, cancel)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
 	_ = cloudSession.Leave()
-	c.StoreDeviceSession(realm, webrtcSession)
+	c.StoreDeviceSession(realm, webrtcSession, sessionCtx, cancel)             //nolint:contextcheck
 	go c.reconnectLoop(webrtcSession, authid, privateKey, realm, cfgDirectory) //nolint
 	return webrtcSession, nil
 }
@@ -292,9 +327,12 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKe
 			time.Sleep(retryDelay)
 			continue
 		}
-		webrtcSession, err := ConnectWebrtc(context.Background(), cloudSession, realm, authid, privateKey, cfgDirectory)
+		sessionCtx, cancel := context.WithCancel(context.Background())
+		webrtcSession, err := ConnectWebrtc(context.Background(), cloudSession, realm, authid, privateKey,
+			cfgDirectory, cancel)
 		if err != nil {
 			log.Printf("failed to connect using webrtc: %v", err)
+			cancel()
 			retryDelay *= 2
 			if retryDelay > maxDelay {
 				retryDelay = maxDelay
@@ -306,12 +344,13 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKe
 		if sess, ok := c.SessionByRealm(realm); ok {
 			if sess.Connected() {
 				_ = webrtcSession.Leave()
+				cancel()
 				break
 			}
 
 			c.DeleteDeviceSession(realm)
 		}
-		c.StoreDeviceSession(realm, webrtcSession)
+		c.StoreDeviceSession(realm, webrtcSession, sessionCtx, cancel)
 		<-webrtcSession.Done()
 	}
 }
@@ -331,11 +370,12 @@ func (c *ClientSessions) Login() {
 func (c *ClientSessions) Logout() {
 	c.Lock()
 	c.loggedIn = false
-	deviceSessions := c.deviceSessionByRealm
-	c.deviceSessionByRealm = make(map[string]*xconn.Session)
+	sessions := c.sessions
+	c.sessions = make(map[string]*deviceSession)
 	c.Unlock()
 
-	for _, session := range deviceSessions {
-		_ = session.Leave()
+	for _, session := range sessions {
+		session.cancel()
+		_ = session.session.Leave()
 	}
 }
