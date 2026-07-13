@@ -17,7 +17,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318
 	github.com/xconnio/xconn-go v0.1.1-0.20260623101916-a2ee1d584214
-	github.com/xconnio/xconn-webrtc-go v0.0.0-20260709105745-3a94538c3e3c
+	github.com/xconnio/xconn-webrtc-go v0.0.0-20260713105202-e23ffce34677
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.43.0
 	golang.org/x/term v0.36.0
