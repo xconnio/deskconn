@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -67,25 +68,25 @@ func main() {
 
 	lsFileCmd := fileCmd.Command("ls", "List files on a device")
 	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	lsFileModeFlag := lsFileCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
 	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	mvModeFlag := mvCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
 	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().
-		HintAction(cpPathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().
-		HintAction(cpPathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
@@ -93,15 +94,22 @@ func main() {
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
 	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	rmModeFlag := rmCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	catCmd := fileCmd.Command("cat", "Print the contents of a file on a device")
 	catTarget := catCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	catModeFlag := catCmd.Flag("mode",
+		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
+	).Enum(ModeP2P, ModeRouted)
+
+	editCmd := fileCmd.Command("edit", "Edit a text file on a device with $EDITOR and send only the diff")
+	editTarget := editCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
+		HintAction(remotePathCompletions(cfgDirectory)).String()
+	editModeFlag := editCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
@@ -412,6 +420,100 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		}
+
+	case editCmd.FullCommand():
+		device, path := parseDevicePath(*editTarget)
+		if path == "" {
+			fmt.Fprintln(os.Stderr, "path is required")
+			return
+		}
+		if !deskconn.IsEditableExtension(path) {
+			fmt.Fprintf(os.Stderr, "%s: not a text file, editing is not supported\n", path)
+			return
+		}
+		realm, err := deviceRealm(device, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		var original []byte
+		switch *editModeFlag {
+		case ModeRouted:
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			original, err = deskconn.ReadFile(deviceSession, path)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		default:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			original, err = deskconn.ReadFileViaProxy(localSession, realm, path, *editModeFlag == ModeP2P)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		}
+
+		tmpFile, err := os.CreateTemp("", "deskconn-edit-*-"+filepath.Base(path))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		tmpPath := tmpFile.Name()
+		defer func() { _ = os.Remove(tmpPath) }()
+
+		if _, err := tmpFile.Write(original); err != nil {
+			_ = tmpFile.Close()
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if err := tmpFile.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+
+		editCmdExec := exec.Command(editor, tmpPath) // nolint: gosec
+		editCmdExec.Stdin = os.Stdin
+		editCmdExec.Stdout = os.Stdout
+		editCmdExec.Stderr = os.Stderr
+		if err := editCmdExec.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		edited, err := os.ReadFile(tmpPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		if bytes.Equal(original, edited) {
+			fmt.Println("no changes made")
+			return
+		}
+
+		patch := deskconn.BuildEditPatch(original, edited)
+		payload, _ := json.Marshal(map[string]string{"path": path, "patch": patch})
+		if err := fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileEdit,
+			payload, *editModeFlag); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		fmt.Println("file updated")
 
 	case shellCmd.FullCommand():
 		realm, err := deviceRealm(*shellDeviceName, cfgDirectory)
@@ -1793,9 +1895,9 @@ func devicePathCompletions(cfgDirectory string) func() []string {
 	}
 }
 
-// cpPathCompletions falls back to local filename completion when no
+// remotePathCompletions falls back to local filename completion when no
 // "device:" prefix is typed, and browses the remote directory once one is.
-func cpPathCompletions(cfgDirectory string) func() []string {
+func remotePathCompletions(cfgDirectory string) func() []string {
 	return func() []string {
 		current := currentCompletionArg()
 		if !isRemotePath(current) {

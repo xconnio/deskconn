@@ -12,6 +12,7 @@ require (
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/phin1x/go-ipp v1.7.0
 	github.com/pion/webrtc/v4 v4.1.6
+	github.com/sergi/go-diff v1.4.0
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1

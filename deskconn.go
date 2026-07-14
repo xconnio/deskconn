@@ -26,6 +26,7 @@ const (
 	ProcedureFileRename          = "io.xconn.deskconn.deskconnd.file.rename"
 	ProcedureFileDelete          = "io.xconn.deskconn.deskconnd.file.delete"
 	ProcedureFileCopy            = "io.xconn.deskconn.deskconnd.file.copy"
+	ProcedureFileEdit            = "io.xconn.deskconn.deskconnd.file.edit"
 	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
 	ProcedureDeviceInfo          = "io.xconn.deskconn.deskconnd.device.info"
 	ProcedureLogs                = "io.xconn.deskconn.deskconnd.logs"
@@ -126,6 +127,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureFileRename:           d.handleFileRename,
 		ProcedureFileDelete:           d.handleFileDelete,
 		ProcedureFileCopy:             d.handleFileCopy,
+		ProcedureFileEdit:             d.handleFileEdit,
 		ProcedureFileDownload:         d.handleFileDownload,
 		ProcedureFileUpload:           d.handleFileUpload,
 		ProcedureFileCat:              d.handleFileCat,

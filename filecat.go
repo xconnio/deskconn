@@ -71,14 +71,26 @@ func (d *Deskconn) handleFileCat(ctx context.Context, inv *xconn.Invocation) *xc
 }
 
 func CatFile(session *xconn.Session, remotePath string) error {
-	return streamCat(session, ProcedureFileCat, false, remotePath)
+	return streamCat(session, ProcedureFileCat, false, os.Stdout, remotePath)
 }
 
 func CatFileViaProxy(localSession *xconn.Session, realm, remotePath string, p2p bool) error {
-	return streamCat(localSession, ProcedureProxyCat, p2p, realm, remotePath)
+	return streamCat(localSession, ProcedureProxyCat, p2p, os.Stdout, realm, remotePath)
 }
 
-func streamCat(session *xconn.Session, procedure string, p2p bool, prefixArgs ...any) error {
+func ReadFile(session *xconn.Session, remotePath string) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	err := streamCat(session, ProcedureFileCat, false, buf, remotePath)
+	return buf.Bytes(), err
+}
+
+func ReadFileViaProxy(localSession *xconn.Session, realm, remotePath string, p2p bool) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	err := streamCat(localSession, ProcedureProxyCat, p2p, buf, realm, remotePath)
+	return buf.Bytes(), err
+}
+
+func streamCat(session *xconn.Session, procedure string, p2p bool, out io.Writer, prefixArgs ...any) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -148,7 +160,7 @@ func streamCat(session *xconn.Session, procedure string, p2p bool, prefixArgs ..
 				return
 			}
 
-			if _, err := os.Stdout.Write(chunk); err != nil {
+			if _, err := out.Write(chunk); err != nil {
 				transferErr = err
 				cancel()
 				return
