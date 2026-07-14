@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -102,6 +103,13 @@ func main() {
 	catTarget := catCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(devicePathCompletions(cfgDirectory)).String()
 	catModeFlag := catCmd.Flag("mode",
+		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
+	).Enum(ModeP2P, ModeRouted)
+
+	editCmd := fileCmd.Command("edit", "Edit a text file on a device with $EDITOR and send only the diff")
+	editTarget := editCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
+		HintAction(devicePathCompletions(cfgDirectory)).String()
+	editModeFlag := editCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
@@ -412,6 +420,100 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		}
+
+	case editCmd.FullCommand():
+		device, path := parseDevicePath(*editTarget)
+		if path == "" {
+			fmt.Fprintln(os.Stderr, "path is required")
+			return
+		}
+		if !deskconn.IsEditableExtension(path) {
+			fmt.Fprintf(os.Stderr, "%s: not a text file, editing is not supported\n", path)
+			return
+		}
+		realm, err := deviceRealm(device, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		var original []byte
+		switch *editModeFlag {
+		case ModeRouted:
+			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			original, err = deskconn.ReadFile(deviceSession, path)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		default:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			original, err = deskconn.ReadFileViaProxy(localSession, realm, path, *editModeFlag == ModeP2P)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		}
+
+		tmpFile, err := os.CreateTemp("", "deskconn-edit-*-"+filepath.Base(path))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		tmpPath := tmpFile.Name()
+		defer func() { _ = os.Remove(tmpPath) }()
+
+		if _, err := tmpFile.Write(original); err != nil {
+			_ = tmpFile.Close()
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if err := tmpFile.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+
+		editCmdExec := exec.Command(editor, tmpPath) // nolint: gosec
+		editCmdExec.Stdin = os.Stdin
+		editCmdExec.Stdout = os.Stdout
+		editCmdExec.Stderr = os.Stderr
+		if err := editCmdExec.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		edited, err := os.ReadFile(tmpPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		if bytes.Equal(original, edited) {
+			fmt.Println("no changes made")
+			return
+		}
+
+		patch := deskconn.BuildEditPatch(original, edited)
+		payload, _ := json.Marshal(map[string]string{"path": path, "patch": patch})
+		if err := fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileEdit,
+			payload, *editModeFlag); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		fmt.Println("file updated")
 
 	case shellCmd.FullCommand():
 		realm, err := deviceRealm(*shellDeviceName, cfgDirectory)

@@ -1,6 +1,7 @@
 package deskconn_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn"
+	"github.com/xconnio/xconn-go"
 )
 
 func tempDirInHome(t *testing.T) string {
@@ -253,4 +255,158 @@ func TestFileBrowserCopyPathEscapesHome(t *testing.T) {
 	fb := deskconn.NewFileBrowser()
 	err := fb.Copy("/etc/hosts", "/etc/hosts2")
 	require.ErrorContains(t, err, "relative path escapes home directory")
+}
+
+func TestFileBrowserEditAppliesPatch(t *testing.T) {
+	dir := tempDirInHome(t)
+	path := filepath.Join(dir, "edit.txt")
+	original := []byte("hello world\n")
+	require.NoError(t, os.WriteFile(path, original, 0644))
+
+	edited := []byte("hello there world\n")
+	patch := deskconn.BuildEditPatch(original, edited)
+
+	fb := deskconn.NewFileBrowser()
+	require.NoError(t, fb.Edit(path, patch))
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, edited, got)
+}
+
+func TestFileBrowserEditPreservesFileMode(t *testing.T) {
+	dir := tempDirInHome(t)
+	path := filepath.Join(dir, "edit.sh")
+	original := []byte("echo one\n")
+	require.NoError(t, os.WriteFile(path, original, 0755))
+
+	patch := deskconn.BuildEditPatch(original, []byte("echo two\n"))
+
+	fb := deskconn.NewFileBrowser()
+	require.NoError(t, fb.Edit(path, patch))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0755), info.Mode().Perm())
+}
+
+func TestFileBrowserEditRejectsBinaryFile(t *testing.T) {
+	dir := tempDirInHome(t)
+	path := filepath.Join(dir, "video.mp4")
+	original := []byte("fake\x00mp4\x00data")
+	require.NoError(t, os.WriteFile(path, original, 0644))
+
+	fb := deskconn.NewFileBrowser()
+	err := fb.Edit(path, "")
+	require.ErrorContains(t, err, "binary file, editing is not supported")
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, original, got)
+}
+
+func TestIsEditableExtension(t *testing.T) {
+	require.True(t, deskconn.IsEditableExtension("notes.txt"))
+	require.True(t, deskconn.IsEditableExtension("main.go"))
+	require.True(t, deskconn.IsEditableExtension("Makefile"))
+	require.True(t, deskconn.IsEditableExtension(".gitignore"))
+
+	require.False(t, deskconn.IsEditableExtension("movie.mp4"))
+	require.False(t, deskconn.IsEditableExtension("photo.jpg"))
+	require.False(t, deskconn.IsEditableExtension("report.pdf"))
+	require.False(t, deskconn.IsEditableExtension("resume.docx"))
+}
+
+func TestFileBrowserEditConflictLeavesFileUntouched(t *testing.T) {
+	dir := tempDirInHome(t)
+	path := filepath.Join(dir, "edit.txt")
+	original := []byte("hello world\n")
+	require.NoError(t, os.WriteFile(path, original, 0644))
+
+	patch := deskconn.BuildEditPatch(original, []byte("hello there world\n"))
+
+	changed := []byte("something else entirely\n")
+	require.NoError(t, os.WriteFile(path, changed, 0644))
+
+	fb := deskconn.NewFileBrowser()
+	err := fb.Edit(path, patch)
+	require.ErrorContains(t, err, "patch could not be applied cleanly")
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, changed, got)
+}
+
+func TestFileBrowserEditEmptyPath(t *testing.T) {
+	fb := deskconn.NewFileBrowser()
+	err := fb.Edit("", "")
+	require.ErrorContains(t, err, "path cannot be empty")
+}
+
+func TestFileBrowserEditPathEscapesHome(t *testing.T) {
+	fb := deskconn.NewFileBrowser()
+	err := fb.Edit("/etc/hosts", "")
+	require.ErrorContains(t, err, "relative path escapes home directory")
+}
+
+func TestFileBrowserEditDirectory(t *testing.T) {
+	dir := tempDirInHome(t)
+	fb := deskconn.NewFileBrowser()
+	err := fb.Edit(dir, "")
+	require.ErrorContains(t, err, "is a directory")
+}
+
+func TestFileBrowserEditNonExistent(t *testing.T) {
+	dir := tempDirInHome(t)
+	fb := deskconn.NewFileBrowser()
+	err := fb.Edit(filepath.Join(dir, "ghost.txt"), "")
+	require.Error(t, err)
+}
+
+func TestHandleFileEditRPC(t *testing.T) {
+	r, err := xconn.NewRouter(&xconn.RouterConfig{})
+	require.NoError(t, err)
+	require.NoError(t, r.AddRealm("realm1", xconn.DefaultRealmConfig()))
+
+	callee, err := xconn.ConnectInMemory(r, "realm1")
+	require.NoError(t, err)
+	caller, err := xconn.ConnectInMemory(r, "realm1")
+	require.NoError(t, err)
+
+	d := deskconn.NewDeskconn(nil, nil, nil)
+	require.NoError(t, d.Register(callee))
+
+	dir := tempDirInHome(t)
+	path := filepath.Join(dir, "rpc-edit.txt")
+	original := []byte("hello world\n")
+	require.NoError(t, os.WriteFile(path, original, 0644))
+
+	edited := []byte("hello there world\n")
+	patch := deskconn.BuildEditPatch(original, edited)
+
+	payload, err := json.Marshal(map[string]string{"path": path, "patch": patch})
+	require.NoError(t, err)
+
+	_, err = deskconn.CallFileOp(caller, deskconn.ProcedureFileEdit, payload)
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, edited, got)
+}
+
+func TestBuildEditPatchNoChanges(t *testing.T) {
+	content := []byte("unchanged content\n")
+	patch := deskconn.BuildEditPatch(content, content)
+
+	fb := deskconn.NewFileBrowser()
+	dir := tempDirInHome(t)
+	path := filepath.Join(dir, "unchanged.txt")
+	require.NoError(t, os.WriteFile(path, content, 0644))
+
+	require.NoError(t, fb.Edit(path, patch))
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, content, got)
 }

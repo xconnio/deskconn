@@ -20,10 +20,32 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sergi/go-diff/diffmatchpatch"
+
 	"github.com/xconnio/xconn-go"
 )
 
 var errFilePathEscapesHome = errors.New("relative path escapes home directory")
+var errEditConflict = errors.New("file changed on the device, patch could not be applied cleanly")
+
+const binarySniffLen = 8000
+
+func IsEditableExtension(name string) bool {
+	switch fileCategory(name) {
+	case CategoryImages, CategoryVideos, CategoryPDFs, CategoryDocuments:
+		return false
+	default:
+		return true
+	}
+}
+
+func isBinaryContent(content []byte) bool {
+	sniffLen := len(content)
+	if sniffLen > binarySniffLen {
+		sniffLen = binarySniffLen
+	}
+	return bytes.IndexByte(content[:sniffLen], 0) != -1
+}
 
 type FileEntry struct {
 	Name       string    `json:"name"`
@@ -420,6 +442,57 @@ func (f *FileBrowser) Copy(srcPath, dstPath string) error {
 	return copyFile(resolvedSrc, resolvedDst)
 }
 
+func (f *FileBrowser) Edit(pathArg, patchText string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home dir: %w", err)
+	}
+
+	resolved, err := resolveOperationPath(homeDir, pathArg)
+	if err != nil {
+		return err
+	}
+
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s: is a directory", pathArg)
+	}
+
+	original, err := os.ReadFile(resolved)
+	if err != nil {
+		return err
+	}
+	if isBinaryContent(original) {
+		return fmt.Errorf("%s: binary file, editing is not supported", pathArg)
+	}
+
+	dmp := diffmatchpatch.New()
+	patches, err := dmp.PatchFromText(patchText)
+	if err != nil {
+		return fmt.Errorf("invalid patch: %w", err)
+	}
+
+	patched, applied := dmp.PatchApply(patches, string(original))
+	for _, ok := range applied {
+		if !ok {
+			return errEditConflict
+		}
+	}
+
+	//nolint:gosec // resolved is validated by resolveOperationPath
+	return os.WriteFile(resolved, []byte(patched), info.Mode().Perm())
+}
+
+func BuildEditPatch(original, edited []byte) string {
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain(string(original), string(edited), false)
+	patches := dmp.PatchMake(string(original), diffs)
+	return dmp.PatchToText(patches)
+}
+
 func copyFile(src, dst string) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -706,6 +779,44 @@ func (d *Deskconn) handleFileDelete(_ context.Context, inv *xconn.Invocation) *x
 	}
 
 	if err := d.files.Delete(args.Path); err != nil {
+		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
+	encryptedResult, err := EncryptPayload(resultBytes, enc.sendKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(encryptedResult)
+}
+
+func (d *Deskconn) handleFileEdit(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, ok := d.keys.fetch(inv.Caller())
+	if !ok {
+		return xconn.NewInvocationError(ErrInvalidArgument, "no session keys found, call key exchange first")
+	}
+
+	encrypted, err := inv.ArgBytes(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+	plaintext, err := DecryptPayload(encrypted, enc.receiveKey)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	var args struct {
+		Path  string `json:"path"`
+		Patch string `json:"patch"`
+	}
+	if err := json.Unmarshal(plaintext, &args); err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	if err := d.files.Edit(args.Path, args.Patch); err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
