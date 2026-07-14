@@ -68,25 +68,25 @@ func main() {
 
 	lsFileCmd := fileCmd.Command("ls", "List files on a device")
 	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	lsFileModeFlag := lsFileCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
 	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	mvModeFlag := mvCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
 	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().
-		HintAction(cpPathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().
-		HintAction(cpPathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
@@ -94,21 +94,21 @@ func main() {
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
 	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	rmModeFlag := rmCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	catCmd := fileCmd.Command("cat", "Print the contents of a file on a device")
 	catTarget := catCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	catModeFlag := catCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
 	editCmd := fileCmd.Command("edit", "Edit a text file on a device with $EDITOR and send only the diff")
 	editTarget := editCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
-		HintAction(devicePathCompletions(cfgDirectory)).String()
+		HintAction(remotePathCompletions(cfgDirectory)).String()
 	editModeFlag := editCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
@@ -1895,9 +1895,9 @@ func devicePathCompletions(cfgDirectory string) func() []string {
 	}
 }
 
-// cpPathCompletions falls back to local filename completion when no
+// remotePathCompletions falls back to local filename completion when no
 // "device:" prefix is typed, and browses the remote directory once one is.
-func cpPathCompletions(cfgDirectory string) func() []string {
+func remotePathCompletions(cfgDirectory string) func() []string {
 	return func() []string {
 		current := currentCompletionArg()
 		if !isRemotePath(current) {
