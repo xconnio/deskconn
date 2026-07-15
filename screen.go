@@ -109,6 +109,10 @@ func (s *Screen) Lock() error {
 		return fmt.Errorf("screen lock provider not initialized")
 	}
 
+	if locked, err := s.IsLocked(); err == nil && locked {
+		return nil
+	}
+
 	obj := s.sessionBus.Object(s.lockProvider.service, s.lockProvider.path)
 	return obj.Call(s.lockProvider.iface+"."+s.lockProvider.lock, 0).Err
 }
