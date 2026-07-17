@@ -214,6 +214,8 @@ func main() {
 	selfVersionCmd := selfCmd.Command("version", "Show the installed deskconn version")
 	selfUpdateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
 
+	aiCmds := registerAICommands(app, cfgDirectory)
+
 	if len(os.Args) == 2 && os.Args[1] == "self" {
 		app.Usage([]string{"self"})
 		return
@@ -344,12 +346,7 @@ func main() {
 			}
 		case !srcRemote && dstRemote:
 			dstDevice, dstPath := parseDevicePath(*cpDst)
-			realm, err := deviceRealm(dstDevice, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
+			deviceSession, err := ConnectToMachine(context.Background(), dstDevice, cfgDirectory, *cpModeFlag == ModeP2P)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -359,12 +356,7 @@ func main() {
 			}
 		case srcRemote && !dstRemote:
 			srcDevice, srcPath := parseDevicePath(*cpSrc)
-			realm, err := deviceRealm(srcDevice, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *cpModeFlag == ModeP2P)
+			deviceSession, err := ConnectToMachine(context.Background(), srcDevice, cfgDirectory, *cpModeFlag == ModeP2P)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -627,12 +619,7 @@ func main() {
 				fmt.Printf("printing mode: %s\n", mode)
 			}
 		case *printLsDevice != "":
-			realm, err := deviceRealm(*printLsDevice, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			deviceSession, err := ConnectToMachine(context.Background(), *printLsDevice, cfgDirectory, false)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -673,18 +660,13 @@ func main() {
 				fmt.Fprintln(os.Stderr, "file_path required")
 				return
 			}
-			realm, err := deviceRealm(device, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
 			data, err := os.ReadFile(*printFilePath)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 			filename := filepath.Base(*printFilePath)
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *printP2PFlag)
+			deviceSession, err := ConnectToMachine(context.Background(), device, cfgDirectory, *printP2PFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -728,13 +710,7 @@ func main() {
 			return
 		}
 
-		realm, err := deviceRealm(*portForwardDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *portForwardP2PFlag)
+		deviceSession, err := ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory, *portForwardP2PFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -787,13 +763,7 @@ func main() {
 			return
 		}
 
-		realm, err := deviceRealm(*portReverseDevice, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, *portReverseP2PFlag)
+		deviceSession, err := ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory, *portReverseP2PFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -1294,6 +1264,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
+
+	default:
+		dispatchAICommand(parsedCmd, aiCmds, cfgDirectory)
 	}
 }
 
@@ -1699,6 +1672,20 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 	}
 
 	return "", fmt.Errorf("device not found: %s", deviceName)
+}
+
+func ConnectToMachine(ctx context.Context, machine, cfgDirectory string, useP2P bool) (*xconn.Session, error) {
+	//nolint:contextcheck
+	realm, err := deviceRealm(machine, cfgDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("unknown device %q: %w", machine, err)
+	}
+
+	session, err := deskconn.ConnectDeviceRealm(ctx, realm, cfgDirectory, useP2P)
+	if err != nil {
+		return nil, fmt.Errorf("could not reach %s: %w", machine, err)
+	}
+	return session, nil
 }
 
 func readCredentials(flagUsername, flagPassword string, useStdin bool) (username, password string, err error) {
