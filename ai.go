@@ -29,8 +29,9 @@ type AISessionSummary struct {
 }
 
 type aiSessionPullArgs struct {
-	Path string `json:"path"`
-	Tool string `json:"tool,omitempty"`
+	Path      string `json:"path"`
+	Tool      string `json:"tool,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // AISessionBundle is one tool's bundled session files, as exchanged over the wire.
@@ -110,6 +111,24 @@ func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation)
 	sessions, err := aiLocalSessions(args.Path)
 	if err != nil {
 		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	if args.SessionID != "" {
+		var matches []ai.SessionFile
+		for _, s := range sessions {
+			id := strings.TrimSuffix(filepath.Base(s.Path), ".jsonl")
+			if strings.HasPrefix(id, args.SessionID) {
+				matches = append(matches, s)
+			}
+		}
+		switch {
+		case len(matches) == 0:
+			return xconn.NewInvocationError(ErrOperationFailed, fmt.Sprintf("no session matching %q", args.SessionID))
+		case len(matches) > 1:
+			return xconn.NewInvocationError(ErrOperationFailed,
+				fmt.Sprintf("%q matches more than one session; use a longer prefix", args.SessionID))
+		}
+		sessions = matches
 	}
 
 	byTool := make(map[string][]ai.SessionFile)
@@ -205,8 +224,8 @@ func parseAISessionPullResult(respBytes []byte) ([]AISessionBundle, error) {
 	return bundles, nil
 }
 
-func CallAISessionPull(deviceSession *xconn.Session, path, tool string) ([]AISessionBundle, error) {
-	payload, err := json.Marshal(aiSessionPullArgs{Path: path, Tool: tool})
+func CallAISessionPull(deviceSession *xconn.Session, path, tool, sessionID string) ([]AISessionBundle, error) {
+	payload, err := json.Marshal(aiSessionPullArgs{Path: path, Tool: tool, SessionID: sessionID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -218,9 +237,11 @@ func CallAISessionPull(deviceSession *xconn.Session, path, tool string) ([]AISes
 	return parseAISessionPullResult(respBytes)
 }
 
-func CallAISessionPullProxy(localSession *xconn.Session, realm, path, tool string,
+// CallAISessionPullProxy is CallAISessionPull routed through the local daemon's cached device
+// session for realm, instead of connecting directly.
+func CallAISessionPullProxy(localSession *xconn.Session, realm, path, tool, sessionID string,
 	useP2P bool) ([]AISessionBundle, error) {
-	payload, err := json.Marshal(aiSessionPullArgs{Path: path, Tool: tool})
+	payload, err := json.Marshal(aiSessionPullArgs{Path: path, Tool: tool, SessionID: sessionID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}

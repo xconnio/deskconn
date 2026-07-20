@@ -26,8 +26,9 @@ type aiCommands struct {
 	lsMachine *string
 	lsMode    *string
 
-	syncMachine *string
-	syncMode    *string
+	syncMachine   *string
+	syncMode      *string
+	syncSessionID *string
 
 	resumeSessionID *string
 	resumePrintOnly *bool
@@ -46,6 +47,8 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	syncCmd := aiCmd.Command("sync", "Pull claude sessions from another device onto this one")
 	syncMachine := syncCmd.Arg("machine", "Device to pull sessions from").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
+	syncSessionID := syncCmd.Arg("session-id",
+		"Only pull the session matching this id (or a unique prefix of one); default pulls all").String()
 	syncMode := syncCmd.Flag("mode",
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
@@ -63,6 +66,7 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 		lsMode:          lsMode,
 		syncMachine:     syncMachine,
 		syncMode:        syncMode,
+		syncSessionID:   syncSessionID,
 		resumeSessionID: resumeSessionID,
 		resumePrintOnly: resumePrintOnly,
 	}
@@ -75,7 +79,7 @@ func dispatchAICommand(parsedCmd string, cmds *aiCommands, cfgDirectory string) 
 			fmt.Fprintln(os.Stderr, err)
 		}
 	case cmds.sync.FullCommand():
-		if err := runAISync(cfgDirectory, *cmds.syncMachine, *cmds.syncMode); err != nil {
+		if err := runAISync(cfgDirectory, *cmds.syncMachine, *cmds.syncMode, *cmds.syncSessionID); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	case cmds.resume.FullCommand():
@@ -155,7 +159,7 @@ func runAILs(cfgDirectory, machine, mode string) error {
 	return table.Render()
 }
 
-func runAISync(cfgDirectory, machine, mode string) error {
+func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 	path, err := aiProjectPath()
 	if err != nil {
 		return err
@@ -187,9 +191,9 @@ func runAISync(cfgDirectory, machine, mode string) error {
 
 	var bundles []deskconn.AISessionBundle
 	if session != nil {
-		bundles, err = deskconn.CallAISessionPull(session, path, "")
+		bundles, err = deskconn.CallAISessionPull(session, path, "", sessionID)
 	} else {
-		bundles, err = deskconn.CallAISessionPullProxy(localSession, realm, path, "", useP2P)
+		bundles, err = deskconn.CallAISessionPullProxy(localSession, realm, path, "", sessionID, useP2P)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to pull sessions from %s: %w", machine, err)

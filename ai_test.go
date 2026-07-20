@@ -50,10 +50,17 @@ func isolatedHome(t *testing.T) string {
 // session picker relies on) under homeDir for the project at path.
 func seedClaudeSession(t *testing.T, homeDir, path string) {
 	t.Helper()
+	seedClaudeSessionWithID(t, homeDir, path, "abc")
+}
+
+// seedClaudeSessionWithID is seedClaudeSession with an explicit session id (jsonl basename), so
+// tests can seed more than one session for the same project.
+func seedClaudeSessionWithID(t *testing.T, homeDir, path, sessionID string) {
+	t.Helper()
 	projectDir := filepath.Join(homeDir, ".claude", "projects", claudeProjectDir(homeDir, path))
 	require.NoError(t, os.MkdirAll(projectDir, 0755))
 	content := `{"type":"summary","summary":"Fix the login bug","leafUuid":"x"}` + "\n" + `{"hello":"world"}`
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "abc.jsonl"), []byte(content), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, sessionID+".jsonl"), []byte(content), 0600))
 }
 
 func TestAISessionListHandlerMissingKeyExchange(t *testing.T) {
@@ -98,7 +105,7 @@ func TestAISessionPullHandlerNoMatchingSessionsErrors(t *testing.T) {
 	isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
-	_, err := deskconn.CallAISessionPull(caller, randomPath(t), "")
+	_, err := deskconn.CallAISessionPull(caller, randomPath(t), "", "")
 	require.ErrorContains(t, err, "no local sessions found")
 }
 
@@ -109,7 +116,7 @@ func TestAISessionPullHandlerReturnsBundle(t *testing.T) {
 	path := randomPath(t)
 	seedClaudeSession(t, homeDir, path)
 
-	bundles, err := deskconn.CallAISessionPull(caller, path, "")
+	bundles, err := deskconn.CallAISessionPull(caller, path, "", "")
 	require.NoError(t, err)
 	require.Len(t, bundles, 1)
 	require.Equal(t, ai.ToolClaude, bundles[0].Tool)
@@ -125,4 +132,52 @@ func TestAISessionPullHandlerReturnsBundle(t *testing.T) {
 	_, err = os.Stat(filepath.Join(restoreHome, ".claude", "projects",
 		claudeProjectDir(restoreHome, path), "abc.jsonl"))
 	require.NoError(t, err)
+}
+
+func TestAISessionPullHandlerFiltersBySessionIDPrefix(t *testing.T) {
+	homeDir := isolatedHome(t)
+	caller := setupDeskconnWithInstance(t)
+
+	path := randomPath(t)
+	seedClaudeSessionWithID(t, homeDir, path, "abc123")
+	seedClaudeSessionWithID(t, homeDir, path, "def456")
+
+	bundles, err := deskconn.CallAISessionPull(caller, path, "", "abc")
+	require.NoError(t, err)
+	require.Len(t, bundles, 1)
+
+	restoreHome := t.TempDir()
+	count, err := ai.ExtractTarball(bundles[0].Tarball, restoreHome, path)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+
+	_, err = os.Stat(filepath.Join(restoreHome, ".claude", "projects",
+		claudeProjectDir(restoreHome, path), "abc123.jsonl"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(restoreHome, ".claude", "projects",
+		claudeProjectDir(restoreHome, path), "def456.jsonl"))
+	require.True(t, os.IsNotExist(err))
+}
+
+func TestAISessionPullHandlerSessionIDNoMatchErrors(t *testing.T) {
+	homeDir := isolatedHome(t)
+	caller := setupDeskconnWithInstance(t)
+
+	path := randomPath(t)
+	seedClaudeSessionWithID(t, homeDir, path, "abc123")
+
+	_, err := deskconn.CallAISessionPull(caller, path, "", "zzz")
+	require.ErrorContains(t, err, `no session matching "zzz"`)
+}
+
+func TestAISessionPullHandlerSessionIDAmbiguousPrefixErrors(t *testing.T) {
+	homeDir := isolatedHome(t)
+	caller := setupDeskconnWithInstance(t)
+
+	path := randomPath(t)
+	seedClaudeSessionWithID(t, homeDir, path, "abc123")
+	seedClaudeSessionWithID(t, homeDir, path, "abc456")
+
+	_, err := deskconn.CallAISessionPull(caller, path, "", "abc")
+	require.ErrorContains(t, err, `"abc" matches more than one session; use a longer prefix`)
 }
