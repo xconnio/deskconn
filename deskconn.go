@@ -153,6 +153,8 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureIndexQuery:           d.handleIndexQuery,
 		ProcedureWallpaperGet:         d.wallpaper.HandleGet,
 		ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
+		ProcedureAISessionList:        d.handleAISessionList,
+		ProcedureAISessionPull:        d.handleAISessionPull,
 		ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
