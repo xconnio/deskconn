@@ -32,6 +32,8 @@ type aiCommands struct {
 
 	resumeSessionID *string
 	resumePrintOnly *bool
+	resumeRemote    *string
+	resumeMode      *string
 }
 
 func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiCommands {
@@ -53,10 +55,17 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
 	).Enum(ModeP2P, ModeRouted)
 
-	resumeCmd := aiCmd.Command("resume", "Resume a synced Claude Code session by id (see `ai ls`)")
+	resumeCmd := aiCmd.Command("resume", "Resume a Claude Code session by id (see `ai ls`)")
 	resumeSessionID := resumeCmd.Arg("session-id", "Session id (or a unique prefix of one) to resume").Required().String()
 	resumePrintOnly := resumeCmd.Flag("print-only",
 		"Only print the resume command; don't launch").Bool()
+	resumeRemote := resumeCmd.Flag("remote",
+		"Run claude directly on this device instead of resuming a locally synced session").
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	resumeMode := resumeCmd.Flag("mode",
+		"Connection mode when --remote is set: 'routed' connects directly through the cloud router, "+
+			"default proxies through the local daemon over WebRTC",
+	).Enum(ModeP2P, ModeRouted)
 
 	return &aiCommands{
 		ls:              lsCmd,
@@ -69,6 +78,8 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 		syncSessionID:   syncSessionID,
 		resumeSessionID: resumeSessionID,
 		resumePrintOnly: resumePrintOnly,
+		resumeRemote:    resumeRemote,
+		resumeMode:      resumeMode,
 	}
 }
 
@@ -83,7 +94,11 @@ func dispatchAICommand(parsedCmd string, cmds *aiCommands, cfgDirectory string) 
 			fmt.Fprintln(os.Stderr, err)
 		}
 	case cmds.resume.FullCommand():
-		if err := runAIResume(*cmds.resumeSessionID, *cmds.resumePrintOnly); err != nil {
+		if *cmds.resumeRemote != "" {
+			if err := runAIResumeRemote(cfgDirectory, *cmds.resumeRemote, *cmds.resumeSessionID, *cmds.resumeMode); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		} else if err := runAIResume(*cmds.resumeSessionID, *cmds.resumePrintOnly); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	default:
@@ -267,6 +282,41 @@ func aiResumeCommand(sessionID string) (string, []string) {
 		args = append(args, sessionID)
 	}
 	return "claude", args
+}
+
+func runAIResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
+	path, err := aiProjectPath()
+	if err != nil {
+		return err
+	}
+
+	cmdName, args := aiResumeCommand(sessionID)
+	fullArgs := append([]string{
+		"bash", "-c", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
+	}, args...)
+
+	if mode == ModeRouted {
+		session, err := ConnectToMachine(context.Background(), machine, cfgDirectory, false)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = session.Leave() }()
+
+		return deskconn.StartInteractiveCommand(session, "", deskconn.ProcedureExec, fullArgs...)
+	}
+
+	realm, err := deviceRealm(machine, cfgDirectory)
+	if err != nil {
+		return fmt.Errorf("unknown device %q: %w", machine, err)
+	}
+	localSession, err := xconn.ConnectAnonymous(context.Background(),
+		fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
+	if err != nil {
+		return fmt.Errorf("could not reach local daemon: %w", err)
+	}
+	defer func() { _ = localSession.Leave() }()
+
+	return deskconn.StartInteractiveCommand(localSession, realm, deskconn.ProcedureProxyExec, fullArgs...)
 }
 
 // launch runs tool as a foreground child, inheriting stdio.
