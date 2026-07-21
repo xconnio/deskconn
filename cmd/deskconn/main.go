@@ -37,6 +37,7 @@ var version = "v0.1.0-alpha"
 const (
 	ModeRouted = "routed"
 	ModeP2P    = "p2p"
+	ModeQUIC   = "quic"
 )
 
 func main() {
@@ -89,8 +90,8 @@ func main() {
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
 	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
@@ -346,23 +347,57 @@ func main() {
 			}
 		case !srcRemote && dstRemote:
 			dstDevice, dstPath := parseDevicePath(*cpDst)
-			deviceSession, err := ConnectToMachine(context.Background(), dstDevice, cfgDirectory, *cpModeFlag == ModeP2P)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			if err := deskconn.PushFiles(deviceSession, *cpSrc, dstPath, *cpRecursive); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+			if *cpModeFlag == ModeQUIC {
+				realm, err := deviceRealm(dstDevice, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				defer quicSess.Close()
+				if err := deskconn.PushFilesQUIC(quicSess, *cpSrc, dstPath, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
+			} else {
+				deviceSession, err := ConnectToMachine(context.Background(), dstDevice, cfgDirectory, *cpModeFlag == ModeP2P)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				if err := deskconn.PushFiles(deviceSession, *cpSrc, dstPath, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
 			}
 		case srcRemote && !dstRemote:
 			srcDevice, srcPath := parseDevicePath(*cpSrc)
-			deviceSession, err := ConnectToMachine(context.Background(), srcDevice, cfgDirectory, *cpModeFlag == ModeP2P)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			if err := deskconn.PullFiles(deviceSession, srcPath, *cpDst, *cpRecursive); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+			if *cpModeFlag == ModeQUIC {
+				realm, err := deviceRealm(srcDevice, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				defer quicSess.Close()
+				if err := deskconn.PullFilesQUIC(quicSess, srcPath, *cpDst, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
+			} else {
+				deviceSession, err := ConnectToMachine(context.Background(), srcDevice, cfgDirectory, *cpModeFlag == ModeP2P)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				if err := deskconn.PullFiles(deviceSession, srcPath, *cpDst, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
 			}
 		default:
 			fmt.Fprintln(os.Stderr, "at least one of src or dst must be a remote path (device:path)")
