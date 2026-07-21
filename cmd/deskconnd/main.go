@@ -283,25 +283,17 @@ start:
 			default:
 			}
 
-			crytosignAuthenticator, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
+			cryptosignAuth, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
 			if err != nil {
 				log.Printf("failed to initialize cryptosign authenticator: %v", err)
-
-				// exponential backoff
-				retryDelay *= 2
-				if retryDelay > maxDelay {
-					retryDelay = maxDelay
-				}
+				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
-			xconnClient := xconn.Client{
-				KeepAliveInterval: 30 * time.Second,
-				KeepAliveTimeout:  10 * time.Second,
-				Authenticator:     crytosignAuthenticator,
-			}
 
-			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), cred.Realm)
+			// Open the QUIC connection and the first WAMP session on the device realm.
+			deviceSess, err := xconn.ConnectQUIC(ctx, deskconn.CloudQUICAddress(), cred.Realm,
+				&xconn.QUICDialerConfig{Authenticator: cryptosignAuth, TLSConfig: deskconn.CloudQUICTLSConfig()})
 			if err != nil {
 				if err.Error() == "wamp.error.no_such_realm" {
 					select {
@@ -310,156 +302,41 @@ start:
 					}
 				}
 				log.Printf("failed to connect to cloud, will retry in %v: %v", retryDelay, err)
-
-				// exponential backoff
-				retryDelay *= 2
-				if retryDelay > maxDelay {
-					retryDelay = maxDelay
-				}
+				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
 
-			log.Println("connected successfully to cloud")
+			// Open a second WAMP session on the cloud realm over the same QUIC connection.
+			cloudSess, err := deviceSess.OpenSession(ctx, deskconn.CloudRealm,
+				&xconn.QUICDialerConfig{Authenticator: cryptosignAuth})
+			if err != nil {
+				log.Printf("failed to open cloud realm session, will retry in %v: %v", retryDelay, err)
+				_ = deviceSess.Close()
+				retryDelay = min(retryDelay*2, maxDelay)
+				time.Sleep(retryDelay)
+				continue
+			}
 
-			if err := deskconnApis.Register(cloudSession); err != nil {
-				// exponential backoff
-				retryDelay *= 2
-				if retryDelay > maxDelay {
-					retryDelay = maxDelay
-				}
+			deviceSession := deviceSess.Session
+			cloudSession := cloudSess.Session
+
+			log.Println("connected to cloud")
+
+			if err := deskconnApis.Register(deviceSession); err != nil {
 				log.Printf("failed to register procedures on cloud, will retry in %v: %v", retryDelay, err)
-				_ = cloudSession.Leave()
+				_ = deviceSess.Connection().Close()
+				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
 
-			cloudRealmSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconn.CloudRealm)
-			if err != nil {
-				log.Printf("failed to connect to cloud, will retry in %v: %v", retryDelay, err)
-				retryDelay *= 2
-				if retryDelay > maxDelay {
-					retryDelay = maxDelay
-				}
-				time.Sleep(retryDelay)
-				continue
-			}
-			iceServers, expiresAt, err := deskconn.FetchTURNServers(cloudRealmSession)
-			if err != nil {
-				log.Printf("failed to fetch TURN credentials, using STUN only: %v", err)
-				iceServers = []xconnwebrtc.ICEServer{
-					{URLs: []string{deskconn.StunServerURL}},
-				}
-			}
-
-			webRtcManager := xconnwebrtc.NewWebRTCHandler()
-			cfg := &xconnwebrtc.ProviderConfig{
-				Session:                     cloudSession,
-				ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
-				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
-				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
-				Serializer:                  &serializers.CBORSerializer{},
-				Authenticator:               authenticator,
-				Router:                      router,
-				ICEServers:                  iceServers,
-			}
-			if err := webRtcManager.Setup(cfg); err != nil {
-				retryDelay *= 2
-				if retryDelay > maxDelay {
-					retryDelay = maxDelay
-				}
-				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
-				_ = cloudSession.Leave()
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			webRtcManager.OnDataChannel(deskconnApis.HandleFileStreamChannel)
-
-			go func(initialExpiresAt int64) {
-				currentExpiresAt := initialExpiresAt
-				const turnCredentialRefreshBuffer = 5 * time.Minute
-				for {
-					sleepDur := time.Until(time.Unix(currentExpiresAt, 0)) - turnCredentialRefreshBuffer
-					if sleepDur <= 0 {
-						sleepDur = 0
-					}
-					select {
-					case <-cloudRealmSession.Done():
-						return
-					case <-time.After(sleepDur):
-					}
-
-					newServers, newExpiresAt, err := deskconn.FetchTURNServers(cloudRealmSession)
-					if err != nil {
-						log.Printf("failed to refresh TURN credentials: %v", err)
-						currentExpiresAt = time.Now().Add(10 * time.Second).Unix()
-						continue
-					}
-					webRtcManager.UpdateICEServers(newServers)
-					currentExpiresAt = newExpiresAt
-				}
-			}(expiresAt)
-
-			// reset backoff after successful connection
-			retryDelay = 1 * time.Second
-
-			// wait for session to disconnect
-			<-cloudSession.Done()
-
-			log.Println("disconnected from cloud, retrying...")
-		}
-	}()
-
-	go func() {
-		retryDelay := 1 * time.Second
-		maxDelay := 30 * time.Second
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			crytosignAuthenticator, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
-			if err != nil {
-				log.Printf("failed to initialize cryptosign authenticator: %v", err)
-
-				// exponential backoff
-				retryDelay *= 2
-				if retryDelay > maxDelay {
-					retryDelay = maxDelay
-				}
-				time.Sleep(retryDelay)
-				continue
-			}
-			xconnClient := xconn.Client{
-				KeepAliveInterval: 30 * time.Second,
-				KeepAliveTimeout:  10 * time.Second,
-				Authenticator:     crytosignAuthenticator,
-			}
-			cloudSession, err := xconnClient.Connect(ctx, deskconn.CloudURI(), deskconn.CloudRealm)
-			if err != nil {
-				log.Printf("failed to connect to cloud realm, will retry in %v: %v", retryDelay, err)
-
-				// exponential backoff
-				retryDelay *= 2
-				if retryDelay > maxDelay {
-					retryDelay = maxDelay
-				}
-				time.Sleep(retryDelay)
-				continue
-			}
-
+			// Fetch and maintain authorized principals via the cloud realm session.
 			callResp := cloudSession.Call(deskconn.ProcedureListKeys).Do()
 			if callResp.Err != nil {
-				// exponential backoff
-				retryDelay *= 2
-				if retryDelay > maxDelay {
-					retryDelay = maxDelay
-				}
-				log.Println("Failed to list keys:", callResp.Err)
-				_ = cloudSession.Leave()
+				log.Println("failed to list keys:", callResp.Err)
+				_ = deviceSess.Connection().Close()
+				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -467,7 +344,8 @@ start:
 			jsonData, err := json.MarshalIndent(callResp.Args()[0], "", "  ")
 			if err != nil {
 				log.Println(err)
-				_ = cloudSession.Leave()
+				_ = deviceSess.Connection().Close()
+				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -475,7 +353,8 @@ start:
 			var cryptosignPrincipals []*deskconn.CryptosignPrincipal
 			if err = json.Unmarshal(jsonData, &cryptosignPrincipals); err != nil {
 				log.Println(err)
-				_ = cloudSession.Leave()
+				_ = deviceSess.Connection().Close()
+				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -500,12 +379,72 @@ start:
 			if subResp.Err != nil {
 				log.Println(subResp.Err)
 			}
-			// reset backoff after successful connection
+
+			// Fetch TURN credentials and set up WebRTC via the cloud realm session.
+			iceServers, expiresAt, err := deskconn.FetchTURNServers(cloudSession)
+			if err != nil {
+				log.Printf("failed to fetch TURN credentials, using STUN only: %v", err)
+				iceServers = []xconnwebrtc.ICEServer{
+					{URLs: []string{deskconn.StunServerURL}},
+				}
+			}
+
+			webRtcManager := xconnwebrtc.NewWebRTCHandler()
+			cfg := &xconnwebrtc.ProviderConfig{
+				Session:                     deviceSession,
+				ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
+				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
+				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
+				Serializer:                  &serializers.CBORSerializer{},
+				Authenticator:               authenticator,
+				Router:                      router,
+				ICEServers:                  iceServers,
+			}
+			if err := webRtcManager.Setup(cfg); err != nil {
+				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
+				_ = deviceSess.Connection().Close()
+				retryDelay = min(retryDelay*2, maxDelay)
+				time.Sleep(retryDelay)
+				continue
+			}
+
+			webRtcManager.OnDataChannel(deskconnApis.HandleFileStreamChannel)
+
+			go func(initialExpiresAt int64) {
+				currentExpiresAt := initialExpiresAt
+				const turnCredentialRefreshBuffer = 5 * time.Minute
+				for {
+					sleepDur := time.Until(time.Unix(currentExpiresAt, 0)) - turnCredentialRefreshBuffer
+					if sleepDur <= 0 {
+						sleepDur = 0
+					}
+					select {
+					case <-cloudSession.Done():
+						return
+					case <-time.After(sleepDur):
+					}
+
+					newServers, newExpiresAt, err := deskconn.FetchTURNServers(cloudSession)
+					if err != nil {
+						log.Printf("failed to refresh TURN credentials: %v", err)
+						currentExpiresAt = time.Now().Add(10 * time.Second).Unix()
+						continue
+					}
+					webRtcManager.UpdateICEServers(newServers)
+					currentExpiresAt = newExpiresAt
+				}
+			}(expiresAt)
+
+			// Reset backoff after successful connection.
 			retryDelay = 1 * time.Second
 
-			// wait for session to disconnect
-			<-cloudSession.Done()
+			// Both sessions share the QUIC connection; either ending means reconnect.
+			select {
+			case <-deviceSession.Done():
+			case <-cloudSession.Done():
+			}
 
+			_ = deviceSess.Connection().Close()
 			log.Println("disconnected from cloud, retrying...")
 		}
 	}()
