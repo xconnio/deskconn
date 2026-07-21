@@ -1158,6 +1158,13 @@ func main() {
 			toMiB(info.SwapTotal), toMiB(info.SwapFree), toMiB(info.SwapUsed))
 		fmt.Printf("Disk (/):   %s used, %s free / %s total\n",
 			formatBytes(info.DiskUsed), formatBytes(info.DiskFree), formatBytes(info.DiskTotal))
+		if b := info.Battery; b != nil {
+			fmt.Printf("Battery:    %s (%d%%)", b.Status, b.Percentage)
+			if b.TimeRemainingMins > 0 {
+				fmt.Printf(", %dh%02dm remaining", b.TimeRemainingMins/60, b.TimeRemainingMins%60)
+			}
+			fmt.Println()
+		}
 
 	case logsCmd.FullCommand():
 		realm, err := deviceRealm(*logsDevice, cfgDirectory)
