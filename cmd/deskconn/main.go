@@ -71,8 +71,8 @@ func main() {
 	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	lsFileModeFlag := lsFileCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
 	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().
@@ -80,8 +80,8 @@ func main() {
 	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	mvModeFlag := mvCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
 	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().
@@ -97,29 +97,29 @@ func main() {
 	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	rmModeFlag := rmCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	catCmd := fileCmd.Command("cat", "Print the contents of a file on a device")
 	catTarget := catCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	catModeFlag := catCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	editCmd := fileCmd.Command("edit", "Edit a text file on a device with $EDITOR and send only the diff")
 	editTarget := editCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	editModeFlag := editCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	shellModeFlag := shellCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	execCmd := app.Command("exec", "Run a command")
 	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().
@@ -194,8 +194,8 @@ func main() {
 	infoDevice := infoCmd.Arg("device", "ID, name or alias of device").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	infoModeFlag := infoCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	logsCmd := app.Command("logs", "Stream logs from a device")
 	logsDevice := logsCmd.Arg("device", "ID, name or alias of device").Required().
@@ -286,6 +286,16 @@ func main() {
 			args = append(args, path)
 		}
 		switch *lsFileModeFlag {
+		case ModeQUIC:
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			if err := deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureExec, args...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		case ModeRouted:
 			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 			if err != nil {
@@ -428,6 +438,16 @@ func main() {
 			return
 		}
 		switch *catModeFlag {
+		case ModeQUIC:
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			if err := deskconn.CatFile(quicSess.Session, path); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		case ModeRouted:
 			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 			if err != nil {
@@ -466,6 +486,18 @@ func main() {
 
 		var original []byte
 		switch *editModeFlag {
+		case ModeQUIC:
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			original, err = deskconn.ReadFile(quicSess.Session, path)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
 		case ModeRouted:
 			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 			if err != nil {
@@ -550,6 +582,17 @@ func main() {
 		}
 
 		switch *shellModeFlag {
+		case ModeQUIC:
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			if err := deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureShell); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+
 		case ModeRouted:
 			// Direct cloud connection, no session stored.
 			shellSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
@@ -1137,6 +1180,14 @@ func main() {
 
 		var callResp xconn.CallResponse
 		switch *infoModeFlag {
+		case ModeQUIC:
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			callResp = quicSess.Call(deskconn.ProcedureDeviceInfo).Do()
 		case ModeRouted:
 			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 			if err != nil {
@@ -2022,6 +2073,14 @@ func parseDevicePath(s string) (device, path string) {
 
 func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
 	switch mode {
+	case ModeQUIC:
+		quicSess, err := deskconn.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+		if err != nil {
+			return err
+		}
+		defer quicSess.Connection().Close()
+		_, err = deskconn.CallFileOp(quicSess.Session, procedure, payload)
+		return err
 	case ModeRouted:
 		deviceSession, err := deskconn.ConnectDeviceRealm(ctx, realm, cfgDirectory, false)
 		if err != nil {
