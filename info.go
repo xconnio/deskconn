@@ -53,6 +53,8 @@ type DeviceInfo struct {
 	DiskTotal uint64 `json:"disk_total"`
 
 	NetworkInterfaces []NetworkInterface `json:"network_interfaces"`
+
+	Battery *BatteryInfo `json:"battery,omitempty"`
 }
 
 func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
@@ -202,6 +204,10 @@ func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xco
 		DiskTotal: diskStat.Total,
 
 		NetworkInterfaces: netInterfaces,
+	}
+
+	if battery, err := GetBatteryInfo(); err == nil {
+		info.Battery = battery
 	}
 
 	data, err := json.Marshal(info)
