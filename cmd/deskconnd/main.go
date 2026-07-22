@@ -323,6 +323,9 @@ start:
 
 			log.Println("connected to cloud")
 
+			// Accept file-transfer streams relayed from CLI clients.
+			go deskconnApis.AcceptQUICStreams(deviceSess)
+
 			if err := deskconnApis.Register(deviceSession); err != nil {
 				log.Printf("failed to register procedures on cloud, will retry in %v: %v", retryDelay, err)
 				_ = deviceSess.Connection().Close()

@@ -301,6 +301,23 @@ func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P 
 	return ConnectWebrtc(ctx, session, realm, authid, privKey, cfgDirectory, nil)
 }
 
+func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*xconn.QUICSession, error) {
+	authid, privKey, err := ReadCredentials(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authenticator: %w", err)
+	}
+
+	return xconn.ConnectQUIC(ctx, CloudQUICAddress(), realm, &xconn.QUICDialerConfig{
+		Authenticator: authenticator,
+		TLSConfig:     CloudQUICTLSConfig(),
+	})
+}
+
 func ConnectWebrtc(ctx context.Context, session *xconn.Session, realm, authid, privateKey,
 	cfgDirectory string, onDisconnect func()) (*xconn.Session, error) {
 	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
