@@ -43,8 +43,8 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	lsMachine := lsCmd.Arg("machine", "Device to list sessions on").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	lsMode := lsCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	syncCmd := aiCmd.Command("sync", "Pull claude sessions from another device onto this one")
 	syncMachine := syncCmd.Arg("machine", "Device to pull sessions from").Required().
@@ -52,8 +52,8 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	syncSessionID := syncCmd.Arg("session-id",
 		"Only pull the session matching this id (or a unique prefix of one); default pulls all").String()
 	syncMode := syncCmd.Flag("mode",
-		"Connection mode: 'p2p' uses direct WebRTC, 'routed' uses router, default auto-migrates from routed to p2p",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	resumeCmd := aiCmd.Command("resume", "Resume a Claude Code session by id (see `ai ls`)")
 	resumeSessionID := resumeCmd.Arg("session-id", "Session id (or a unique prefix of one) to resume").Required().String()
@@ -63,9 +63,9 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 		"Run claude directly on this device instead of resuming a locally synced session").
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	resumeMode := resumeCmd.Flag("mode",
-		"Connection mode when --remote is set: 'routed' connects directly through the cloud router, "+
-			"default proxies through the local daemon over WebRTC",
-	).Enum(ModeP2P, ModeRouted)
+		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, 'routed' connects directly "+
+			"through the cloud router, default proxies through the local daemon over WebRTC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	return &aiCommands{
 		ls:              lsCmd,
@@ -133,18 +133,32 @@ func runAILs(cfgDirectory, machine, mode string) error {
 	}
 
 	var sessions []deskconn.AISessionSummary
-	if mode == ModeRouted {
+	switch mode {
+	case ModeQUIC:
+		realm, err := deviceRealm(machine, cfgDirectory)
+		if err != nil {
+			return fmt.Errorf("unknown device %q: %w", machine, err)
+		}
+		quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+		if err != nil {
+			return err
+		}
+		defer quicSess.Connection().Close()
+		sessions, err = deskconn.CallAISessionList(quicSess.Session, path)
+		if err != nil {
+			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
+		}
+	case ModeRouted:
 		session, err := ConnectToMachine(context.Background(), machine, cfgDirectory, false)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = session.Leave() }()
-
 		sessions, err = deskconn.CallAISessionList(session, path)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
 		}
-	} else {
+	default:
 		realm, err := deviceRealm(machine, cfgDirectory)
 		if err != nil {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
@@ -155,7 +169,6 @@ func runAILs(cfgDirectory, machine, mode string) error {
 			return fmt.Errorf("could not reach local daemon: %w", err)
 		}
 		defer func() { _ = localSession.Leave() }()
-
 		sessions, err = deskconn.CallAISessionListProxy(localSession, realm, path, mode == ModeP2P)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
@@ -180,35 +193,40 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 		return err
 	}
 
-	var session *xconn.Session
-	var localSession *xconn.Session
-	var realm string
-	useP2P := mode == ModeP2P
-
-	if mode == ModeRouted {
-		session, err = ConnectToMachine(context.Background(), machine, cfgDirectory, false)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = session.Leave() }()
-	} else {
+	var bundles []deskconn.AISessionBundle
+	switch mode {
+	case ModeQUIC:
+		var realm string
 		realm, err = deviceRealm(machine, cfgDirectory)
 		if err != nil {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
-		localSession, err = xconn.ConnectAnonymous(context.Background(),
-			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
+		quicSess, qErr := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+		if qErr != nil {
+			return qErr
+		}
+		defer quicSess.Connection().Close()
+		bundles, err = deskconn.CallAISessionPull(quicSess.Session, path, "", sessionID)
+	case ModeRouted:
+		session, sErr := ConnectToMachine(context.Background(), machine, cfgDirectory, false)
+		if sErr != nil {
+			return sErr
+		}
+		defer func() { _ = session.Leave() }()
+		bundles, err = deskconn.CallAISessionPull(session, path, "", sessionID)
+	default:
+		var realm string
+		realm, err = deviceRealm(machine, cfgDirectory)
 		if err != nil {
-			return fmt.Errorf("could not reach local daemon: %w", err)
+			return fmt.Errorf("unknown device %q: %w", machine, err)
+		}
+		localSession, lErr := xconn.ConnectAnonymous(context.Background(),
+			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
+		if lErr != nil {
+			return fmt.Errorf("could not reach local daemon: %w", lErr)
 		}
 		defer func() { _ = localSession.Leave() }()
-	}
-
-	var bundles []deskconn.AISessionBundle
-	if session != nil {
-		bundles, err = deskconn.CallAISessionPull(session, path, "", sessionID)
-	} else {
-		bundles, err = deskconn.CallAISessionPullProxy(localSession, realm, path, "", sessionID, useP2P)
+		bundles, err = deskconn.CallAISessionPullProxy(localSession, realm, path, "", sessionID, mode == ModeP2P)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to pull sessions from %s: %w", machine, err)
@@ -295,28 +313,38 @@ func runAIResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
 		"bash", "-c", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
 	}, args...)
 
-	if mode == ModeRouted {
+	switch mode {
+	case ModeQUIC:
+		realm, err := deviceRealm(machine, cfgDirectory)
+		if err != nil {
+			return fmt.Errorf("unknown device %q: %w", machine, err)
+		}
+		quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+		if err != nil {
+			return err
+		}
+		defer quicSess.Connection().Close()
+		return deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureExec, fullArgs...)
+	case ModeRouted:
 		session, err := ConnectToMachine(context.Background(), machine, cfgDirectory, false)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = session.Leave() }()
-
 		return deskconn.StartInteractiveCommand(session, "", deskconn.ProcedureExec, fullArgs...)
+	default:
+		realm, err := deviceRealm(machine, cfgDirectory)
+		if err != nil {
+			return fmt.Errorf("unknown device %q: %w", machine, err)
+		}
+		localSession, err := xconn.ConnectAnonymous(context.Background(),
+			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
+		if err != nil {
+			return fmt.Errorf("could not reach local daemon: %w", err)
+		}
+		defer func() { _ = localSession.Leave() }()
+		return deskconn.StartInteractiveCommand(localSession, realm, deskconn.ProcedureProxyExec, fullArgs...)
 	}
-
-	realm, err := deviceRealm(machine, cfgDirectory)
-	if err != nil {
-		return fmt.Errorf("unknown device %q: %w", machine, err)
-	}
-	localSession, err := xconn.ConnectAnonymous(context.Background(),
-		fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
-	if err != nil {
-		return fmt.Errorf("could not reach local daemon: %w", err)
-	}
-	defer func() { _ = localSession.Leave() }()
-
-	return deskconn.StartInteractiveCommand(localSession, realm, deskconn.ProcedureProxyExec, fullArgs...)
 }
 
 // launch runs tool as a foreground child, inheriting stdio.
