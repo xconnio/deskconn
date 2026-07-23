@@ -111,6 +111,18 @@ func main() {
 		log.Fatal(regRespCat.Err)
 	}
 
+	regRespPrinterList := sess.Register(deskconn.ProcedureProxyPrinterList,
+		deskconn.ProxyPrinterListHandler(clientSession, cfgDirectory)).Do()
+	if regRespPrinterList.Err != nil {
+		log.Fatal(regRespPrinterList.Err)
+	}
+
+	regRespPrinterPrint := sess.Register(deskconn.ProcedureProxyPrinterPrint,
+		deskconn.ProxyPrinterPrintHandler(clientSession, cfgDirectory)).Do()
+	if regRespPrinterPrint.Err != nil {
+		log.Fatal(regRespPrinterPrint.Err)
+	}
+
 	regRespLogin := sess.Register(deskconn.ProcedureLogin,
 		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSession.Login()

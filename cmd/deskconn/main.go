@@ -665,13 +665,23 @@ func main() {
 				deskconn.ProcedureProxyExec, *command...); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
-		default:
+		case ModeRouted:
 			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 			if err := deskconn.StartInteractiveCommand(deviceSession, "", deskconn.ProcedureExec, *command...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		default:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			if err := deskconn.StartInteractiveCommand(localSession, realm,
+				deskconn.ProcedureProxyExec, *command...); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		}
@@ -715,30 +725,43 @@ func main() {
 				fmt.Printf("printing mode: %s\n", mode)
 			}
 		case *printLsDevice != "":
-			var printLsSession *xconn.Session
-			if *printModeFlag == ModeQUIC {
-				realm, err := deviceRealm(*printLsDevice, cfgDirectory)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
+			realm, err := deviceRealm(*printLsDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			var callResp xconn.CallResponse
+			switch *printModeFlag {
+			case ModeQUIC:
 				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
 				defer quicSess.Connection().Close()
-				printLsSession = quicSess.Session
-			} else {
-				var err error
-				printLsSession, err = ConnectToMachine(context.Background(), *printLsDevice, cfgDirectory,
-					*printModeFlag == ModeP2P)
+				callResp = quicSess.Session.Call(deskconn.ProcedurePrinterList).Do()
+			case ModeRouted:
+				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
+				callResp = deviceSession.Call(deskconn.ProcedurePrinterList).Do()
+			case ModeP2P:
+				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				callResp = localSession.Call(deskconn.ProcedureProxyPrinterList).Args(realm, true).Do()
+			default:
+				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				callResp = localSession.Call(deskconn.ProcedureProxyPrinterList).Args(realm).Do()
 			}
-			callResp := printLsSession.Call(deskconn.ProcedurePrinterList).Do()
 			if callResp.Err != nil {
 				fmt.Fprintln(os.Stderr, callResp.Err)
 				return
@@ -780,30 +803,44 @@ func main() {
 				return
 			}
 			filename := filepath.Base(*printFilePath)
-			var printSession *xconn.Session
-			if *printModeFlag == ModeQUIC {
-				realm, err := deviceRealm(device, cfgDirectory)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
+			realm, err := deviceRealm(device, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			var callResp xconn.CallResponse
+			switch *printModeFlag {
+			case ModeQUIC:
 				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
 				defer quicSess.Connection().Close()
-				printSession = quicSess.Session
-			} else {
-				var err error
-				printSession, err = ConnectToMachine(context.Background(), device, cfgDirectory,
-					*printModeFlag == ModeP2P)
+				callResp = quicSess.Session.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
+			case ModeRouted:
+				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
+				callResp = deviceSession.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
+			case ModeP2P:
+				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				callResp = localSession.Call(deskconn.ProcedureProxyPrinterPrint).Args(realm, printerName,
+					filename, data, true).Do()
+			default:
+				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				callResp = localSession.Call(deskconn.ProcedureProxyPrinterPrint).Args(realm, printerName, filename, data).Do()
 			}
-			callResp := printSession.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
 			if callResp.Err != nil {
 				fmt.Fprintln(os.Stderr, callResp.Err)
 				return
@@ -858,8 +895,12 @@ func main() {
 			deviceSession = quicSess.Session
 		} else {
 			var err error
-			deviceSession, err = ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory,
-				*portForwardModeFlag == ModeP2P)
+			switch *portForwardModeFlag {
+			case ModeP2P:
+				deviceSession, err = ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory, true)
+			default:
+				deviceSession, err = ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory, false)
+			}
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -929,8 +970,12 @@ func main() {
 			deviceSession = quicSess.Session
 		} else {
 			var err error
-			deviceSession, err = ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory,
-				*portReverseModeFlag == ModeP2P)
+			switch *portReverseModeFlag {
+			case ModeP2P:
+				deviceSession, err = ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory, true)
+			default:
+				deviceSession, err = ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory, false)
+			}
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
