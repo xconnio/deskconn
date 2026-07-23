@@ -33,19 +33,21 @@ const (
 	ProcedurePrincipalDelete = "io.xconn.deskconn.account.principal.delete"
 	ProcedureAccountGet      = "io.xconn.deskconn.account.get"
 
-	ProcedureProxyShell       = "io.xconn.deskconn.deskconnd.proxy.shell"
-	ProcedureProxyExec        = "io.xconn.deskconn.deskconnd.proxy.exec"
-	ProcedureProxyFileOp      = "io.xconn.deskconn.deskconnd.proxy.file.op"
-	ProcedureProxyDeviceInfo  = "io.xconn.deskconn.deskconnd.proxy.device.info"
-	ProcedureProxyLogs        = "io.xconn.deskconn.deskconnd.proxy.logs"
-	ProcedureProxyPing        = "io.xconn.deskconn.deskconnd.proxy.ping"
-	ProcedureProxyCat         = "io.xconn.deskconn.deskconnd.proxy.file.cat"
-	ProcedureLogin            = "io.xconn.deskconn.login"
-	ProcedureLogout           = "io.xconn.deskconn.logout"
-	ProcedureConnect          = "io.xconn.deskconn.connect"
-	ProcedureDisconnect       = "io.xconn.deskconn.disconnect"
-	ProcedureDisconnectAll    = "io.xconn.deskconn.disconnect_all"
-	ProcedureConnectedDevices = "io.xconn.deskconn.connected_devices"
+	ProcedureProxyShell        = "io.xconn.deskconn.deskconnd.proxy.shell"
+	ProcedureProxyExec         = "io.xconn.deskconn.deskconnd.proxy.exec"
+	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
+	ProcedureProxyDeviceInfo   = "io.xconn.deskconn.deskconnd.proxy.device.info"
+	ProcedureProxyLogs         = "io.xconn.deskconn.deskconnd.proxy.logs"
+	ProcedureProxyPing         = "io.xconn.deskconn.deskconnd.proxy.ping"
+	ProcedureProxyCat          = "io.xconn.deskconn.deskconnd.proxy.file.cat"
+	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
+	ProcedureProxyPrinterPrint = "io.xconn.deskconn.deskconnd.proxy.printer.print"
+	ProcedureLogin             = "io.xconn.deskconn.login"
+	ProcedureLogout            = "io.xconn.deskconn.logout"
+	ProcedureConnect           = "io.xconn.deskconn.connect"
+	ProcedureDisconnect        = "io.xconn.deskconn.disconnect"
+	ProcedureDisconnectAll     = "io.xconn.deskconn.disconnect_all"
+	ProcedureConnectedDevices  = "io.xconn.deskconn.connected_devices"
 
 	ProcedureListDesktop = "io.xconn.deskconn.desktop.list"
 
@@ -405,7 +407,7 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 			}
 
-			deviceSess, err := clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
+			deviceSess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
 			if err != nil {
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 			}
@@ -908,6 +910,66 @@ func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn
 		}
 
 		return xconn.NewInvocationResult(time.Since(start).Milliseconds())
+	}
+}
+
+func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		useP2P, _ := inv.ArgBool(1)
+		deviceSess, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, useP2P)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		callResp := deviceSess.Call(ProcedurePrinterList).Do()
+		if callResp.Err != nil {
+			_ = deviceSess.Leave()
+			clientSessions.DeleteDeviceSession(realm)
+			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
+		}
+
+		return xconn.NewInvocationResult(callResp.Args()...)
+	}
+}
+
+func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		printer, err := inv.ArgString(1)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		filename, err := inv.ArgString(2)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		data, err := inv.ArgBytes(3)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		useP2P, _ := inv.ArgBool(4)
+		deviceSess, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, useP2P)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		callResp := deviceSess.Call(ProcedurePrinterPrint).Args(printer, filename, data).Do()
+		if callResp.Err != nil {
+			_ = deviceSess.Leave()
+			clientSessions.DeleteDeviceSession(realm)
+			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
+		}
+
+		return xconn.NewInvocationResult(callResp.Args()...)
 	}
 }
 
