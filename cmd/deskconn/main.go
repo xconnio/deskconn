@@ -125,7 +125,9 @@ func main() {
 	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
-	execP2PFlag := execCmd.Flag("p2p", "Connect using WebRTC").Bool()
+	execModeFlag := execCmd.Flag("mode",
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	printCmd := app.Command("print", "Print operations")
 	printEnableFlag := printCmd.Flag("enable", "Enable receiving print jobs on this desktop").Bool()
@@ -138,7 +140,9 @@ func main() {
 	printTarget := printCmd.Arg("target", "Device and printer as machine:printer (e.g. m1:HP_LaserJet)").
 		HintAction(devicePathCompletions(cfgDirectory)).String()
 	printFilePath := printCmd.Arg("file_path", "Local file path").String()
-	printP2PFlag := printCmd.Flag("p2p", "Connect using WebRTC").Bool()
+	printModeFlag := printCmd.Flag("mode",
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
@@ -147,7 +151,9 @@ func main() {
 	portForwardPorts := portForwardCmd.Arg("ports", "Port mapping as localport:remoteport").String()
 	portForwardLocalFlag := portForwardCmd.Flag("local", "Local port to listen on").Short('l').String()
 	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote device to connect to").Short('r').String()
-	portForwardP2PFlag := portForwardCmd.Flag("p2p", "Connect using WebRTC").Bool()
+	portForwardModeFlag := portForwardCmd.Flag("mode",
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	portReverseCmd := portCmd.Command("reverse", "Reverse-forward a remote port to a local port")
 	portReverseDevice := portReverseCmd.Arg("device", "ID, name or alias of device").Required().
@@ -155,7 +161,9 @@ func main() {
 	portReversePorts := portReverseCmd.Arg("ports", "Port mapping as remoteport:localport").String()
 	portReverseRemoteFlag := portReverseCmd.Flag("remote", "Port on the remote device to listen on").Short('r').String()
 	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
-	portReverseP2PFlag := portReverseCmd.Flag("p2p", "Connect using WebRTC").Bool()
+	portReverseModeFlag := portReverseCmd.Flag("mode",
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
+	).Enum(ModeQUIC, ModeP2P, ModeRouted)
 
 	pingCmd := app.Command("ping", "Ping a device and measure round-trip time")
 	pingDevice := pingCmd.Arg("device", "ID, name or alias of device").Required().
@@ -636,8 +644,18 @@ func main() {
 			return
 		}
 
-		if *execP2PFlag {
-			// P2P: proxy establishes/reuses a WebRTC session.
+		switch *execModeFlag {
+		case ModeQUIC:
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			if err := deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureExec, *command...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		case ModeP2P:
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -647,7 +665,7 @@ func main() {
 				deskconn.ProcedureProxyExec, *command...); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
-		} else {
+		default:
 			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -697,12 +715,30 @@ func main() {
 				fmt.Printf("printing mode: %s\n", mode)
 			}
 		case *printLsDevice != "":
-			deviceSession, err := ConnectToMachine(context.Background(), *printLsDevice, cfgDirectory, false)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
+			var printLsSession *xconn.Session
+			if *printModeFlag == ModeQUIC {
+				realm, err := deviceRealm(*printLsDevice, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				defer quicSess.Connection().Close()
+				printLsSession = quicSess.Session
+			} else {
+				var err error
+				printLsSession, err = ConnectToMachine(context.Background(), *printLsDevice, cfgDirectory,
+					*printModeFlag == ModeP2P)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
 			}
-			callResp := deviceSession.Call(deskconn.ProcedurePrinterList).Do()
+			callResp := printLsSession.Call(deskconn.ProcedurePrinterList).Do()
 			if callResp.Err != nil {
 				fmt.Fprintln(os.Stderr, callResp.Err)
 				return
@@ -744,12 +780,30 @@ func main() {
 				return
 			}
 			filename := filepath.Base(*printFilePath)
-			deviceSession, err := ConnectToMachine(context.Background(), device, cfgDirectory, *printP2PFlag)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
+			var printSession *xconn.Session
+			if *printModeFlag == ModeQUIC {
+				realm, err := deviceRealm(device, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				defer quicSess.Connection().Close()
+				printSession = quicSess.Session
+			} else {
+				var err error
+				printSession, err = ConnectToMachine(context.Background(), device, cfgDirectory,
+					*printModeFlag == ModeP2P)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
 			}
-			callResp := deviceSession.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
+			callResp := printSession.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
 			if callResp.Err != nil {
 				fmt.Fprintln(os.Stderr, callResp.Err)
 				return
@@ -788,10 +842,28 @@ func main() {
 			return
 		}
 
-		deviceSession, err := ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory, *portForwardP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
+		var deviceSession *xconn.Session
+		if *portForwardModeFlag == ModeQUIC {
+			realm, err := deviceRealm(*portForwardDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			deviceSession = quicSess.Session
+		} else {
+			var err error
+			deviceSession, err = ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory,
+				*portForwardModeFlag == ModeP2P)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
 		}
 
 		fmt.Printf("Forwarding 127.0.0.1:%s -> %s:%s\n", localPort, *portForwardDevice, remotePort)
@@ -841,10 +913,28 @@ func main() {
 			return
 		}
 
-		deviceSession, err := ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory, *portReverseP2PFlag)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
+		var deviceSession *xconn.Session
+		if *portReverseModeFlag == ModeQUIC {
+			realm, err := deviceRealm(*portReverseDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			deviceSession = quicSess.Session
+		} else {
+			var err error
+			deviceSession, err = ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory,
+				*portReverseModeFlag == ModeP2P)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
 		}
 
 		fmt.Printf("Reverse forwarding %s:%s -> 127.0.0.1:%s\n", *portReverseDevice, remotePort, localPort)
