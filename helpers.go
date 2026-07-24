@@ -42,6 +42,8 @@ const (
 	ProcedureProxyCat          = "io.xconn.deskconn.deskconnd.proxy.file.cat"
 	ProcedureProxyFilePush     = "io.xconn.deskconn.deskconnd.proxy.file.push"
 	ProcedureProxyFilePull     = "io.xconn.deskconn.deskconnd.proxy.file.pull"
+	ProcedureProxyPortForward  = "io.xconn.deskconn.deskconnd.proxy.port.forward"
+	ProcedureProxyPortReverse  = "io.xconn.deskconn.deskconnd.proxy.port.reverse"
 	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
 	ProcedureProxyPrinterPrint = "io.xconn.deskconn.deskconnd.proxy.printer.print"
 	ProcedureLogin             = "io.xconn.deskconn.login"
@@ -1004,6 +1006,60 @@ func ProxyFilePullHandler(clientSessions *ClientSessions, cfgDirectory string) x
 
 		if callResp.Err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
+		}
+		return xconn.NewInvocationResult()
+	}
+}
+
+func ProxyPortForwardHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		remotePort, err := inv.ArgString(1)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		localPort, err := inv.ArgString(2)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		deviceSess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		if err := ForwardLocalPort(ctx, deviceSess, remotePort, localPort); err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+		return xconn.NewInvocationResult()
+	}
+}
+
+func ProxyPortReverseHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		remotePort, err := inv.ArgString(1)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+		localPort, err := inv.ArgString(2)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		deviceSess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		if err := ReverseLocalPort(ctx, deviceSess, remotePort, localPort); err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
 		return xconn.NewInvocationResult()
 	}
