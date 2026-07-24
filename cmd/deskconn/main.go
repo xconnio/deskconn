@@ -222,6 +222,8 @@ func main() {
 	selfCmd := app.Command("self", "Manage the installed deskconn CLI.")
 	selfVersionCmd := selfCmd.Command("version", "Show the installed deskconn version")
 	selfUpdateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
+	selfRemoveCmd := selfCmd.Command("remove", "Remove deskconn from this machine")
+	selfRemoveYes := selfRemoveCmd.Flag("yes", "Do not prompt for confirmation").Short('y').Bool()
 
 	aiCmds := registerAICommands(app, cfgDirectory)
 
@@ -1437,16 +1439,13 @@ func main() {
 		}
 
 	case screenshotEnableCmd.FullCommand():
-		fmt.Print("Deskconn will take a screenshot to verify screenshot permission. Allow? (y/n): ")
-		reader := bufio.NewReader(os.Stdin)
-		text, err := reader.ReadString('\n')
+		confirmed, err := confirmPrompt(
+			"Deskconn will take a screenshot to verify screenshot permission. Allow? (y/n): ", false)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		switch strings.ToLower(strings.TrimSpace(text)) {
-		case "y", "yes":
-		default:
+		if !confirmed {
 			fmt.Fprintln(os.Stderr, "screenshot enable cancelled")
 			return
 		}
@@ -1523,6 +1522,12 @@ func main() {
 			return
 		}
 
+	case selfRemoveCmd.FullCommand():
+		if err := removeApp(cfgDirectory, *selfRemoveYes); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
 	default:
 		dispatchAICommand(parsedCmd, aiCmds, cfgDirectory)
 	}
@@ -1586,6 +1591,119 @@ func updateApp(cfgDirectory string) error {
 
 	fmt.Printf("Updated deskconn from version %s to %s.\n", version, updateResp.LatestVersion)
 	return nil
+}
+
+const pathInstallerBlock = "\n# Added by deskconn installer\nexport PATH=\"$HOME/.local/bin:$PATH\"\n"
+
+// confirmPrompt prints prompt, reads a line from stdin, and reports whether the response counts
+// as affirmative: "y"/"yes" (case-insensitive) are always affirmative, and an empty response
+// (just Enter) falls back to defaultYes.
+func confirmPrompt(prompt string, defaultYes bool) (bool, error) {
+	fmt.Print(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	text, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "y", "yes":
+		return true, nil
+	case "":
+		return defaultYes, nil
+	default:
+		return false, nil
+	}
+}
+
+func removeApp(cfgDirectory string, skipConfirm bool) error {
+	if !skipConfirm {
+		confirmed, err := confirmPrompt("Are you sure you want to remove deskconn and all configuration, "+
+			"credentials and device list? (y/N): ", false)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			fmt.Println("remove cancelled")
+			return nil
+		}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
+	const serviceName = "deskconnd"
+	serviceFile := filepath.Join(homeDir, ".config", "systemd", "user", serviceName+".service")
+
+	if _, err := os.Stat(serviceFile); err == nil {
+		fmt.Println("Stopping deskconnd service...")
+		_ = exec.Command("systemctl", "--user", "stop", serviceName).Run()    // nolint: gosec
+		_ = exec.Command("systemctl", "--user", "disable", serviceName).Run() // nolint: gosec
+		if err := os.Remove(serviceFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove service file: %w", err)
+		}
+		_ = exec.Command("systemctl", "--user", "daemon-reload").Run() // nolint: gosec
+	}
+
+	binDir := filepath.Join(homeDir, ".local", "bin")
+	execDir := filepath.Join(homeDir, ".local", "lib", "exec")
+	bashCompDir := filepath.Join(homeDir, ".local", "share", "bash-completion", "completions")
+	zshCompDir := filepath.Join(homeDir, ".local", "share", "zsh", "site-functions")
+
+	paths := []string{
+		filepath.Join(binDir, "deskconn"),
+		filepath.Join(binDir, "desk"),
+		filepath.Join(execDir, "deskconnd"),
+		filepath.Join(bashCompDir, "deskconn"),
+		filepath.Join(bashCompDir, "desk"),
+		filepath.Join(zshCompDir, "_deskconn"),
+		filepath.Join(zshCompDir, "_desk"),
+	}
+
+	fmt.Println("Removing deskconn binaries and shell completions...")
+	for _, p := range paths {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove %s: %w", p, err)
+		}
+	}
+
+	for _, rcFile := range []string{".bashrc", ".bash_profile", ".zshrc", ".profile"} {
+		if err := removePathInstallerBlock(filepath.Join(homeDir, rcFile)); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to clean up %s: %v\n", rcFile, err)
+		}
+	}
+
+	fmt.Println("Removing deskconn configuration, credentials and device list...")
+	if err := os.RemoveAll(cfgDirectory); err != nil {
+		return fmt.Errorf("failed to remove config directory: %w", err)
+	}
+
+	fmt.Println("deskconn has been removed.")
+	return nil
+}
+
+// removePathInstallerBlock strips the exact PATH block install.sh appends to shell rc files.
+// It is a no-op if the file doesn't exist or doesn't contain the block.
+func removePathInstallerBlock(rcFile string) error {
+	data, err := os.ReadFile(rcFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if !strings.Contains(string(data), pathInstallerBlock) {
+		return nil
+	}
+
+	updated := strings.Replace(string(data), pathInstallerBlock, "", 1)
+	info, err := os.Stat(rcFile)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(rcFile, []byte(updated), info.Mode()) // nolint: gosec
 }
 
 func downloadAndInstallUpdate(downloadURL string) error {
@@ -1834,16 +1952,12 @@ func detach(flagUsername, flagPassword string, useStdin bool) error {
 		return err
 	}
 
-	fmt.Printf("Are you sure you want to detach desktop '%s' with ID '%s'?\n(Y/n): ", name, authID)
-
-	var confirm string
-	_, err = fmt.Scanln(&confirm)
-	if err != nil && err.Error() != "unexpected newline" {
+	confirmed, err := confirmPrompt(
+		fmt.Sprintf("Are you sure you want to detach desktop '%s' with ID '%s'?\n(Y/n): ", name, authID), true)
+	if err != nil {
 		return err
 	}
-
-	confirm = strings.TrimSpace(strings.ToLower(confirm))
-	if confirm != "" && confirm != "y" && confirm != "yes" {
+	if !confirmed {
 		fmt.Println("detach cancelled")
 		return nil
 	}
