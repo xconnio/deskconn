@@ -412,6 +412,14 @@ func (d *Deskconn) handleFileUpload(ctx context.Context, inv *xconn.Invocation) 
 }
 
 func PushFiles(session *xconn.Session, localPath, remotePath string, recursive bool) error {
+	return pushFilesInternal(session, "", localPath, remotePath, recursive)
+}
+
+func PushFilesViaProxy(session *xconn.Session, realm, localPath, remotePath string, recursive bool) error {
+	return pushFilesInternal(session, realm, localPath, remotePath, recursive)
+}
+
+func pushFilesInternal(session *xconn.Session, realm, localPath, remotePath string, recursive bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -471,12 +479,20 @@ func PushFiles(session *xconn.Session, localPath, remotePath string, recursive b
 		errCh <- err
 	}()
 
+	procedure := ProcedureFileUpload
+	if realm != "" {
+		procedure = ProcedureProxyFilePush
+	}
+
 	firstSent := false
 	firstServerMsg := true
-	callResp := session.Call(ProcedureFileUpload).
+	callResp := session.Call(procedure).
 		ProgressSender(func(ctx context.Context) *xconn.Progress {
 			if !firstSent {
 				firstSent = true
+				if realm != "" {
+					return xconn.NewProgress(realm, msgKey, clientPublicKey)
+				}
 				return xconn.NewProgress(msgKey, clientPublicKey)
 			}
 			select {
@@ -488,6 +504,9 @@ func PushFiles(session *xconn.Session, localPath, remotePath string, recursive b
 						return stream.final
 					}
 					return &xconn.Progress{}
+				}
+				if realm != "" {
+					p.Args = append([]any{realm}, p.Args...)
 				}
 				return p
 			}

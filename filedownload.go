@@ -235,6 +235,14 @@ func dlStreamFile(ctx context.Context, inv *xconn.Invocation, filePath, basePath
 }
 
 func PullFiles(session *xconn.Session, remotePath, localPath string, recursive bool) error {
+	return pullFilesInternal(session, "", remotePath, localPath, recursive)
+}
+
+func PullFilesViaProxy(session *xconn.Session, realm, remotePath, localPath string, recursive bool) error {
+	return pullFilesInternal(session, realm, remotePath, localPath, recursive)
+}
+
+func pullFilesInternal(session *xconn.Session, realm, remotePath, localPath string, recursive bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -271,7 +279,14 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 	localInfo, statErr := os.Lstat(localPath)
 	localIsDir = statErr == nil && localInfo.IsDir()
 
-	callResp := session.Call(ProcedureFileDownload).
+	procedure := ProcedureFileDownload
+	callArgs := []any{remotePath, recursive, publicKey}
+	if realm != "" {
+		procedure = ProcedureProxyFilePull
+		callArgs = []any{realm, remotePath, recursive, publicKey}
+	}
+
+	callResp := session.Call(procedure).
 		ProgressReceiver(func(progress *xconn.ProgressResult) {
 			if transferErr != nil {
 				return
@@ -417,7 +432,7 @@ func PullFiles(session *xconn.Session, remotePath, localPath string, recursive b
 				currentReceived += int64(len(chunk))
 				printProgress(currentName, currentReceived, currentSize, time.Since(currentStart))
 			}
-		}).Args(remotePath, recursive, publicKey).DoContext(ctx)
+		}).Args(callArgs...).DoContext(ctx)
 
 	if currentFile != nil {
 		_ = currentFile.Close()

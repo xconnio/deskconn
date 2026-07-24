@@ -111,6 +111,19 @@ func main() {
 		log.Fatal(regRespCat.Err)
 	}
 
+	regRespFilePush := sess.Register(deskconn.ProcedureProxyFilePush,
+		deskconn.ProxyProgressiveInvocationHandler(proxyCalls, clientSession, cfgDirectory,
+			deskconn.ProcedureFileUpload)).Do()
+	if regRespFilePush.Err != nil {
+		log.Fatal(regRespFilePush.Err)
+	}
+
+	regRespFilePull := sess.Register(deskconn.ProcedureProxyFilePull,
+		deskconn.ProxyFilePullHandler(clientSession, cfgDirectory)).Do()
+	if regRespFilePull.Err != nil {
+		log.Fatal(regRespFilePull.Err)
+	}
+
 	regRespPrinterList := sess.Register(deskconn.ProcedureProxyPrinterList,
 		deskconn.ProxyPrinterListHandler(clientSession, cfgDirectory)).Do()
 	if regRespPrinterList.Err != nil {

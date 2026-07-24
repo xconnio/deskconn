@@ -365,12 +365,13 @@ func main() {
 			}
 		case !srcRemote && dstRemote:
 			dstDevice, dstPath := parseDevicePath(*cpDst)
-			if *cpModeFlag == ModeQUIC {
-				realm, err := deviceRealm(dstDevice, cfgDirectory)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
+			realm, err := deviceRealm(dstDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			switch *cpModeFlag {
+			case ModeQUIC:
 				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -380,8 +381,8 @@ func main() {
 				if err := deskconn.PushFilesQUIC(quicSess, *cpSrc, dstPath, *cpRecursive); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
-			} else {
-				deviceSession, err := ConnectToMachine(context.Background(), dstDevice, cfgDirectory, *cpModeFlag == ModeP2P)
+			case ModeRouted:
+				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -389,15 +390,25 @@ func main() {
 				if err := deskconn.PushFiles(deviceSession, *cpSrc, dstPath, *cpRecursive); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
-			}
-		case srcRemote && !dstRemote:
-			srcDevice, srcPath := parseDevicePath(*cpSrc)
-			if *cpModeFlag == ModeQUIC {
-				realm, err := deviceRealm(srcDevice, cfgDirectory)
+			default:
+				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
+				if err := deskconn.PushFilesViaProxy(localSession, realm, *cpSrc, dstPath, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
+			}
+		case srcRemote && !dstRemote:
+			srcDevice, srcPath := parseDevicePath(*cpSrc)
+			realm, err := deviceRealm(srcDevice, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			switch *cpModeFlag {
+			case ModeQUIC:
 				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -407,13 +418,22 @@ func main() {
 				if err := deskconn.PullFilesQUIC(quicSess, srcPath, *cpDst, *cpRecursive); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
-			} else {
-				deviceSession, err := ConnectToMachine(context.Background(), srcDevice, cfgDirectory, *cpModeFlag == ModeP2P)
+			case ModeRouted:
+				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
 				if err := deskconn.PullFiles(deviceSession, srcPath, *cpDst, *cpRecursive); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
+			default:
+				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+				if err := deskconn.PullFilesViaProxy(localSession, realm, srcPath, *cpDst, *cpRecursive); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			}
