@@ -899,32 +899,10 @@ func main() {
 			return
 		}
 
-		var deviceSession *xconn.Session
-		if *portForwardModeFlag == ModeQUIC {
-			realm, err := deviceRealm(*portForwardDevice, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer quicSess.Connection().Close()
-			deviceSession = quicSess.Session
-		} else {
-			var err error
-			switch *portForwardModeFlag {
-			case ModeP2P:
-				deviceSession, err = ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory, true)
-			default:
-				deviceSession, err = ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory, false)
-			}
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
+		realm, err := deviceRealm(*portForwardDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
 		}
 
 		fmt.Printf("Forwarding 127.0.0.1:%s -> %s:%s\n", localPort, *portForwardDevice, remotePort)
@@ -932,13 +910,40 @@ func main() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- deskconn.ForwardLocalPort(ctx, deviceSession, remotePort, localPort)
-		}()
-
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+
+		errCh := make(chan error, 1)
+		switch *portForwardModeFlag {
+		case ModeQUIC:
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			go func() { errCh <- deskconn.ForwardLocalPort(ctx, quicSess.Session, remotePort, localPort) }()
+		case ModeRouted:
+			deviceSession, err := ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			go func() { errCh <- deskconn.ForwardLocalPort(ctx, deviceSession, remotePort, localPort) }()
+		default:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			go func() {
+				resp := localSession.Call(deskconn.ProcedureProxyPortForward).
+					Args(realm, remotePort, localPort).DoContext(ctx)
+				errCh <- resp.Err
+			}()
+		}
+
 		select {
 		case <-sigCh:
 			fmt.Println("\nStopping port forwarding...")
@@ -974,32 +979,10 @@ func main() {
 			return
 		}
 
-		var deviceSession *xconn.Session
-		if *portReverseModeFlag == ModeQUIC {
-			realm, err := deviceRealm(*portReverseDevice, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer quicSess.Connection().Close()
-			deviceSession = quicSess.Session
-		} else {
-			var err error
-			switch *portReverseModeFlag {
-			case ModeP2P:
-				deviceSession, err = ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory, true)
-			default:
-				deviceSession, err = ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory, false)
-			}
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
+		realm, err := deviceRealm(*portReverseDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
 		}
 
 		fmt.Printf("Reverse forwarding %s:%s -> 127.0.0.1:%s\n", *portReverseDevice, remotePort, localPort)
@@ -1007,13 +990,40 @@ func main() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- deskconn.ReverseLocalPort(ctx, deviceSession, remotePort, localPort)
-		}()
-
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+
+		errCh := make(chan error, 1)
+		switch *portReverseModeFlag {
+		case ModeQUIC:
+			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			defer quicSess.Connection().Close()
+			go func() { errCh <- deskconn.ReverseLocalPort(ctx, quicSess.Session, remotePort, localPort) }()
+		case ModeRouted:
+			deviceSession, err := ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory, false)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			go func() { errCh <- deskconn.ReverseLocalPort(ctx, deviceSession, remotePort, localPort) }()
+		default:
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+			go func() {
+				resp := localSession.Call(deskconn.ProcedureProxyPortReverse).
+					Args(realm, remotePort, localPort).DoContext(ctx)
+				errCh <- resp.Err
+			}()
+		}
+
 		select {
 		case <-sigCh:
 			fmt.Println("\nStopping reverse port forwarding...")
