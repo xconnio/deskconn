@@ -164,18 +164,8 @@ func aiLocalSessions(path string) ([]ai.SessionFile, error) {
 	return ai.DiscoverClaudeSessions(homeDir, path)
 }
 
-// aiProxyCall asks localSession's daemon to run procedure against realm's device on our
-// behalf, reusing its cached (and, unless useP2P is set, auto-upgrading) device session
-// instead of this process connecting fresh - the same ProcedureProxyFileOp path file
-// operations already use.
-func aiProxyCall(localSession *xconn.Session, realm, procedure string, payload []byte, useP2P bool) ([]byte, error) {
-	call := localSession.Call(ProcedureProxyFileOp)
-	if useP2P {
-		call = call.Args(realm, procedure, payload, true)
-	} else {
-		call = call.Args(realm, procedure, payload)
-	}
-	resp := call.Do()
+func aiProxyCall(localSession *xconn.Session, realm, procedure string, payload []byte) ([]byte, error) {
+	resp := localSession.Call(ProcedureProxyFileOp).Args(realm, procedure, payload).Do()
 	if resp.Err != nil {
 		return nil, resp.Err
 	}
@@ -203,13 +193,13 @@ func CallAISessionList(deviceSession *xconn.Session, path string) ([]AISessionSu
 	return parseAISessionListResult(respBytes)
 }
 
-func CallAISessionListProxy(localSession *xconn.Session, realm, path string, useP2P bool) ([]AISessionSummary, error) {
+func CallAISessionListProxy(localSession *xconn.Session, realm, path string) ([]AISessionSummary, error) {
 	payload, err := json.Marshal(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	respBytes, err := aiProxyCall(localSession, realm, ProcedureAISessionList, payload, useP2P)
+	respBytes, err := aiProxyCall(localSession, realm, ProcedureAISessionList, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -237,16 +227,14 @@ func CallAISessionPull(deviceSession *xconn.Session, path, tool, sessionID strin
 	return parseAISessionPullResult(respBytes)
 }
 
-// CallAISessionPullProxy is CallAISessionPull routed through the local daemon's cached device
-// session for realm, instead of connecting directly.
-func CallAISessionPullProxy(localSession *xconn.Session, realm, path, tool, sessionID string,
-	useP2P bool) ([]AISessionBundle, error) {
+func CallAISessionPullProxy(localSession *xconn.Session, realm, path, tool,
+	sessionID string) ([]AISessionBundle, error) {
 	payload, err := json.Marshal(aiSessionPullArgs{Path: path, Tool: tool, SessionID: sessionID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	respBytes, err := aiProxyCall(localSession, realm, ProcedureAISessionPull, payload, useP2P)
+	respBytes, err := aiProxyCall(localSession, realm, ProcedureAISessionPull, payload)
 	if err != nil {
 		return nil, err
 	}

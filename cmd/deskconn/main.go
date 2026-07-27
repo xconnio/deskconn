@@ -35,9 +35,8 @@ import (
 var version = "v0.1.0-alpha"
 
 const (
-	ModeRouted = "routed"
-	ModeP2P    = "p2p"
-	ModeQUIC   = "quic"
+	ModeQUIC = "quic"
+	ModeP2P  = "p2p"
 )
 
 func main() {
@@ -71,8 +70,8 @@ func main() {
 	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	lsFileModeFlag := lsFileCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
 	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().
@@ -80,8 +79,8 @@ func main() {
 	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	mvModeFlag := mvCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
 	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().
@@ -90,44 +89,44 @@ func main() {
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := cpCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
 	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	rmModeFlag := rmCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	catCmd := fileCmd.Command("cat", "Print the contents of a file on a device")
 	catTarget := catCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	catModeFlag := catCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	editCmd := fileCmd.Command("edit", "Edit a text file on a device with $EDITOR and send only the diff")
 	editTarget := editCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	editModeFlag := editCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	shellCmd := app.Command("shell", "Start interactive shell")
 	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	shellModeFlag := shellCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	execCmd := app.Command("exec", "Run a command")
 	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 	execModeFlag := execCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	printCmd := app.Command("print", "Print operations")
 	printEnableFlag := printCmd.Flag("enable", "Enable receiving print jobs on this desktop").Bool()
@@ -141,8 +140,8 @@ func main() {
 		HintAction(devicePathCompletions(cfgDirectory)).String()
 	printFilePath := printCmd.Arg("file_path", "Local file path").String()
 	printModeFlag := printCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
@@ -152,8 +151,8 @@ func main() {
 	portForwardLocalFlag := portForwardCmd.Flag("local", "Local port to listen on").Short('l').String()
 	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote device to connect to").Short('r').String()
 	portForwardModeFlag := portForwardCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	portReverseCmd := portCmd.Command("reverse", "Reverse-forward a remote port to a local port")
 	portReverseDevice := portReverseCmd.Arg("device", "ID, name or alias of device").Required().
@@ -162,8 +161,8 @@ func main() {
 	portReverseRemoteFlag := portReverseCmd.Flag("remote", "Port on the remote device to listen on").Short('r').String()
 	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
 	portReverseModeFlag := portReverseCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	pingCmd := app.Command("ping", "Ping a device and measure round-trip time")
 	pingDevice := pingCmd.Arg("device", "ID, name or alias of device").Required().
@@ -202,8 +201,8 @@ func main() {
 	infoDevice := infoCmd.Arg("device", "ID, name or alias of device").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	infoModeFlag := infoCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	logsCmd := app.Command("logs", "Stream logs from a device")
 	logsDevice := logsCmd.Arg("device", "ID, name or alias of device").Required().
@@ -306,13 +305,14 @@ func main() {
 			if err := deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureExec, args...); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
-		case ModeRouted:
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+		case ModeP2P:
+			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			if err := deskconn.StartInteractiveCommand(deviceSession, "", deskconn.ProcedureExec, args...); err != nil {
+			defer func() { _ = p2pSess.Leave() }()
+			if err := deskconn.StartInteractiveCommand(p2pSess, "", deskconn.ProcedureExec, args...); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		default:
@@ -383,13 +383,14 @@ func main() {
 				if err := deskconn.PushFilesQUIC(quicSess, *cpSrc, dstPath, *cpRecursive); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
-			case ModeRouted:
-				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			case ModeP2P:
+				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				if err := deskconn.PushFiles(deviceSession, *cpSrc, dstPath, *cpRecursive); err != nil {
+				defer func() { _ = p2pSess.Leave() }()
+				if err := deskconn.PushFiles(p2pSess, *cpSrc, dstPath, *cpRecursive); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			default:
@@ -420,13 +421,14 @@ func main() {
 				if err := deskconn.PullFilesQUIC(quicSess, srcPath, *cpDst, *cpRecursive); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
-			case ModeRouted:
-				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+			case ModeP2P:
+				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				if err := deskconn.PullFiles(deviceSession, srcPath, *cpDst, *cpRecursive); err != nil {
+				defer func() { _ = p2pSess.Leave() }()
+				if err := deskconn.PullFiles(p2pSess, srcPath, *cpDst, *cpRecursive); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			default:
@@ -478,13 +480,14 @@ func main() {
 			if err := deskconn.CatFile(quicSess.Session, path); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
-		case ModeRouted:
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+		case ModeP2P:
+			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			if err := deskconn.CatFile(deviceSession, path); err != nil {
+			defer func() { _ = p2pSess.Leave() }()
+			if err := deskconn.CatFile(p2pSess, path); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		default:
@@ -493,7 +496,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			if err := deskconn.CatFileViaProxy(localSession, realm, path, *catModeFlag == ModeP2P); err != nil {
+			if err := deskconn.CatFileViaProxy(localSession, realm, path); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		}
@@ -528,13 +531,14 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-		case ModeRouted:
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
+		case ModeP2P:
+			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			original, err = deskconn.ReadFile(deviceSession, path)
+			defer func() { _ = p2pSess.Leave() }()
+			original, err = deskconn.ReadFile(p2pSess, path)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -545,7 +549,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			original, err = deskconn.ReadFileViaProxy(localSession, realm, path, *editModeFlag == ModeP2P)
+			original, err = deskconn.ReadFileViaProxy(localSession, realm, path)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -622,32 +626,17 @@ func main() {
 			if err := deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureShell); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
-
-		case ModeRouted:
-			// Direct cloud connection, no session stored.
-			shellSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			if err := deskconn.StartInteractiveCommand(shellSession, "", deskconn.ProcedureShell); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-
 		case ModeP2P:
-			// Synchronous WebRTC via exec proxy (reuses or creates cached P2P session).
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			if err := deskconn.StartInteractiveCommand(localSession, realm,
-				deskconn.ProcedureProxyExec, "bash"); err != nil {
+			defer func() { _ = p2pSess.Leave() }()
+			if err := deskconn.StartInteractiveCommand(p2pSess, "", deskconn.ProcedureShell); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
-
 		default:
-			// Default: daemon handles cloud-first start, WebRTC upgrade in background
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -678,22 +667,13 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		case ModeP2P:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			if err := deskconn.StartInteractiveCommand(localSession, realm,
-				deskconn.ProcedureProxyExec, *command...); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		case ModeRouted:
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			if err := deskconn.StartInteractiveCommand(deviceSession, "", deskconn.ProcedureExec, *command...); err != nil {
+			defer func() { _ = p2pSess.Leave() }()
+			if err := deskconn.StartInteractiveCommand(p2pSess, "", deskconn.ProcedureExec, *command...); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		default:
@@ -762,20 +742,14 @@ func main() {
 				}
 				defer quicSess.Connection().Close()
 				callResp = quicSess.Session.Call(deskconn.ProcedurePrinterList).Do()
-			case ModeRouted:
-				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				callResp = deviceSession.Call(deskconn.ProcedurePrinterList).Do()
 			case ModeP2P:
-				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				callResp = localSession.Call(deskconn.ProcedureProxyPrinterList).Args(realm, true).Do()
+				defer func() { _ = p2pSess.Leave() }()
+				callResp = p2pSess.Call(deskconn.ProcedurePrinterList).Do()
 			default:
 				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 				if err != nil {
@@ -840,21 +814,14 @@ func main() {
 				}
 				defer quicSess.Connection().Close()
 				callResp = quicSess.Session.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
-			case ModeRouted:
-				deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				callResp = deviceSession.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
 			case ModeP2P:
-				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				callResp = localSession.Call(deskconn.ProcedureProxyPrinterPrint).Args(realm, printerName,
-					filename, data, true).Do()
+				defer func() { _ = p2pSess.Leave() }()
+				callResp = p2pSess.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
 			default:
 				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 				if err != nil {
@@ -926,13 +893,14 @@ func main() {
 			}
 			defer quicSess.Connection().Close()
 			go func() { errCh <- deskconn.ForwardLocalPort(ctx, quicSess.Session, remotePort, localPort) }()
-		case ModeRouted:
-			deviceSession, err := ConnectToMachine(context.Background(), *portForwardDevice, cfgDirectory, false)
+		case ModeP2P:
+			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			go func() { errCh <- deskconn.ForwardLocalPort(ctx, deviceSession, remotePort, localPort) }()
+			defer func() { _ = p2pSess.Leave() }()
+			go func() { errCh <- deskconn.ForwardLocalPort(ctx, p2pSess, remotePort, localPort) }()
 		default:
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
@@ -1006,13 +974,14 @@ func main() {
 			}
 			defer quicSess.Connection().Close()
 			go func() { errCh <- deskconn.ReverseLocalPort(ctx, quicSess.Session, remotePort, localPort) }()
-		case ModeRouted:
-			deviceSession, err := ConnectToMachine(context.Background(), *portReverseDevice, cfgDirectory, false)
+		case ModeP2P:
+			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			go func() { errCh <- deskconn.ReverseLocalPort(ctx, deviceSession, remotePort, localPort) }()
+			defer func() { _ = p2pSess.Leave() }()
+			go func() { errCh <- deskconn.ReverseLocalPort(ctx, p2pSess, remotePort, localPort) }()
 		default:
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
@@ -1355,20 +1324,14 @@ func main() {
 			}
 			defer quicSess.Connection().Close()
 			callResp = quicSess.Call(deskconn.ProcedureDeviceInfo).Do()
-		case ModeRouted:
-			deviceSession, err := deskconn.ConnectDeviceRealm(context.Background(), realm, cfgDirectory, false)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			callResp = deviceSession.Call(deskconn.ProcedureDeviceInfo).Do()
 		case ModeP2P:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			callResp = localSession.Call(deskconn.ProcedureProxyDeviceInfo).Args(realm, true).Do()
+			defer func() { _ = p2pSess.Leave() }()
+			callResp = p2pSess.Call(deskconn.ProcedureDeviceInfo).Do()
 		default:
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
@@ -2046,20 +2009,6 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 	return "", fmt.Errorf("device not found: %s", deviceName)
 }
 
-func ConnectToMachine(ctx context.Context, machine, cfgDirectory string, useP2P bool) (*xconn.Session, error) {
-	//nolint:contextcheck
-	realm, err := deviceRealm(machine, cfgDirectory)
-	if err != nil {
-		return nil, fmt.Errorf("unknown device %q: %w", machine, err)
-	}
-
-	session, err := deskconn.ConnectDeviceRealm(ctx, realm, cfgDirectory, useP2P)
-	if err != nil {
-		return nil, fmt.Errorf("could not reach %s: %w", machine, err)
-	}
-	return session, nil
-}
-
 func readCredentials(flagUsername, flagPassword string, useStdin bool) (username, password string, err error) {
 	if useStdin {
 		if flagUsername == "" {
@@ -2367,20 +2316,14 @@ func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, pay
 		defer quicSess.Connection().Close()
 		_, err = deskconn.CallFileOp(quicSess.Session, procedure, payload)
 		return err
-	case ModeRouted:
-		deviceSession, err := deskconn.ConnectDeviceRealm(ctx, realm, cfgDirectory, false)
-		if err != nil {
-			return err
-		}
-		_, err = deskconn.CallFileOp(deviceSession, procedure, payload)
-		return err
 	case ModeP2P:
-		localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
+		p2pSess, err := deskconn.ConnectDeviceRealmP2P(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
-		resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, procedure, payload, true).Do()
-		return resp.Err
+		defer func() { _ = p2pSess.Leave() }()
+		_, err = deskconn.CallFileOp(p2pSess, procedure, payload)
+		return err
 	default:
 		localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
 		if err != nil {

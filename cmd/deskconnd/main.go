@@ -172,7 +172,7 @@ func main() {
 			if err != nil {
 				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
 			}
-			_, err = clientSession.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
+			_, err = clientSession.EnsureDeviceSession(ctx, realm, cfgDirectory)
 			if err != nil {
 				return xconn.NewInvocationError(deskconn.ErrOperationFailed, err.Error())
 			}

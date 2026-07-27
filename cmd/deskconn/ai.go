@@ -43,8 +43,8 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	lsMachine := lsCmd.Arg("machine", "Device to list sessions on").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	lsMode := lsCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session",
+	).Enum(ModeQUIC, ModeP2P)
 
 	syncCmd := aiCmd.Command("sync", "Pull claude sessions from another device onto this one")
 	syncMachine := syncCmd.Arg("machine", "Device to pull sessions from").Required().
@@ -52,8 +52,8 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	syncSessionID := syncCmd.Arg("session-id",
 		"Only pull the session matching this id (or a unique prefix of one); default pulls all").String()
 	syncMode := syncCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC, 'routed' uses WAMP RPC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session",
+	).Enum(ModeQUIC, ModeP2P)
 
 	resumeCmd := aiCmd.Command("resume", "Resume a Claude Code session by id (see `ai ls`)")
 	resumeSessionID := resumeCmd.Arg("session-id", "Session id (or a unique prefix of one) to resume").Required().String()
@@ -63,9 +63,8 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 		"Run claude directly on this device instead of resuming a locally synced session").
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	resumeMode := resumeCmd.Flag("mode",
-		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, 'routed' connects directly "+
-			"through the cloud router, default proxies through the local daemon over WebRTC",
-	).Enum(ModeQUIC, ModeP2P, ModeRouted)
+		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, default uses daemon persistent session",
+	).Enum(ModeQUIC, ModeP2P)
 
 	return &aiCommands{
 		ls:              lsCmd,
@@ -148,13 +147,17 @@ func runAILs(cfgDirectory, machine, mode string) error {
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
 		}
-	case ModeRouted:
-		session, err := ConnectToMachine(context.Background(), machine, cfgDirectory, false)
+	case ModeP2P:
+		realm, err := deviceRealm(machine, cfgDirectory)
+		if err != nil {
+			return fmt.Errorf("unknown device %q: %w", machine, err)
+		}
+		p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = session.Leave() }()
-		sessions, err = deskconn.CallAISessionList(session, path)
+		defer func() { _ = p2pSess.Leave() }()
+		sessions, err = deskconn.CallAISessionList(p2pSess, path)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
 		}
@@ -169,7 +172,7 @@ func runAILs(cfgDirectory, machine, mode string) error {
 			return fmt.Errorf("could not reach local daemon: %w", err)
 		}
 		defer func() { _ = localSession.Leave() }()
-		sessions, err = deskconn.CallAISessionListProxy(localSession, realm, path, mode == ModeP2P)
+		sessions, err = deskconn.CallAISessionListProxy(localSession, realm, path)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
 		}
@@ -207,13 +210,18 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 		}
 		defer quicSess.Connection().Close()
 		bundles, err = deskconn.CallAISessionPull(quicSess.Session, path, "", sessionID)
-	case ModeRouted:
-		session, sErr := ConnectToMachine(context.Background(), machine, cfgDirectory, false)
-		if sErr != nil {
-			return sErr
+	case ModeP2P:
+		var realm string
+		realm, err = deviceRealm(machine, cfgDirectory)
+		if err != nil {
+			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
-		defer func() { _ = session.Leave() }()
-		bundles, err = deskconn.CallAISessionPull(session, path, "", sessionID)
+		p2pSess, pErr := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
+		if pErr != nil {
+			return pErr
+		}
+		defer func() { _ = p2pSess.Leave() }()
+		bundles, err = deskconn.CallAISessionPull(p2pSess, path, "", sessionID)
 	default:
 		var realm string
 		realm, err = deviceRealm(machine, cfgDirectory)
@@ -226,7 +234,7 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 			return fmt.Errorf("could not reach local daemon: %w", lErr)
 		}
 		defer func() { _ = localSession.Leave() }()
-		bundles, err = deskconn.CallAISessionPullProxy(localSession, realm, path, "", sessionID, mode == ModeP2P)
+		bundles, err = deskconn.CallAISessionPullProxy(localSession, realm, path, "", sessionID)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to pull sessions from %s: %w", machine, err)
@@ -325,13 +333,17 @@ func runAIResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
 		}
 		defer quicSess.Connection().Close()
 		return deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureExec, fullArgs...)
-	case ModeRouted:
-		session, err := ConnectToMachine(context.Background(), machine, cfgDirectory, false)
+	case ModeP2P:
+		realm, err := deviceRealm(machine, cfgDirectory)
+		if err != nil {
+			return fmt.Errorf("unknown device %q: %w", machine, err)
+		}
+		p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = session.Leave() }()
-		return deskconn.StartInteractiveCommand(session, "", deskconn.ProcedureExec, fullArgs...)
+		defer func() { _ = p2pSess.Leave() }()
+		return deskconn.StartInteractiveCommand(p2pSess, "", deskconn.ProcedureExec, fullArgs...)
 	default:
 		realm, err := deviceRealm(machine, cfgDirectory)
 		if err != nil {

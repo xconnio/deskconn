@@ -130,15 +130,24 @@ type deviceSession struct {
 }
 
 type ClientSessions struct {
-	sessions map[string]*deviceSession
-	loggedIn bool
+	sessions     map[string]*deviceSession
+	disconnected map[string]struct{}
+	loggedIn     bool
 	sync.Mutex
 }
 
 func NewClientSessions() *ClientSessions {
 	return &ClientSessions{
-		sessions: make(map[string]*deviceSession),
+		sessions:     make(map[string]*deviceSession),
+		disconnected: make(map[string]struct{}),
 	}
+}
+
+func (c *ClientSessions) isDisconnected(realm string) bool {
+	c.Lock()
+	defer c.Unlock()
+	_, ok := c.disconnected[realm]
+	return ok
 }
 
 func (c *ClientSessions) SessionByRealm(realm string) (*xconn.Session, bool) {
@@ -197,6 +206,7 @@ func (c *ClientSessions) DeleteDeviceSession(realm string) {
 
 func (c *ClientSessions) Disconnect(realm string) {
 	c.Lock()
+	c.disconnected[realm] = struct{}{}
 	session, ok := c.sessions[realm]
 	if ok {
 		session.cancel()
@@ -211,6 +221,9 @@ func (c *ClientSessions) Disconnect(realm string) {
 
 func (c *ClientSessions) DisconnectAll() {
 	c.Lock()
+	for realm := range c.sessions {
+		c.disconnected[realm] = struct{}{}
+	}
 	sessions := c.sessions
 	c.sessions = make(map[string]*deviceSession)
 	c.Unlock()
@@ -221,103 +234,114 @@ func (c *ClientSessions) DisconnectAll() {
 	}
 }
 
+// EnsureDeviceSession returns the cached session if connected, otherwise connects via QUIC
+// and starts a background upgrade to WebRTC P2P.
+func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm,
+	cfgDirectory string) (*xconn.Session, error) {
+	sess, _, err := c.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+	return sess, err
+}
+
 // EnsureDeviceSessionWithUpgrade is like EnsureDeviceSession but also returns a channel
-// that receives the WebRTC session when the background upgrade completes. If a connected
-// session is already cached the channel is closed immediately.
+// that receives the WebRTC session once the background upgrade completes. If the session
+// is already a connected P2P session the channel is closed immediately.
 func (c *ClientSessions) EnsureDeviceSessionWithUpgrade(ctx context.Context, realm,
 	cfgDirectory string) (*xconn.Session, <-chan *xconn.Session, error) {
-	if session, ok := c.SessionByRealm(realm); ok {
-		if session.Connected() {
+	c.Lock()
+	delete(c.disconnected, realm)
+	if ds, ok := c.sessions[realm]; ok {
+		if ds.session.Connected() {
+			c.Unlock()
 			ch := make(chan *xconn.Session)
-			close(ch)
-			return session, ch, nil
+			close(ch) // already connected (P2P or QUIC with upgrade in flight); caller need not migrate
+			return ds.session, ch, nil
 		}
-		c.DeleteDeviceSession(realm)
+		ds.cancel()
+		delete(c.sessions, realm)
 	}
+	c.Unlock()
 
-	authid, privKey, err := ReadCredentials(cfgDirectory)
+	quicSess, err := ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	cloudSession, err := xconn.ConnectCryptosign(ctx, CloudURI(), realm, authid, privKey)
-	if err != nil {
-		return nil, nil, err
+	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
+	c.Lock()
+	delete(c.disconnected, realm)
+	if old, ok := c.sessions[realm]; ok {
+		old.cancel()
 	}
+	c.sessions[realm] = &deviceSession{
+		session:     quicSess.Session,
+		connectedAt: time.Now(),
+		ctx:         sessCtx,
+		cancel:      cancel,
+	}
+	c.Unlock()
 
 	upgradeCh := make(chan *xconn.Session, 1)
-	go func() { // nolint:contextcheck
-		if sess := c.upgradeToWebRTC(cloudSession, authid, privKey, realm, cfgDirectory); sess != nil {
+	go func() { //nolint
+		if sess := c.upgradeToWebRTC(quicSess, realm, cfgDirectory); sess != nil {
 			upgradeCh <- sess
 		}
 		close(upgradeCh)
 	}()
-
-	return cloudSession, upgradeCh, nil
+	return quicSess.Session, upgradeCh, nil
 }
 
-// upgradeToWebRTC negotiates a WebRTC session using cloudSession for signalling. On
-// success it atomically replaces the stored session, starts the reconnect loop, and
-// returns the WebRTC session. Returns nil on failure.
-func (c *ClientSessions) upgradeToWebRTC(cloudSession *xconn.Session, authid, privateKey, realm,
-	cfgDirectory string) *xconn.Session {
-	ctx, cancel := context.WithCancel(context.Background())
-	webrtcSession, err := ConnectWebrtc(context.Background(), cloudSession, realm, authid, privateKey,
-		cfgDirectory, cancel)
+// upgradeToWebRTC negotiates a WebRTC session using quicSess for signalling. On success
+// it atomically replaces the stored session, closes the QUIC connection, starts the
+// reconnect loop, and returns the WebRTC session. Returns nil on failure.
+func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfgDirectory string) *xconn.Session {
+	authid, privKey, err := ReadCredentials(cfgDirectory)
 	if err != nil {
-		log.Printf("webrtc upgrade: failed to connect: %v", err)
-		cancel()
+		log.Printf("p2p upgrade %s: %v", realm, err)
+		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
 		return nil
 	}
 
-	c.StoreDeviceSession(realm, webrtcSession, ctx, cancel)
-
-	log.Printf("webrtc upgrade: session for %s upgraded to WebRTC", realm)
-	go c.reconnectLoop(webrtcSession, authid, privateKey, realm, cfgDirectory) //nolint
-	return webrtcSession
-}
-
-// EnsureP2PDeviceSession returns the cached session if one exists. Otherwise it
-// establishes a WebRTC connection synchronously — never falling back to cloud.
-func (c *ClientSessions) EnsureP2PDeviceSession(ctx context.Context, realm,
-	cfgDirectory string) (*xconn.Session, error) {
-	if session, ok := c.SessionByRealm(realm); ok {
-		if session.Connected() {
-			return session, nil
-		}
-		c.DeleteDeviceSession(realm)
-	}
-
-	authid, privateKey, err := ReadCredentials(cfgDirectory)
+	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
+	webrtcSess, err := ConnectWebrtc(context.Background(), quicSess.Session, realm, authid, privKey,
+		cfgDirectory, cancel)
 	if err != nil {
-		return nil, err
-	}
-
-	cloudSession, err := xconn.ConnectCryptosign(ctx, CloudURI(), realm, authid, privateKey)
-	if err != nil {
-		return nil, err
-	}
-
-	sessionCtx, cancel := context.WithCancel(context.Background())
-	webrtcSession, err := ConnectWebrtc(ctx, cloudSession, realm, authid, privateKey, cfgDirectory, cancel)
-	if err != nil {
+		log.Printf("p2p upgrade %s: %v", realm, err)
 		cancel()
-		return nil, err
+		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
+		return nil
 	}
 
-	_ = cloudSession.Leave()
-	c.StoreDeviceSession(realm, webrtcSession, sessionCtx, cancel)             //nolint:contextcheck
-	go c.reconnectLoop(webrtcSession, authid, privateKey, realm, cfgDirectory) //nolint
-	return webrtcSession, nil
+	if c.isDisconnected(realm) {
+		cancel()
+		_ = webrtcSess.Leave()
+		return nil
+	}
+
+	c.StoreDeviceSession(realm, webrtcSess, sessCtx, cancel)
+	log.Printf("p2p upgrade %s: upgraded to WebRTC", realm)
+
+	go c.reconnectLoop(webrtcSess, nil, realm, cfgDirectory) //nolint
+	return webrtcSess
 }
 
-func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKey, realm, cfgDirectory string) {
+// reconnectLoop waits for session to disconnect then reconnects via QUIC and retries the P2P upgrade.
+// conn is non-nil for QUIC sessions (closed on disconnect); nil for WebRTC sessions.
+func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ Close() error },
+	realm, cfgDirectory string) {
 	<-session.Done()
+	if conn != nil {
+		conn.Close()
+	}
+
+	if c.isDisconnected(realm) {
+		return
+	}
+
 	retryDelay := 1 * time.Second
 	maxDelay := 30 * time.Second
-	for c.LoggedIn() {
+	for c.LoggedIn() && !c.isDisconnected(realm) {
 		c.DeleteDeviceSession(realm)
-		cloudSession, err := xconn.ConnectCryptosign(context.Background(), CloudURI(), realm, authid, privateKey)
+		newSess, err := ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			log.Printf("failed to connect cloud: %v", err)
 			retryDelay *= 2
@@ -327,31 +351,11 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, authid, privateKe
 			time.Sleep(retryDelay)
 			continue
 		}
-		sessionCtx, cancel := context.WithCancel(context.Background())
-		webrtcSession, err := ConnectWebrtc(context.Background(), cloudSession, realm, authid, privateKey,
-			cfgDirectory, cancel)
-		if err != nil {
-			log.Printf("failed to connect using webrtc: %v", err)
-			cancel()
-			retryDelay *= 2
-			if retryDelay > maxDelay {
-				retryDelay = maxDelay
-			}
-			time.Sleep(retryDelay)
-			continue
-		}
-		_ = cloudSession.Leave()
-		if sess, ok := c.SessionByRealm(realm); ok {
-			if sess.Connected() {
-				_ = webrtcSession.Leave()
-				cancel()
-				break
-			}
-
-			c.DeleteDeviceSession(realm)
-		}
-		c.StoreDeviceSession(realm, webrtcSession, sessionCtx, cancel)
-		<-webrtcSession.Done()
+		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
+		c.StoreDeviceSession(realm, newSess.Session, sessCtx, cancel)
+		log.Printf("reconnect %s: reconnected via QUIC", realm)
+		go c.upgradeToWebRTC(newSess, realm, cfgDirectory) //nolint
+		return
 	}
 }
 
