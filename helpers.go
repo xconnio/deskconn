@@ -324,6 +324,27 @@ func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*x
 	})
 }
 
+// ConnectDeviceRealmP2P connects directly to a device via WebRTC P2P, using QUIC for signaling.
+func ConnectDeviceRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xconn.Session, error) {
+	authid, privKey, err := ReadCredentials(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	quicSess, err := ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	webrtcSess, err := ConnectWebrtc(ctx, quicSess.Session, realm, authid, privKey, cfgDirectory, func() {})
+	quicSess.Connection().Close()
+	if err != nil {
+		return nil, err
+	}
+
+	return webrtcSess, nil
+}
+
 func ConnectWebrtc(ctx context.Context, session *xconn.Session, realm, authid, privateKey,
 	cfgDirectory string, onDisconnect func()) (*xconn.Session, error) {
 	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
@@ -411,7 +432,7 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 			}
 
-			deviceSess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+			deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 			if err != nil {
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 			}
@@ -457,9 +478,9 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 }
 
 // ProxyShellHandler proxies ProcedureShell with transparent PTY migration.
-// On first connection it uses a cloud session for fast start, then upgrades to WebRTC in the background.
-// When WebRTC is ready the daemon migrates the live PTY and stores the WebRTC session for future reuse.
-// If a P2P session is already cached it is used directly with no migration needed.
+// On first connection it uses a QUIC session for fast start, then upgrades to WebRTC in
+// the background. When WebRTC is ready the daemon migrates the live PTY and stores the
+// WebRTC session for future reuse. If a P2P session is already cached it is used directly.
 func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 	cfgDirectory string) xconn.InvocationHandler {
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
@@ -562,13 +583,13 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				}
 			}()
 
-			// Migration goroutine, fires only when a cloud upgrade to WebRTC completes
+			// Migration goroutine: fires when QUIC upgrades to WebRTC in the background.
 			go func() { //nolint:gosec
 				var webrtcSession *xconn.Session
 				select {
 				case ws, ok := <-upgradeCh:
 					if !ok || ws == nil {
-						return // already P2P or upgrade failed; cloud goroutine owns the session
+						return // upgrade failed or already P2P; QUIC goroutine owns the result
 					}
 					webrtcSession = ws
 				case <-migrationCtx.Done():
@@ -802,15 +823,6 @@ func encryptedCall(session *xconn.Session, procedure string, payload []byte, enc
 	return DecryptPayload(encResult, enc.receiveKey)
 }
 
-func ensureDeviceSession(ctx context.Context, clientSessions *ClientSessions, realm, cfgDirectory string,
-	p2p bool) (*xconn.Session, error) {
-	if p2p {
-		return clientSessions.EnsureP2PDeviceSession(ctx, realm, cfgDirectory)
-	}
-	sess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
-	return sess, err
-}
-
 func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessions *ClientSessions,
 	cfgDirectory string) (strArg string, bytesArg []byte, sess *xconn.Session, invErr *xconn.InvocationResult) {
 	realm, err := inv.ArgString(0)
@@ -825,8 +837,7 @@ func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessio
 	if err != nil {
 		return "", nil, nil, xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 	}
-	useP2P, _ := inv.ArgBool(3)
-	sess, err = ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, useP2P)
+	sess, err = clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 	if err != nil {
 		return "", nil, nil, xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
@@ -876,15 +887,14 @@ func ProxyDeviceInfoHandler(clientSessions *ClientSessions, cfgDirectory string)
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
 
-		useP2P, _ := inv.ArgBool(1)
-		deviceSession, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, useP2P)
+		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
 
-		callResp := deviceSession.Call(ProcedureDeviceInfo).Do()
+		callResp := deviceSess.Call(ProcedureDeviceInfo).Do()
 		if callResp.Err != nil {
-			_ = deviceSession.Leave()
+			_ = deviceSess.Leave()
 			clientSessions.DeleteDeviceSession(realm)
 			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
 		}
@@ -900,15 +910,15 @@ func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
 
-		deviceSession, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, false)
+		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
 
 		start := time.Now()
-		callResp := deviceSession.Call(ProcedurePing).Do()
+		callResp := deviceSess.Call(ProcedurePing).Do()
 		if callResp.Err != nil {
-			_ = deviceSession.Leave()
+			_ = deviceSess.Leave()
 			clientSessions.DeleteDeviceSession(realm)
 			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
 		}
@@ -924,8 +934,7 @@ func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
 
-		useP2P, _ := inv.ArgBool(1)
-		deviceSess, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, useP2P)
+		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
@@ -960,8 +969,7 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
 
-		useP2P, _ := inv.ArgBool(4)
-		deviceSess, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, useP2P)
+		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
@@ -993,7 +1001,7 @@ func ProxyFilePullHandler(clientSessions *ClientSessions, cfgDirectory string) x
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
 
-		deviceSess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
@@ -1026,7 +1034,7 @@ func ProxyPortForwardHandler(clientSessions *ClientSessions, cfgDirectory string
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
 
-		deviceSess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
@@ -1053,7 +1061,7 @@ func ProxyPortReverseHandler(clientSessions *ClientSessions, cfgDirectory string
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 		}
 
-		deviceSess, _, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
@@ -1093,7 +1101,7 @@ func ProxyLogsHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 			}
 
-			deviceSession, err := ensureDeviceSession(ctx, clientSessions, realm, cfgDirectory, false)
+			deviceSession, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 			if err != nil {
 				proxyCalls.Delete(caller)
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())

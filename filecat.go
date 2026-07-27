@@ -71,26 +71,26 @@ func (d *Deskconn) handleFileCat(ctx context.Context, inv *xconn.Invocation) *xc
 }
 
 func CatFile(session *xconn.Session, remotePath string) error {
-	return streamCat(session, ProcedureFileCat, false, os.Stdout, remotePath)
+	return streamCat(session, ProcedureFileCat, os.Stdout, remotePath)
 }
 
-func CatFileViaProxy(localSession *xconn.Session, realm, remotePath string, p2p bool) error {
-	return streamCat(localSession, ProcedureProxyCat, p2p, os.Stdout, realm, remotePath)
+func CatFileViaProxy(localSession *xconn.Session, realm, remotePath string) error {
+	return streamCat(localSession, ProcedureProxyCat, os.Stdout, realm, remotePath)
 }
 
 func ReadFile(session *xconn.Session, remotePath string) ([]byte, error) {
 	buf := &bytes.Buffer{}
-	err := streamCat(session, ProcedureFileCat, false, buf, remotePath)
+	err := streamCat(session, ProcedureFileCat, buf, remotePath)
 	return buf.Bytes(), err
 }
 
-func ReadFileViaProxy(localSession *xconn.Session, realm, remotePath string, p2p bool) ([]byte, error) {
+func ReadFileViaProxy(localSession *xconn.Session, realm, remotePath string) ([]byte, error) {
 	buf := &bytes.Buffer{}
-	err := streamCat(localSession, ProcedureProxyCat, p2p, buf, realm, remotePath)
+	err := streamCat(localSession, ProcedureProxyCat, buf, realm, remotePath)
 	return buf.Bytes(), err
 }
 
-func streamCat(session *xconn.Session, procedure string, p2p bool, out io.Writer, prefixArgs ...any) error {
+func streamCat(session *xconn.Session, procedure string, out io.Writer, prefixArgs ...any) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -111,9 +111,6 @@ func streamCat(session *xconn.Session, procedure string, p2p bool, out io.Writer
 	}
 
 	callArgs := append(prefixArgs, publicKey)
-	if p2p {
-		callArgs = append(callArgs, true)
-	}
 
 	var (
 		receiveKey     []byte
