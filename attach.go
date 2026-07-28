@@ -21,13 +21,6 @@ const (
 	MachineIDPath                    = "/etc/machine-id"
 )
 
-func CloudURI() string {
-	if v, ok := os.LookupEnv("DESKCONN_CLOUD_URI"); ok {
-		return v
-	}
-	return "wss://api.deskconn.com/ws"
-}
-
 func CloudQUICAddress() string {
 	if v, ok := os.LookupEnv("DESKCONN_CLOUD_QUIC_ADDRESS"); ok {
 		return v
@@ -54,10 +47,16 @@ type Credentials struct {
 }
 
 func Attach(username, password, desktopName string) error {
-	session, err := xconn.ConnectCRA(context.Background(), CloudURI(), Realm, username, password)
+	quicSess, err := ConnectCloudCRA(context.Background(), username, password)
 	if err != nil {
 		return err
 	}
+	go func() {
+		<-quicSess.Done()
+		_ = quicSess.Connection().Close()
+	}()
+	defer quicSess.Connection().Close()
+	session := quicSess.Session
 
 	machineID, err := os.ReadFile(MachineIDPath)
 	if err != nil {
