@@ -302,8 +302,7 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfg
 	}
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-	webrtcSess, err := ConnectWebrtc(context.Background(), quicSess.Session, realm, authid, privKey,
-		cfgDirectory, cancel)
+	webrtcSess, err := ConnectWebrtc(quicSess.Session, realm, authid, privKey, cancel)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)
 		cancel()
