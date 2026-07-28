@@ -420,15 +420,6 @@ start:
 				log.Println(subResp.Err)
 			}
 
-			// Fetch TURN credentials and set up WebRTC via the cloud realm session.
-			iceServers, expiresAt, err := deskconn.FetchTURNServers(cloudSession)
-			if err != nil {
-				log.Printf("failed to fetch TURN credentials, using STUN only: %v", err)
-				iceServers = []xconnwebrtc.ICEServer{
-					{URLs: []string{deskconn.StunServerURL}},
-				}
-			}
-
 			webRtcManager := xconnwebrtc.NewWebRTCHandler()
 			cfg := &xconnwebrtc.ProviderConfig{
 				Session:                     deviceSession,
@@ -438,7 +429,9 @@ start:
 				Serializer:                  &serializers.CBORSerializer{},
 				Authenticator:               authenticator,
 				Router:                      router,
-				ICEServers:                  iceServers,
+				ICEServers: []xconnwebrtc.ICEServer{
+					{URLs: []string{deskconn.StunServerURL}},
+				},
 			}
 			if err := webRtcManager.Setup(cfg); err != nil {
 				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
@@ -449,31 +442,6 @@ start:
 			}
 
 			webRtcManager.OnDataChannel(deskconnApis.HandleFileStreamChannel)
-
-			go func(initialExpiresAt int64) {
-				currentExpiresAt := initialExpiresAt
-				const turnCredentialRefreshBuffer = 5 * time.Minute
-				for {
-					sleepDur := time.Until(time.Unix(currentExpiresAt, 0)) - turnCredentialRefreshBuffer
-					if sleepDur <= 0 {
-						sleepDur = 0
-					}
-					select {
-					case <-cloudSession.Done():
-						return
-					case <-time.After(sleepDur):
-					}
-
-					newServers, newExpiresAt, err := deskconn.FetchTURNServers(cloudSession)
-					if err != nil {
-						log.Printf("failed to refresh TURN credentials: %v", err)
-						currentExpiresAt = time.Now().Add(10 * time.Second).Unix()
-						continue
-					}
-					webRtcManager.UpdateICEServers(newServers)
-					currentExpiresAt = newExpiresAt
-				}
-			}(expiresAt)
 
 			// Reset backoff after successful connection.
 			retryDelay = 1 * time.Second
