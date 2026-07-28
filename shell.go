@@ -28,6 +28,7 @@ type ptySession struct {
 	mu      sync.Mutex
 	inv     *xconn.Invocation
 	sendKey []byte
+	authID  string
 }
 
 type interactiveShellSession struct {
@@ -157,7 +158,7 @@ func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey
 		return nil, fmt.Errorf("failed to start PTY: %w", err)
 	}
 
-	ps := &ptySession{inv: inv, sendKey: sendKey}
+	ps := &ptySession{inv: inv, sendKey: sendKey, authID: inv.CallerAuthID()}
 	p.Lock()
 	p.ptmx[shellID] = ptmx
 	p.sessions[shellID] = ps
@@ -306,7 +307,8 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 							if ptmxOk && psOk {
 								validToken := tokenOk && subtle.ConstantTimeCompare(
 									[]byte(migrateToken), []byte(expectedToken)) == 1
-								if tokenErr != nil || !validToken {
+								sameCaller := oldPS.authID != "" && oldPS.authID == inv.CallerAuthID()
+								if tokenErr != nil || !validToken || !sameCaller {
 									p.Unlock()
 									return xconn.NewInvocationError(ErrNotAuthorized, "invalid migration token")
 								}
