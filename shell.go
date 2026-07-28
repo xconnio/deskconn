@@ -303,7 +303,6 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 							oldPtmx, ptmxOk := p.ptmx[oldShellID]
 							oldPS, psOk := p.sessions[oldShellID]
 							expectedToken, tokenOk := p.migrationTokens[oldShellID]
-							delete(p.migrationTokens, oldShellID)
 							if ptmxOk && psOk {
 								validToken := tokenOk && subtle.ConstantTimeCompare(
 									[]byte(migrateToken), []byte(expectedToken)) == 1
@@ -311,6 +310,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 									p.Unlock()
 									return xconn.NewInvocationError(ErrNotAuthorized, "invalid migration token")
 								}
+								delete(p.migrationTokens, oldShellID)
 								oldPS.mu.Lock()
 								oldInv := oldPS.inv
 								oldPS.inv = inv
