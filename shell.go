@@ -3,6 +3,9 @@ package deskconn
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"os"
@@ -27,6 +30,7 @@ type ptySession struct {
 	mu      sync.Mutex
 	inv     *xconn.Invocation
 	sendKey []byte
+	authID  string
 }
 
 type interactiveShellSession struct {
@@ -100,6 +104,27 @@ func (p *interactiveShellSession) setupEncryption(inv *xconn.Invocation, clientP
 	return enc, nil
 }
 
+// sendMigrationToken generates a fresh migration token for shellID and delivers it to the
+// client encrypted with the session's own sendKey, via a "MIGRATE:" marker.
+func (p *interactiveShellSession) sendMigrationToken(inv *xconn.Invocation, shellID string, sendKey []byte) {
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	encToken, err := EncryptPayload([]byte(token), sendKey)
+	if err != nil {
+		return
+	}
+
+	p.Lock()
+	p.migrationTokens[shellID] = token
+	p.Unlock()
+
+	_ = inv.SendProgress([]any{append([]byte("MIGRATE:"), encToken...)}, nil)
+}
+
 func (p *interactiveShellSession) cleanupShell(shellID string, inv *xconn.Invocation) {
 	p.Lock()
 	if stored, ok := p.ptmx[shellID]; ok {
@@ -156,7 +181,7 @@ func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey
 		return nil, fmt.Errorf("failed to start PTY: %w", err)
 	}
 
-	ps := &ptySession{inv: inv, sendKey: sendKey}
+	ps := &ptySession{inv: inv, sendKey: sendKey, authID: inv.CallerAuthID()}
 	p.Lock()
 	p.ptmx[shellID] = ptmx
 	p.sessions[shellID] = ps
@@ -274,6 +299,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 				if invErr != nil {
 					return invErr
 				}
+				p.sendMigrationToken(inv, shellID, enc.sendKey)
 				payload = payload[:keyIdx]
 				exists = false
 			} else {
@@ -296,18 +322,27 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 					}
 					if !exists {
 						if oldSessionID, err := inv.KwargUInt64("session-id"); err == nil {
-							migrateToken, tokenErr := inv.KwargString("migrate-token")
+							encMigrate, migrateErr := inv.KwargBytes("migrate")
 							oldShellID := fmt.Sprintf("%d", oldSessionID)
 							p.Lock()
 							oldPtmx, ptmxOk := p.ptmx[oldShellID]
 							oldPS, psOk := p.sessions[oldShellID]
+							oldEnc, oldEncOk := p.encKeys[oldShellID]
 							expectedToken, tokenOk := p.migrationTokens[oldShellID]
-							delete(p.migrationTokens, oldShellID)
-							if ptmxOk && psOk {
-								if tokenErr != nil || !tokenOk || migrateToken != expectedToken {
+							if ptmxOk && psOk && oldEncOk {
+								var validToken bool
+								if migrateErr == nil {
+									if plaintext, derr := DecryptPayload(encMigrate, oldEnc.sendKey); derr == nil {
+										validToken = tokenOk && subtle.ConstantTimeCompare(
+											plaintext, []byte(expectedToken)) == 1
+									}
+								}
+								sameCaller := oldPS.authID != "" && oldPS.authID == inv.CallerAuthID()
+								if !validToken || !sameCaller {
 									p.Unlock()
 									return xconn.NewInvocationError(ErrNotAuthorized, "invalid migration token")
 								}
+								delete(p.migrationTokens, oldShellID)
 								oldPS.mu.Lock()
 								oldInv := oldPS.inv
 								oldPS.inv = inv
@@ -333,11 +368,6 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 						}
 					}
 					if !exists {
-						if token, err := inv.KwargString("migrate-token"); err == nil && token != "" {
-							p.Lock()
-							p.migrationTokens[shellID] = token
-							p.Unlock()
-						}
 						newPt, err := p.startPtySession(inv, enc.sendKey, shellID, "bash")
 						if err != nil {
 							return xconn.NewInvocationError(ErrOperationFailed, err.Error())
@@ -601,6 +631,18 @@ func StartInteractiveCommand(session *xconn.Session, realm, procedureName string
 					return
 				}
 				keyExchangeOnce.Do(func() { close(keyExchangeReady) })
+				return
+			}
+
+			if bytes.HasPrefix(data, []byte("MIGRATE:")) {
+				// Still opaque to us: relay the ciphertext to the local proxy as-is,
+				// only it and the device ever hold the key to open it.
+				if realm != "" {
+					blob := append([]byte(nil), data[len("MIGRATE:"):]...)
+					go func() {
+						_ = session.Call(ProcedureProxyShellMigrate).Args(blob).Do()
+					}()
+				}
 				return
 			}
 

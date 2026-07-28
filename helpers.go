@@ -2,8 +2,6 @@ package deskconn
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +32,7 @@ const (
 	ProcedureAccountGet      = "io.xconn.deskconn.account.get"
 
 	ProcedureProxyShell        = "io.xconn.deskconn.deskconnd.proxy.shell"
+	ProcedureProxyShellMigrate = "io.xconn.deskconn.deskconnd.proxy.shell.migrate"
 	ProcedureProxyExec         = "io.xconn.deskconn.deskconnd.proxy.exec"
 	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
 	ProcedureProxyDeviceInfo   = "io.xconn.deskconn.deskconnd.proxy.device.info"
@@ -510,12 +509,6 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			}
 			initialArgs := append([]any(nil), inv.Args()[1:]...)
 
-			tokenBytes := make([]byte, 32)
-			if _, err := rand.Read(tokenBytes); err != nil {
-				return xconn.NewInvocationError(ErrOperationFailed, "failed to generate migration token")
-			}
-			migrationToken := hex.EncodeToString(tokenBytes)
-
 			deviceSession, upgradeCh, err := clientSessions.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
 			if err != nil {
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
@@ -536,20 +529,12 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			}
 			proxyCall.setCloseFunc(closeCloud)
 
-			firstCloudMsg := true
 			go func() {
 				callResp := deviceSession.Call(ProcedureShell).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
 						p, ok := <-cloudCh
 						if !ok {
 							return xconn.NewFinalProgress()
-						}
-						if firstCloudMsg {
-							firstCloudMsg = false
-							if p.Kwargs == nil {
-								p.Kwargs = make(map[string]any)
-							}
-							p.Kwargs["migrate-token"] = migrationToken
 						}
 						return p
 					}).
@@ -607,16 +592,24 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				}
 
 				// WebRTC shell call with session-id so device migrates the live PTY.
-				// session-id must be in the first progress kwargs
+				// The migrate-token itself was generated device-side and relayed to us by
+				// the client still encrypted (see ProxyShellMigrateHandler) — we never see
+				// the plaintext, we just carry it along with our own session-id bookkeeping.
 				sessionID := deviceSession.ID()
+				var migrateBlob []byte
+				select {
+				case migrateBlob = <-proxyCall.migrateBlobCh:
+				case <-migrationCtx.Done():
+					return
+				}
 				callResp := webrtcSession.Call(ProcedureShell).
 					ProgressSender(func(_ context.Context) *xconn.Progress {
 						if !switched {
 							switched = true
 							p := xconn.NewProgress(initialArgs...)
 							p.Kwargs = map[string]any{
-								"session-id":    sessionID,
-								"migrate-token": migrationToken,
+								"session-id": sessionID,
+								"migrate":    migrateBlob,
 							}
 							return p
 						}
@@ -671,6 +664,22 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			return <-resultCh
 		}
 		return xconn.NewInvocationError(xconn.ErrNoResult)
+	}
+}
+
+// ProxyShellMigrateHandler receives the migration token the device generated and encrypted
+// for the caller's own shell session.
+func ProxyShellMigrateHandler(proxyCalls *ProxyCalls) xconn.InvocationHandler {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		blob, err := inv.ArgBytes(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		if proxyCall, exists := proxyCalls.Fetch(inv.Caller()); exists {
+			proxyCall.setMigrateBlob(blob)
+		}
+		return xconn.NewInvocationResult()
 	}
 }
 
