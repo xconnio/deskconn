@@ -3,6 +3,7 @@ package deskconn
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"math"
 	"os"
@@ -304,7 +305,9 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 							expectedToken, tokenOk := p.migrationTokens[oldShellID]
 							delete(p.migrationTokens, oldShellID)
 							if ptmxOk && psOk {
-								if tokenErr != nil || !tokenOk || migrateToken != expectedToken {
+								validToken := tokenOk && subtle.ConstantTimeCompare(
+									[]byte(migrateToken), []byte(expectedToken)) == 1
+								if tokenErr != nil || !validToken {
 									p.Unlock()
 									return xconn.NewInvocationError(ErrNotAuthorized, "invalid migration token")
 								}
