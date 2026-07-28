@@ -268,7 +268,32 @@ func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
 		return nil, err
 	}
 
-	return xconn.ConnectCryptosign(context.Background(), CloudURI(), Realm, authid, privKey)
+	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authenticator: %w", err)
+	}
+
+	quicSess, err := xconn.ConnectQUIC(context.Background(), CloudQUICAddress(), Realm, &xconn.QUICDialerConfig{
+		Authenticator: authenticator,
+		TLSConfig:     CloudQUICTLSConfig(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		<-quicSess.Done()
+		_ = quicSess.Connection().Close()
+	}()
+	return quicSess.Session, nil
+}
+
+func ConnectCloudCRA(ctx context.Context, username, password string) (*xconn.QUICSession, error) {
+	authenticator := xconnauth.NewWAMPCRAAuthenticator(username, password, nil)
+	return xconn.ConnectQUIC(ctx, CloudQUICAddress(), Realm, &xconn.QUICDialerConfig{
+		Authenticator: authenticator,
+		TLSConfig:     CloudQUICTLSConfig(),
+	})
 }
 
 func RemoveCredentialsFiles(cfgDirectory string) error {
@@ -285,26 +310,6 @@ func RemoveCredentialsFiles(cfgDirectory string) error {
 	}
 
 	return nil
-}
-
-func ConnectDeviceRealm(ctx context.Context, realm, cfgDirectory string, useP2P bool) (*xconn.Session, error) {
-	authid, privKey, err := ReadCredentials(cfgDirectory)
-	if err != nil {
-		return nil, err
-	}
-
-	session, err := xconn.ConnectCryptosign(ctx, CloudURI(), realm, authid, privKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if !useP2P {
-		return session, nil
-	}
-
-	defer func() { _ = session.Leave() }()
-
-	return ConnectWebrtc(ctx, session, realm, authid, privKey, cfgDirectory, nil)
 }
 
 func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*xconn.QUICSession, error) {
@@ -1162,12 +1167,24 @@ func GetOrRefreshTURNServers(ctx context.Context, authid, privKey, cfgDirectory 
 		return turnCredentialsToICEServers(cached), nil
 	}
 
-	session, err := xconn.ConnectCryptosign(ctx, CloudURI(), CloudRealm, authid, privKey)
+	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authenticator: %w", err)
+	}
+	quicSess, err := xconn.ConnectQUIC(ctx, CloudQUICAddress(), CloudRealm, &xconn.QUICDialerConfig{
+		Authenticator: authenticator,
+		TLSConfig:     CloudQUICTLSConfig(),
+	})
 	if err != nil {
 		return nil, err
 	}
+	go func() {
+		<-quicSess.Done()
+		_ = quicSess.Connection().Close()
+	}()
+	defer quicSess.Connection().Close()
 
-	fresh, err := fetchTURNCredentials(session)
+	fresh, err := fetchTURNCredentials(quicSess.Session)
 	if err != nil {
 		if cached != nil {
 			return turnCredentialsToICEServers(cached), nil

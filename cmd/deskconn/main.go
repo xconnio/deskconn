@@ -1437,12 +1437,13 @@ func main() {
 			return
 		}
 
-		session, err := deskconn.ConnectDeviceRealm(context.Background(), creds.Realm, cfgDirectory, false)
+		quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), creds.Realm, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		callResp := session.Call(deskconn.ProcedureScreenshotPermission).Do()
+		defer quicSess.Connection().Close()
+		callResp := quicSess.Session.Call(deskconn.ProcedureScreenshotPermission).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 			sessionBus, err := dbus.ConnectSessionBus()
@@ -1905,12 +1906,17 @@ func detach(flagUsername, flagPassword string, useStdin bool) error {
 		return err
 	}
 
-	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
+	quicSess, err := deskconn.ConnectCloudCRA(context.Background(), username, password)
 	if err != nil {
 		return err
 	}
+	go func() {
+		<-quicSess.Done()
+		_ = quicSess.Connection().Close()
+	}()
+	defer quicSess.Connection().Close()
 
-	authID, name, err := selectDevice(session)
+	authID, name, err := selectDevice(quicSess.Session)
 	if err != nil {
 		return err
 	}
@@ -1925,7 +1931,7 @@ func detach(flagUsername, flagPassword string, useStdin bool) error {
 		return nil
 	}
 
-	return deskconn.Detach(session, authID)
+	return deskconn.Detach(quicSess.Session, authID)
 }
 
 func login(flagUsername, flagPassword string, useStdin bool) error {
@@ -1934,12 +1940,17 @@ func login(flagUsername, flagPassword string, useStdin bool) error {
 		return err
 	}
 
-	session, err := xconn.ConnectCRA(context.Background(), deskconn.CloudURI(), deskconn.Realm, username, password)
+	quicSess, err := deskconn.ConnectCloudCRA(context.Background(), username, password)
 	if err != nil {
 		return err
 	}
+	go func() {
+		<-quicSess.Done()
+		_ = quicSess.Connection().Close()
+	}()
+	defer quicSess.Connection().Close()
 
-	return deskconn.Login(session, username)
+	return deskconn.Login(quicSess.Session, username)
 }
 
 func logout(cfgDirectory string) error {
