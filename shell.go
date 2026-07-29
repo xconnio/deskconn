@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 	log "github.com/sirupsen/logrus"
@@ -26,6 +27,15 @@ type encryptionKeys struct {
 	receiveKey []byte
 }
 
+// migrationTokenTTL bounds how long a migration token stays usable after it's issued,
+// so a captured ciphertext blob can't be replayed indefinitely.
+const migrationTokenTTL = 30 * time.Second
+
+type migrationToken struct {
+	value    string
+	issuedAt time.Time
+}
+
 type ptySession struct {
 	mu      sync.Mutex
 	inv     *xconn.Invocation
@@ -36,7 +46,7 @@ type ptySession struct {
 type interactiveShellSession struct {
 	ptmx            map[string]*os.File
 	sessions        map[string]*ptySession
-	migrationTokens map[string]string
+	migrationTokens map[string]migrationToken
 	encKeys         map[string]*encryptionKeys
 	invShellIDs     map[*xconn.Invocation]string // fast-path: inv pointer → shell ID
 	pids            map[string]int               // shell ID → PTY child PID, for /proc cwd lookups
@@ -47,7 +57,7 @@ func newInteractiveShellSession() *interactiveShellSession {
 	return &interactiveShellSession{
 		ptmx:            make(map[string]*os.File),
 		sessions:        make(map[string]*ptySession),
-		migrationTokens: make(map[string]string),
+		migrationTokens: make(map[string]migrationToken),
 		encKeys:         make(map[string]*encryptionKeys),
 		invShellIDs:     make(map[*xconn.Invocation]string),
 		pids:            make(map[string]int),
@@ -119,7 +129,7 @@ func (p *interactiveShellSession) sendMigrationToken(inv *xconn.Invocation, shel
 	}
 
 	p.Lock()
-	p.migrationTokens[shellID] = token
+	p.migrationTokens[shellID] = migrationToken{value: token, issuedAt: time.Now()}
 	p.Unlock()
 
 	_ = inv.SendProgress([]any{append([]byte("MIGRATE:"), encToken...)}, nil)
@@ -331,10 +341,10 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 							expectedToken, tokenOk := p.migrationTokens[oldShellID]
 							if ptmxOk && psOk && oldEncOk {
 								var validToken bool
-								if migrateErr == nil {
+								if migrateErr == nil && tokenOk && time.Since(expectedToken.issuedAt) <= migrationTokenTTL {
 									if plaintext, derr := DecryptPayload(encMigrate, oldEnc.sendKey); derr == nil {
-										validToken = tokenOk && subtle.ConstantTimeCompare(
-											plaintext, []byte(expectedToken)) == 1
+										validToken = subtle.ConstantTimeCompare(
+											plaintext, []byte(expectedToken.value)) == 1
 									}
 								}
 								sameCaller := oldPS.authID != "" && oldPS.authID == inv.CallerAuthID()
