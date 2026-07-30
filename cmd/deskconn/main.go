@@ -29,6 +29,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/deskconn"
+	sysinfo "github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -1350,7 +1351,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		var info deskconn.DeviceInfo
+		var info sysinfo.DeviceInfo
 		if err := json.Unmarshal(rawData, &info); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return

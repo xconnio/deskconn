@@ -8,6 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/xconnio/deskconn/info"
 	"github.com/xconnio/wampproto-go"
 	"github.com/xconnio/xconn-go"
 )
@@ -28,7 +29,6 @@ const (
 	ProcedureFileCopy            = "io.xconn.deskconn.deskconnd.file.copy"
 	ProcedureFileEdit            = "io.xconn.deskconn.deskconnd.file.edit"
 	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
-	ProcedureDeviceInfo          = "io.xconn.deskconn.deskconnd.device.info"
 	ProcedureLogs                = "io.xconn.deskconn.deskconnd.logs"
 	ProcedurePing                = "io.xconn.deskconn.deskconnd.ping"
 	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
@@ -71,6 +71,8 @@ type Deskconn struct {
 	logs            *logSessions
 	indexer         *IndexService
 	wallpaper       *Wallpaper
+	processes       *info.ProcessMonitor
+	appRegistry     *info.AppRegistry
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio) *Deskconn {
@@ -86,6 +88,8 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio) *Deskconn {
 		audio:           audio,
 		printer:         NewPrinter(),
 		logs:            newLogSessions(),
+		processes:       info.NewProcessMonitor(),
+		appRegistry:     info.NewAppRegistry(),
 	}
 	if screen != nil {
 		d.wallpaper = NewWallpaper(screen.SessionBus())
@@ -137,6 +141,10 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedurePortForward:          d.handlePortForward,
 		ProcedurePortReverse:          d.handlePortReverse,
 		ProcedureDeviceInfo:           d.handleDeviceInfo,
+		ProcedureProcessList:          d.handleProcessList,
+		ProcedureProcessSignal:        d.handleProcessSignal,
+		ProcedureAppList:              d.handleAppList,
+		ProcedureAppIcon:              d.handleAppIcon,
 		ProcedureMPRISPlayers:         d.handleListPlayers,
 		ProcedureMPRISPlayPause:       d.handlePlayPause,
 		ProcedureMPRISPlay:            d.handlePlay,
