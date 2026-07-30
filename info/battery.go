@@ -1,4 +1,4 @@
-package deskconn
+package info
 
 import (
 	"fmt"

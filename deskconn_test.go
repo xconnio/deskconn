@@ -1,12 +1,16 @@
 package deskconn_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn"
+	"github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -63,4 +67,34 @@ func TestBrightnessGetSet(t *testing.T) {
 	updated := int(callResp.ArgInt64Or(0, 0))
 	require.GreaterOrEqual(t, updated, 0)
 	require.LessOrEqual(t, updated, 100)
+}
+
+func TestDeviceInfoIncludesBattery(t *testing.T) {
+	tmp := t.TempDir()
+	dev := filepath.Join(tmp, "BAT0")
+	require.NoError(t, os.Mkdir(dev, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dev, "type"), []byte("Battery"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dev, "status"), []byte("Full"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dev, "capacity"), []byte("100"), 0600))
+
+	old := info.PowerSupplyBasePath
+	defer func() { info.PowerSupplyBasePath = old }()
+	info.PowerSupplyBasePath = tmp
+
+	callee, caller := setupRouterAndConnectSessions(t)
+
+	d := deskconn.NewDeskconn(nil, nil, nil)
+	require.NoError(t, d.Register(callee))
+
+	callResp := caller.Call(deskconn.ProcedureDeviceInfo).Do()
+	require.NoError(t, callResp.Err)
+
+	rawData, err := callResp.ArgBytes(0)
+	require.NoError(t, err)
+
+	var deviceInfo info.DeviceInfo
+	require.NoError(t, json.Unmarshal(rawData, &deviceInfo))
+	require.NotNil(t, deviceInfo.Battery)
+	require.Equal(t, "Full", deviceInfo.Battery.Status)
+	require.Equal(t, 100, deviceInfo.Battery.Percentage)
 }
