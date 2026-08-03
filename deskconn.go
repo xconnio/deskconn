@@ -20,6 +20,7 @@ const (
 	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
 	ProcedureShell               = "io.xconn.deskconn.deskconnd.shell"
+	ProcedureShellIsBusy         = "io.xconn.deskconn.deskconnd.shell.isbusy"
 	ProcedureExec                = "io.xconn.deskconn.deskconnd.exec"
 	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
 	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
@@ -126,6 +127,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureScreenLock:           d.lockScreenLockHandler,
 		ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
 		ProcedureShell:                d.shellSession.handleShell(),
+		ProcedureShellIsBusy:          d.shellSession.handleShellIsBusy(),
 		ProcedureExec:                 d.shellSession.handleExec(),
 		ProcedureFileBrowse:           d.handleFileBrowse,
 		ProcedureFileRename:           d.handleFileRename,
