@@ -17,6 +17,7 @@ import (
 
 	"github.com/creack/pty"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
 	"github.com/xconnio/xconn-go"
@@ -159,6 +160,61 @@ func (p *interactiveShellSession) cwdForShell(shellID string) (string, error) {
 		return "", fmt.Errorf("no such shell: %s", shellID)
 	}
 	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+}
+
+// isBusy reports whether some other process (not the shell itself) currently
+// owns the pty's foreground process group — the same check a local terminal
+// (e.g. GNOME Terminal) makes via tcgetpgrp before warning on tab close.
+func (p *interactiveShellSession) isBusy(shellID string) (bool, error) {
+	p.Lock()
+	ptmx, ptmxOk := p.ptmx[shellID]
+	pid, pidOk := p.pids[shellID]
+	p.Unlock()
+	if !ptmxOk || !pidOk {
+		return false, fmt.Errorf("no such shell: %s", shellID)
+	}
+
+	// SyscallConn (not Fd) so the pty stays non-blocking for the output reader
+	// goroutine that's continuously reading it — Fd() would flip that
+	// permanently to blocking mode for the rest of this file's lifetime.
+	rawConn, err := ptmx.SyscallConn()
+	if err != nil {
+		return false, fmt.Errorf("failed to access pty: %w", err)
+	}
+
+	var fgpgid int
+	var ioctlErr error
+	if err := rawConn.Control(func(fd uintptr) {
+		fgpgid, ioctlErr = unix.IoctlGetInt(int(fd), unix.TIOCGPGRP)
+	}); err != nil {
+		return false, fmt.Errorf("failed to access pty fd: %w", err)
+	}
+	if ioctlErr != nil {
+		return false, fmt.Errorf("failed to get foreground pgid: %w", ioctlErr)
+	}
+
+	shellPgid, err := syscall.Getpgid(pid)
+	if err != nil {
+		return false, fmt.Errorf("failed to get shell pgid: %w", err)
+	}
+
+	return fgpgid != shellPgid, nil
+}
+
+func (p *interactiveShellSession) handleShellIsBusy() func(_ context.Context,
+	inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		shellID, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		busy, err := p.isBusy(shellID)
+		if err != nil {
+			return xconn.NewInvocationResult(false)
+		}
+		return xconn.NewInvocationResult(busy)
+	}
 }
 
 // resolveStartDir picks the start dir: "prev-shell" kwarg's live cwd, or home.
