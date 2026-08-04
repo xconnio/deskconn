@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -316,6 +317,9 @@ start:
 
 	detachChan := make(chan struct{}, 1)
 
+	var cloudConnMu sync.Mutex
+	var activeDeviceSess, activeCloudSess *xconn.QUICSession
+
 	go func() {
 		retryDelay := 1 * time.Second
 		maxDelay := 30 * time.Second
@@ -363,6 +367,11 @@ start:
 
 			deviceSession := deviceSess.Session
 			cloudSession := cloudSess.Session
+
+			cloudConnMu.Lock()
+			activeDeviceSess = deviceSess
+			activeCloudSess = cloudSess
+			cloudConnMu.Unlock()
 
 			log.Println("connected to cloud")
 
@@ -458,6 +467,11 @@ start:
 			case <-cloudSession.Done():
 			}
 
+			cloudConnMu.Lock()
+			activeDeviceSess = nil
+			activeCloudSess = nil
+			cloudConnMu.Unlock()
+
 			_ = deviceSess.Connection().Close()
 			log.Println("disconnected from cloud, retrying...")
 		}
@@ -476,6 +490,17 @@ start:
 	case <-sigChan:
 		cancel()
 		clientSession.Logout()
+
+		cloudConnMu.Lock()
+		if activeCloudSess != nil {
+			_ = activeCloudSess.Close()
+		}
+		if activeDeviceSess != nil {
+			_ = activeDeviceSess.Close()
+			_ = activeDeviceSess.Connection().Close()
+		}
+		cloudConnMu.Unlock()
+
 		router.Close()
 		localRouter.Close()
 	case <-detachChan:
