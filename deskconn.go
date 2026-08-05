@@ -468,7 +468,16 @@ func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *x
 		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
 	}
 
-	result, err := d.files.Browse(string(plaintext))
+	var args struct {
+		Path   string `json:"path"`
+		Cursor string `json:"cursor"`
+		Limit  int    `json:"limit"`
+	}
+	if err := json.Unmarshal(plaintext, &args); err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	result, err := d.files.Browse(args.Path, args.Cursor, args.Limit)
 	if err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())

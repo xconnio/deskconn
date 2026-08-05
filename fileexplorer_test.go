@@ -27,7 +27,7 @@ func TestFileBrowserBrowseEmptyPathReturnsHome(t *testing.T) {
 	require.NoError(t, err)
 
 	fb := deskconn.NewFileBrowser()
-	result, err := fb.Browse("")
+	result, err := fb.Browse("", "", 0)
 	require.NoError(t, err)
 	require.True(t, result.IsDir)
 	require.Equal(t, filepath.Clean(homeDir), result.Path)
@@ -40,7 +40,7 @@ func TestFileBrowserBrowseDirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("bb"), 0644))
 
 	fb := deskconn.NewFileBrowser()
-	result, err := fb.Browse(dir)
+	result, err := fb.Browse(dir, "", 0)
 	require.NoError(t, err)
 	require.True(t, result.IsDir)
 	require.Equal(t, "directory", result.Type)
@@ -56,7 +56,7 @@ func TestFileBrowserBrowseFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(filePath, content, 0644))
 
 	fb := deskconn.NewFileBrowser()
-	result, err := fb.Browse(filePath)
+	result, err := fb.Browse(filePath, "", 0)
 	require.NoError(t, err)
 	require.False(t, result.IsDir)
 	require.Equal(t, "file", result.Type)
@@ -66,7 +66,7 @@ func TestFileBrowserBrowseFile(t *testing.T) {
 
 func TestFileBrowserBrowseNonExistent(t *testing.T) {
 	fb := deskconn.NewFileBrowser()
-	_, err := fb.Browse("/nonexistent/deskconn-test-path")
+	_, err := fb.Browse("/nonexistent/deskconn-test-path", "", 0)
 	require.Error(t, err)
 }
 
@@ -78,7 +78,7 @@ func TestFileBrowserBrowseEntriesSortedDirsFirst(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644))
 
 	fb := deskconn.NewFileBrowser()
-	result, err := fb.Browse(dir)
+	result, err := fb.Browse(dir, "", 0)
 	require.NoError(t, err)
 	require.Len(t, result.Entries, 4)
 
@@ -93,13 +93,39 @@ func TestFileBrowserBrowseEntriesSortedDirsFirst(t *testing.T) {
 	require.Equal(t, "z.txt", result.Entries[3].Name)
 }
 
+func TestFileBrowserBrowsePagination(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "a-dir"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.txt"), []byte("c"), 0644))
+
+	fb := deskconn.NewFileBrowser()
+
+	page1, err := fb.Browse(dir, "", 2)
+	require.NoError(t, err)
+	require.Len(t, page1.Entries, 2)
+	require.True(t, page1.HasMore)
+	require.NotEmpty(t, page1.NextCursor)
+	require.Equal(t, "a-dir", page1.Entries[0].Name)
+	require.Equal(t, "a.txt", page1.Entries[1].Name)
+
+	page2, err := fb.Browse(dir, page1.NextCursor, 2)
+	require.NoError(t, err)
+	require.Len(t, page2.Entries, 2)
+	require.False(t, page2.HasMore)
+	require.Empty(t, page2.NextCursor)
+	require.Equal(t, "b.txt", page2.Entries[0].Name)
+	require.Equal(t, "c.txt", page2.Entries[1].Name)
+}
+
 func TestFileBrowserBrowseHiddenEntry(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".hidden"), []byte("h"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "visible"), []byte("v"), 0644))
 
 	fb := deskconn.NewFileBrowser()
-	result, err := fb.Browse(dir)
+	result, err := fb.Browse(dir, "", 0)
 	require.NoError(t, err)
 
 	byName := make(map[string]deskconn.FileEntry, len(result.Entries))
@@ -118,7 +144,7 @@ func TestFileBrowserBrowseSymlink(t *testing.T) {
 	require.NoError(t, os.Symlink(target, link))
 
 	fb := deskconn.NewFileBrowser()
-	result, err := fb.Browse(dir)
+	result, err := fb.Browse(dir, "", 0)
 	require.NoError(t, err)
 
 	byName := make(map[string]deskconn.FileEntry, len(result.Entries))
@@ -132,7 +158,7 @@ func TestFileBrowserBrowseSymlink(t *testing.T) {
 
 func TestFileBrowserBrowseRelativePathEscapesHome(t *testing.T) {
 	fb := deskconn.NewFileBrowser()
-	_, err := fb.Browse("../../etc")
+	_, err := fb.Browse("../../etc", "", 0)
 	require.ErrorContains(t, err, "relative path escapes home directory")
 }
 
