@@ -74,6 +74,8 @@ type FileBrowseResult struct {
 	IsSymlink  bool        `json:"is_symlink"`
 	LinkTarget string      `json:"link_target,omitempty"`
 	Entries    []FileEntry `json:"entries,omitempty"`
+	NextCursor string      `json:"next_cursor,omitempty"`
+	HasMore    bool        `json:"has_more"`
 }
 
 type FileBrowser struct{}
@@ -82,7 +84,12 @@ func NewFileBrowser() *FileBrowser {
 	return &FileBrowser{}
 }
 
-func (f *FileBrowser) Browse(pathArg string) (*FileBrowseResult, error) {
+// Browse lists the contents of pathArg. If limit > 0, results are paginated:
+// cursor (an opaque string from a previous call's NextCursor) resumes after
+// the last entry of that page, and HasMore/NextCursor are set when more
+// entries remain. limit <= 0 returns every entry in one page (legacy
+// behavior for callers that don't paginate, e.g. shell completion).
+func (f *FileBrowser) Browse(pathArg, cursor string, limit int) (*FileBrowseResult, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home dir: %w", err)
@@ -109,7 +116,7 @@ func (f *FileBrowser) Browse(pathArg string) (*FileBrowseResult, error) {
 		return nil, err
 	}
 
-	result.Entries = make([]FileEntry, 0, len(entries))
+	all := make([]FileEntry, 0, len(entries))
 	for _, entry := range entries {
 		entryPath := filepath.Join(resolvedPath, entry.Name())
 		entryInfo, err := os.Lstat(entryPath)
@@ -124,21 +131,76 @@ func (f *FileBrowser) Browse(pathArg string) (*FileBrowseResult, error) {
 				fe.ItemCount = &n
 			}
 		}
-		result.Entries = append(result.Entries, fe)
+		all = append(all, fe)
 	}
 
-	sort.Slice(result.Entries, func(i, j int) bool {
-		if result.Entries[i].IsDir != result.Entries[j].IsDir {
-			return result.Entries[i].IsDir
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].IsDir != all[j].IsDir {
+			return all[i].IsDir
 		}
-		return strings.ToLower(result.Entries[i].Name) < strings.ToLower(result.Entries[j].Name)
+		return strings.ToLower(all[i].Name) < strings.ToLower(all[j].Name)
 	})
 
-	// Generate thumbnails in parallel for image and video entries.
+	start := 0
+	if cursor != "" {
+		cursorKey, err := decodeBrowseCursor(cursor)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cursor: %w", err)
+		}
+		start = sort.Search(len(all), func(i int) bool {
+			return fileEntrySortKey(all[i]) > cursorKey
+		})
+	}
+
+	end := len(all)
+	hasMore := false
+	if limit > 0 && start+limit < len(all) {
+		end = start + limit
+		hasMore = true
+	}
+	page := all[start:end]
+
+	generateThumbnails(page)
+
+	result.Entries = page
+	result.HasMore = hasMore
+	if hasMore {
+		result.NextCursor = encodeBrowseCursor(fileEntrySortKey(page[len(page)-1]))
+	}
+
+	return result, nil
+}
+
+// fileEntrySortKey returns a string that sorts identically to the directory
+// listing order (directories first, then case-insensitive name), so it can
+// be used as a pagination cursor position.
+func fileEntrySortKey(e FileEntry) string {
+	dirRank := "1"
+	if e.IsDir {
+		dirRank = "0"
+	}
+	return dirRank + "\x00" + strings.ToLower(e.Name)
+}
+
+func encodeBrowseCursor(key string) string {
+	return base64.StdEncoding.EncodeToString([]byte(key))
+}
+
+func decodeBrowseCursor(cursor string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(cursor)
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
+}
+
+// generateThumbnails fills in Thumbnail for image and video entries in
+// parallel. Only called for the page actually returned to the caller.
+func generateThumbnails(entries []FileEntry) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
-	for i := range result.Entries {
-		e := &result.Entries[i]
+	for i := range entries {
+		e := &entries[i]
 		if e.IsDir || e.IsSymlink {
 			continue
 		}
@@ -161,8 +223,6 @@ func (f *FileBrowser) Browse(pathArg string) (*FileBrowseResult, error) {
 		}
 	}
 	wg.Wait()
-
-	return result, nil
 }
 
 func resolveBrowsePath(homeDir, pathArg string) (string, error) {

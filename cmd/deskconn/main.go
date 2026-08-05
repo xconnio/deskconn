@@ -38,6 +38,8 @@ var version = "v0.1.0-alpha"
 const (
 	ModeQUIC = "quic"
 	ModeP2P  = "p2p"
+
+	jsonFieldPath = "path"
 )
 
 func main() {
@@ -453,7 +455,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		payload, _ := json.Marshal(map[string]string{"path": path})
+		payload, _ := json.Marshal(map[string]string{jsonFieldPath: path})
 		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileDelete, payload, *rmModeFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -601,7 +603,7 @@ func main() {
 		}
 
 		patch := deskconn.BuildEditPatch(original, edited)
-		payload, _ := json.Marshal(map[string]string{"path": path, "patch": patch})
+		payload, _ := json.Marshal(map[string]string{jsonFieldPath: path, "patch": patch})
 		if err := fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileEdit,
 			payload, *editModeFlag); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -2265,7 +2267,11 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 		return nil
 	}
 
-	resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, deskconn.ProcedureFileBrowse, []byte(dir)).Do()
+	browsePayload, err := json.Marshal(map[string]string{jsonFieldPath: dir})
+	if err != nil {
+		return nil
+	}
+	resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, deskconn.ProcedureFileBrowse, browsePayload).Do()
 	if resp.Err != nil {
 		return nil
 	}
