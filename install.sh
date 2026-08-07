@@ -57,6 +57,24 @@ chmod 700 "$EXEC_DIR/deskconnd"
 
 ln -sf "$BIN_DIR/deskconn" "$BIN_DIR/desk"
 
+# dsh/dcp are shortcuts for a fixed subcommand. Forwarding "--completion-bash" keeps
+# tab-completion working when invoked as "dsh"/"dcp".
+write_alias_script() {
+    local name="$1" subcommand="$2"
+    cat > "$BIN_DIR/$name" <<EOF
+#!/bin/sh
+if [ "\$1" = "--completion-bash" ]; then
+    shift
+    exec deskconn --completion-bash $subcommand "\$@"
+fi
+exec deskconn $subcommand "\$@"
+EOF
+    chmod 755 "$BIN_DIR/$name"
+}
+
+write_alias_script dsh shell
+write_alias_script dcp "file cp"
+
 BASH_COMP_DIR="$HOME/.local/share/bash-completion/completions"
 ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
 
@@ -84,11 +102,15 @@ awk -f "$AWK_SCRIPT" "$BASH_COMP_DIR/deskconn" > "$BASH_COMP_DIR/deskconn.tmp"
 mv "$BASH_COMP_DIR/deskconn.tmp" "$BASH_COMP_DIR/deskconn"
 rm -f "$AWK_SCRIPT"
 
-sed 's/complete -F _deskconn_bash_autocomplete -o default deskconn/complete -F _deskconn_bash_autocomplete -o default desk/' \
-    "$BASH_COMP_DIR/deskconn" > "$BASH_COMP_DIR/desk"
+for alias_name in desk dsh dcp; do
+    sed "s/complete -F _deskconn_bash_autocomplete -o default deskconn/complete -F _deskconn_bash_autocomplete -o default $alias_name/" \
+        "$BASH_COMP_DIR/deskconn" > "$BASH_COMP_DIR/$alias_name"
+done
 
 "$BIN_DIR/deskconn" --completion-script-zsh > "$ZSH_COMP_DIR/_deskconn"
-printf '#compdef desk\n_deskconn "$@"\n' > "$ZSH_COMP_DIR/_desk"
+for alias_name in desk dsh dcp; do
+    printf '#compdef %s\n_deskconn "$@"\n' "$alias_name" > "$ZSH_COMP_DIR/_$alias_name"
+done
 
 echo "Installed shell completions"
 echo "Installed deskconn $VERSION"

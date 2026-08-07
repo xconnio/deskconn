@@ -35,11 +35,60 @@ import (
 
 var version = "v0.1.0-alpha"
 
+// cliAliasScript describes a short subcommand-specific wrapper installed
+// alongside deskconn, e.g. "dsh" running "deskconn shell".
+type cliAliasScript struct {
+	name       string
+	subcommand []string
+}
+
+// aliasScripts lists the wrapper scripts installed next to the deskconn binary.
+func aliasScripts() []cliAliasScript {
+	return []cliAliasScript{
+		{name: aliasProgShell, subcommand: []string{subcommandShell}},
+		{name: aliasProgCopy, subcommand: []string{subcommandFile, subcommandCopy}},
+	}
+}
+
+// aliasWrapperScript renders a POSIX sh wrapper that runs deskconn with
+// subcommand fixed, forwarding the rest of argv untouched. It also forwards
+// live completion requests ("--completion-bash", the first arg per
+// kingpin's generated completion script) so tab-completion still works.
+func aliasWrapperScript(subcommand []string) string {
+	args := strings.Join(subcommand, " ")
+	return fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "%[1]s" ]; then
+    shift
+    exec deskconn %[1]s %[2]s "$@"
+fi
+exec deskconn %[2]s "$@"
+`, completionBashFlag, args)
+}
+
+// cliAliases lists every extra binary name installed alongside deskconn:
+// "desk" is a plain symlink, the rest are wrapper scripts from aliasScripts.
+func cliAliases() []string {
+	names := []string{"desk"}
+	for _, s := range aliasScripts() {
+		names = append(names, s.name)
+	}
+	return names
+}
+
 const (
 	ModeQUIC = "quic"
 	ModeP2P  = "p2p"
 
 	jsonFieldPath = "path"
+
+	aliasProgShell = "dsh"
+	aliasProgCopy  = "dcp"
+
+	subcommandShell = "shell"
+	subcommandFile  = "file"
+	subcommandCopy  = "cp"
+
+	completionBashFlag = "--completion-bash"
 )
 
 func main() {
@@ -1620,12 +1669,16 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 
 	paths := []string{
 		filepath.Join(binDir, "deskconn"),
-		filepath.Join(binDir, "desk"),
 		filepath.Join(execDir, "deskconnd"),
 		filepath.Join(bashCompDir, "deskconn"),
-		filepath.Join(bashCompDir, "desk"),
 		filepath.Join(zshCompDir, "_deskconn"),
-		filepath.Join(zshCompDir, "_desk"),
+	}
+	for _, alias := range cliAliases() {
+		paths = append(paths,
+			filepath.Join(binDir, alias),
+			filepath.Join(bashCompDir, alias),
+			filepath.Join(zshCompDir, "_"+alias),
+		)
 	}
 
 	fmt.Println("Removing deskconn binaries and shell completions...")
@@ -1736,9 +1789,17 @@ func downloadAndInstallUpdate(downloadURL string) error {
 			if err := installBinaryFromReader(tarReader, deskconnPath, 0755); err != nil {
 				return err
 			}
-			_ = os.Remove(filepath.Join(binDir, "desk"))
-			if err := os.Symlink(deskconnPath, filepath.Join(binDir, "desk")); err != nil {
+			deskPath := filepath.Join(binDir, "desk")
+			_ = os.Remove(deskPath)
+			if err := os.Symlink(deskconnPath, deskPath); err != nil {
 				return fmt.Errorf("failed to create desk symlink: %w", err)
+			}
+			for _, s := range aliasScripts() {
+				scriptPath := filepath.Join(binDir, s.name)
+				script := aliasWrapperScript(s.subcommand)
+				if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil { // nolint: gosec
+					return fmt.Errorf("failed to write %s wrapper: %w", s.name, err)
+				}
 			}
 			foundDeskconn = true
 		case "deskconnd":
@@ -1785,12 +1846,6 @@ func installCompletions(deskconnBin string) error {
 	if err := os.WriteFile(filepath.Join(bashDir, "deskconn"), []byte(bashScript), 0644); err != nil { // nolint: gosec
 		return fmt.Errorf("writing bash completion: %w", err)
 	}
-	deskBash := strings.Replace(bashScript,
-		"complete -F _deskconn_bash_autocomplete -o default deskconn",
-		"complete -F _deskconn_bash_autocomplete -o default desk", 1)
-	if err := os.WriteFile(filepath.Join(bashDir, "desk"), []byte(deskBash), 0644); err != nil { // nolint: gosec
-		return fmt.Errorf("writing desk bash completion: %w", err)
-	}
 
 	zshOut, err := exec.Command(deskconnBin, "--completion-script-zsh").Output() // nolint: gosec
 	if err != nil {
@@ -1799,9 +1854,19 @@ func installCompletions(deskconnBin string) error {
 	if err := os.WriteFile(filepath.Join(zshDir, "_deskconn"), zshOut, 0644); err != nil { // nolint: gosec
 		return fmt.Errorf("writing zsh completion: %w", err)
 	}
-	deskZsh := "#compdef desk\n_deskconn \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(zshDir, "_desk"), []byte(deskZsh), 0644); err != nil { // nolint: gosec
-		return fmt.Errorf("writing desk zsh completion: %w", err)
+
+	for _, alias := range cliAliases() {
+		aliasBash := strings.Replace(bashScript,
+			"complete -F _deskconn_bash_autocomplete -o default deskconn",
+			"complete -F _deskconn_bash_autocomplete -o default "+alias, 1)
+		if err := os.WriteFile(filepath.Join(bashDir, alias), []byte(aliasBash), 0644); err != nil { // nolint: gosec
+			return fmt.Errorf("writing %s bash completion: %w", alias, err)
+		}
+
+		aliasZsh := "#compdef " + alias + "\n_deskconn \"$@\"\n"
+		if err := os.WriteFile(filepath.Join(zshDir, "_"+alias), []byte(aliasZsh), 0644); err != nil { // nolint: gosec
+			return fmt.Errorf("writing %s zsh completion: %w", alias, err)
+		}
 	}
 
 	return nil
