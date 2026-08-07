@@ -117,6 +117,8 @@ deskconn shell <device> [--mode p2p|routed]
 deskconn exec  <device> <command...> [--p2p]
 ```
 
+`dsh <device>` is a shortcut for `deskconn shell <device>`.
+
 ### File operations
 
 All file commands accept `device:path` for remote paths and a bare `/path` for local paths.
@@ -128,6 +130,8 @@ deskconn file cp  <src> <dst>   [-r] [--mode p2p|routed]
 deskconn file rm  <target>      [--mode p2p|routed]
 deskconn file cat <device:path> [--mode p2p|routed]
 ```
+
+`dcp <src> <dst>` is a shortcut for `deskconn file cp <src> <dst>`.
 
 ### Port forwarding
 
