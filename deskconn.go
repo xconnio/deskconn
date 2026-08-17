@@ -138,6 +138,8 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureFileUpload:           d.handleFileUpload,
 		ProcedureFileCat:              d.handleFileCat,
 		ProcedureFileSearch:           d.handleFileSearch,
+		ProcedureGitStatus:            d.handleGitStatus,
+		ProcedureGitOriginal:          d.handleGitOriginal,
 		ProcedurePrinterList:          d.printer.handleListPrinters,
 		ProcedurePrinterPrint:         d.printer.handlePrint(),
 		ProcedurePortForward:          d.handlePortForward,
