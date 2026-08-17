@@ -374,7 +374,7 @@ func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
 		return nil, err
 	}
 
-	return finalSession, nil
+	return finalSession.Session, nil
 }
 
 func FetchDevicesFromCloud(cfgDirectory string) ([]Device, error) {
