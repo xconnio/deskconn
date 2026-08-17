@@ -171,6 +171,9 @@ func main() {
 	shellModeFlag := shellCmd.Flag("mode",
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
 	).Enum(ModeQUIC, ModeP2P)
+	shellForwardAgent := shellCmd.Flag("agent-forward",
+		"Forward the local SSH agent to the remote shell (like ssh -A). Only use with hosts you trust.",
+	).Short('A').Bool()
 
 	execCmd := app.Command("exec", "Run a command")
 	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().
@@ -667,6 +670,14 @@ func main() {
 			return
 		}
 
+		var agentSock string
+		if *shellForwardAgent {
+			agentSock = os.Getenv("SSH_AUTH_SOCK")
+			if agentSock == "" {
+				fmt.Fprintln(os.Stderr, "warning: SSH_AUTH_SOCK not set, continuing without agent forwarding")
+			}
+		}
+
 		switch *shellModeFlag {
 		case ModeQUIC:
 			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
@@ -675,6 +686,7 @@ func main() {
 				return
 			}
 			defer quicSess.Connection().Close()
+			defer setupAgentForward(quicSess.Session, "", agentSock)()
 			if err := deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureShell); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
@@ -685,6 +697,7 @@ func main() {
 				return
 			}
 			defer func() { _ = p2pSess.Leave() }()
+			defer setupAgentForward(p2pSess, "", agentSock)()
 			if err := deskconn.StartInteractiveCommand(p2pSess, "", deskconn.ProcedureShell); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
@@ -694,6 +707,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
+			defer setupAgentForward(localSession, realm, agentSock)()
 			if err := deskconn.StartInteractiveCommand(localSession, realm,
 				deskconn.ProcedureProxyShell); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -1610,6 +1624,39 @@ func updateApp(cfgDirectory string) error {
 }
 
 const pathInstallerBlock = "\n# Added by deskconn installer\nexport PATH=\"$HOME/.local/bin:$PATH\"\n"
+
+// agentForwardReadyTimeout bounds how long "deskconn shell -A" waits for the remote agent
+// forwarding listener to come up before giving up and starting a normal (unforwarded) shell.
+const agentForwardReadyTimeout = 5 * time.Second
+
+// setupAgentForward starts SSH-agent forwarding on session (see deskconn.RunAgentForward) when
+// agentSock is non-empty, and blocks until the remote listener is confirmed ready (or setup
+// fails/times out) so the caller can safely start the shell right after — the remote's
+// caller-keyed forwarding state must exist before the shell's first handshake message can
+// trigger the PTY spawn. Forwarding failures are reported as warnings; they never prevent the
+// shell itself from starting. The returned func stops forwarding and must be called (deferred)
+// once the shell exits.
+func setupAgentForward(session *xconn.Session, realm, agentSock string) func() {
+	if agentSock == "" {
+		return func() {}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan error, 1)
+	go func() {
+		_ = deskconn.RunAgentForward(ctx, session, realm, agentSock, ready)
+	}()
+
+	select {
+	case err := <-ready:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: agent forwarding unavailable: %v\n", err)
+		}
+	case <-time.After(agentForwardReadyTimeout):
+		fmt.Fprintln(os.Stderr, "warning: agent forwarding setup timed out, continuing without it")
+	}
+	return cancel
+}
 
 // confirmPrompt prints prompt, reads a line from stdin, and reports whether the response counts
 // as affirmative: "y"/"yes" (case-insensitive) are always affirmative, and an empty response

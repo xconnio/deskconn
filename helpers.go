@@ -33,6 +33,7 @@ const (
 
 	ProcedureProxyShell        = "io.xconn.deskconn.deskconnd.proxy.shell"
 	ProcedureProxyShellMigrate = "io.xconn.deskconn.deskconnd.proxy.shell.migrate"
+	ProcedureProxyAgentForward = "io.xconn.deskconn.deskconnd.proxy.agent.forward"
 	ProcedureProxyExec         = "io.xconn.deskconn.deskconnd.proxy.exec"
 	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
 	ProcedureProxyDeviceInfo   = "io.xconn.deskconn.deskconnd.proxy.device.info"

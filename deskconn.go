@@ -21,6 +21,7 @@ const (
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
 	ProcedureShell               = "io.xconn.deskconn.deskconnd.shell"
 	ProcedureShellIsBusy         = "io.xconn.deskconn.deskconnd.shell.isbusy"
+	ProcedureAgentForward        = "io.xconn.deskconn.deskconnd.agent.forward"
 	ProcedureExec                = "io.xconn.deskconn.deskconnd.exec"
 	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
 	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
@@ -59,39 +60,42 @@ const (
 )
 
 type Deskconn struct {
-	shellSession    *interactiveShellSession
-	keys            *keyManager
-	uploads         *uploadSessions
-	forwardSessions *portForwardSessions
-	reverseSessions *portReverseSessions
-	files           *FileBrowser
-	screen          *Screen
-	mpris           *MPRIS
-	audio           *Audio
-	printer         *Printer
-	logs            *logSessions
-	indexer         *IndexService
-	wallpaper       *Wallpaper
-	processes       *info.ProcessMonitor
-	appRegistry     *info.AppRegistry
+	shellSession         *interactiveShellSession
+	keys                 *keyManager
+	uploads              *uploadSessions
+	forwardSessions      *portForwardSessions
+	reverseSessions      *portReverseSessions
+	agentForwardSessions *agentForwardSessions
+	files                *FileBrowser
+	screen               *Screen
+	mpris                *MPRIS
+	audio                *Audio
+	printer              *Printer
+	logs                 *logSessions
+	indexer              *IndexService
+	wallpaper            *Wallpaper
+	processes            *info.ProcessMonitor
+	appRegistry          *info.AppRegistry
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio) *Deskconn {
 	d := &Deskconn{
-		shellSession:    newInteractiveShellSession(),
-		keys:            newKeyManager(),
-		uploads:         newUploadSessions(),
-		forwardSessions: newPortForwardSessions(),
-		reverseSessions: newPortReverseSessions(),
-		files:           NewFileBrowser(),
-		screen:          screen,
-		mpris:           mpris,
-		audio:           audio,
-		printer:         NewPrinter(),
-		logs:            newLogSessions(),
-		processes:       info.NewProcessMonitor(),
-		appRegistry:     info.NewAppRegistry(),
+		shellSession:         newInteractiveShellSession(),
+		keys:                 newKeyManager(),
+		uploads:              newUploadSessions(),
+		forwardSessions:      newPortForwardSessions(),
+		reverseSessions:      newPortReverseSessions(),
+		agentForwardSessions: newAgentForwardSessions(),
+		files:                NewFileBrowser(),
+		screen:               screen,
+		mpris:                mpris,
+		audio:                audio,
+		printer:              NewPrinter(),
+		logs:                 newLogSessions(),
+		processes:            info.NewProcessMonitor(),
+		appRegistry:          info.NewAppRegistry(),
 	}
+	d.shellSession.agentForward = d.agentForwardSessions
 	if screen != nil {
 		d.wallpaper = NewWallpaper(screen.SessionBus())
 	}
@@ -144,6 +148,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedurePrinterPrint:         d.printer.handlePrint(),
 		ProcedurePortForward:          d.handlePortForward,
 		ProcedurePortReverse:          d.handlePortReverse,
+		ProcedureAgentForward:         d.handleAgentForward,
 		ProcedureDeviceInfo:           d.handleDeviceInfo,
 		ProcedureProcessList:          d.handleProcessList,
 		ProcedureProcessSignal:        d.handleProcessSignal,
@@ -376,6 +381,7 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 	d.uploads.delete(sessionID)
 	d.forwardSessions.deleteCaller(sessionID)
 	d.reverseSessions.stop(sessionID)
+	d.agentForwardSessions.stop(sessionID)
 	d.logs.killAndDeleteByCaller(sessionID)
 }
 
