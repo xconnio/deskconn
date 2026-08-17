@@ -51,6 +51,7 @@ type interactiveShellSession struct {
 	encKeys         map[string]*encryptionKeys
 	invShellIDs     map[*xconn.Invocation]string // fast-path: inv pointer → shell ID
 	pids            map[string]int               // shell ID → PTY child PID, for /proc cwd lookups
+	agentForward    *agentForwardSessions        // set by NewDeskconn; may be nil, check before use
 	sync.Mutex
 }
 
@@ -232,9 +233,29 @@ func (p *interactiveShellSession) resolveStartDir(inv *xconn.Invocation) (string
 	return homeDir, nil
 }
 
+// agentSockForCaller returns the forwarded SSH agent socket path for callerID, or "" if
+// agent forwarding isn't active for it (including when no Deskconn owns this session, e.g.
+// in tests that construct interactiveShellSession directly).
+func (p *interactiveShellSession) agentSockForCaller(callerID uint64) string {
+	if p.agentForward == nil {
+		return ""
+	}
+	path, ok := p.agentForward.socketPath(callerID)
+	if !ok {
+		return ""
+	}
+	return path
+}
+
+// agentSockPath, when non-empty, is exported as SSH_AUTH_SOCK in the spawned process's
+// environment so tools run in the shell (git, ssh, ...) can use the caller's forwarded
+// local SSH agent — see RunAgentForward/handleAgentForward in agentforward.go.
 func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey []byte,
-	shellID string, command string, args ...string) (*os.File, error) {
+	shellID string, agentSockPath string, command string, args ...string) (*os.File, error) {
 	cmd := exec.Command(command, args...)
+	if agentSockPath != "" {
+		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+agentSockPath)
+	}
 
 	dir, err := p.resolveStartDir(inv)
 	if err != nil {
@@ -434,7 +455,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 						}
 					}
 					if !exists {
-						newPt, err := p.startPtySession(inv, enc.sendKey, shellID, "bash")
+						newPt, err := p.startPtySession(inv, enc.sendKey, shellID, p.agentSockForCaller(inv.Caller()), "bash")
 						if err != nil {
 							return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 						}
@@ -450,7 +471,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 			}
 
 			if !exists {
-				newPt, err := p.startPtySession(inv, enc.sendKey, shellID, "bash")
+				newPt, err := p.startPtySession(inv, enc.sendKey, shellID, p.agentSockForCaller(inv.Caller()), "bash")
 				if err != nil {
 					return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 				}
@@ -534,7 +555,9 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 						return xconn.NewInvocationError(ErrInvalidArgument, "invalid size")
 					}
 					if !exists {
-						newPt, err := p.startPtySession(inv, enc.sendKey, shellID, command, args...)
+						// Agent forwarding is a shell-only feature (see agentforward.go); exec
+						// gets no agent socket even if one is active for this caller.
+						newPt, err := p.startPtySession(inv, enc.sendKey, shellID, "", command, args...)
 						if err != nil {
 							return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 						}

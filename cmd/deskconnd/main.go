@@ -68,6 +68,12 @@ func main() {
 	}
 
 	proxyCalls := deskconn.NewProxyCalls()
+	// Agent forwarding gets its own ProxyCalls: a "deskconn shell -A" invocation runs the
+	// shell call and the agent-forward call concurrently over the same local session, and
+	// both ProxyShellHandler and ProxyAgentForwardHandler key purely by caller (session) ID,
+	// so sharing proxyCalls with ProcedureProxyShell/ProcedureProxyExec would let the two
+	// calls clobber each other's state.
+	agentForwardProxyCalls := deskconn.NewProxyCalls()
 	clientSession := deskconn.NewClientSessions()
 
 	regRespShell := sess.Register(deskconn.ProcedureProxyShell, deskconn.ProxyShellHandler(proxyCalls,
@@ -86,6 +92,12 @@ func main() {
 		clientSession, cfgDirectory, deskconn.ProcedureExec)).Do()
 	if regRespExec.Err != nil {
 		log.Fatal(regRespExec.Err)
+	}
+
+	regRespAgentForward := sess.Register(deskconn.ProcedureProxyAgentForward,
+		deskconn.ProxyAgentForwardHandler(agentForwardProxyCalls, clientSession, cfgDirectory)).Do()
+	if regRespAgentForward.Err != nil {
+		log.Fatal(regRespAgentForward.Err)
 	}
 
 	regRespFileOp := sess.Register(deskconn.ProcedureProxyFileOp,

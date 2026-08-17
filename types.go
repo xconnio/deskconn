@@ -140,6 +140,32 @@ type deviceSession struct {
 	connectedAt time.Time
 	ctx         context.Context
 	cancel      context.CancelFunc
+
+	upgradeSubs []chan *xconn.Session
+	sync.Mutex
+}
+
+// subscribeUpgrade registers interest in this session entry being replaced.
+func (ds *deviceSession) subscribeUpgrade() <-chan *xconn.Session {
+	ch := make(chan *xconn.Session, 1)
+	ds.Lock()
+	ds.upgradeSubs = append(ds.upgradeSubs, ch)
+	ds.Unlock()
+	return ch
+}
+
+// notifyReplaced delivers newSession to every subscriber registered via subscribeUpgrade and
+// closes their channels. Called once, right after this entry stops being the realm's current
+// one in ClientSessions.sessions.
+func (ds *deviceSession) notifyReplaced(newSession *xconn.Session) {
+	ds.Lock()
+	subs := ds.upgradeSubs
+	ds.upgradeSubs = nil
+	ds.Unlock()
+	for _, ch := range subs {
+		ch <- newSession
+		close(ch)
+	}
 }
 
 type ClientSessions struct {
@@ -183,10 +209,17 @@ func (c *ClientSessions) SessionContext(realm string) (context.Context, bool) {
 	return session.ctx, true
 }
 
+// StoreDeviceSession installs session as realm's current device session. If it replaces an
+// existing entry (a QUIC-to-P2P upgrade, or a reconnect after a network blip), every caller
+// that subscribed to that old entry via EnsureDeviceSessionWithUpgrade is notified with the
+// new session — not just whichever caller happened to trigger the replacement — so every
+// long-lived proxied call sharing this device connection (e.g. a shell and its agent-forward
+// call under "-A") can independently re-issue itself on the new session.
 func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session,
 	ctx context.Context, cancel context.CancelFunc) {
 	c.Lock()
-	if old, ok := c.sessions[realm]; ok {
+	old, hadOld := c.sessions[realm]
+	if hadOld {
 		old.cancel()
 	}
 	c.sessions[realm] = &deviceSession{
@@ -196,6 +229,10 @@ func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session
 		cancel:      cancel,
 	}
 	c.Unlock()
+
+	if hadOld {
+		old.notifyReplaced(session)
+	}
 }
 
 func (c *ClientSessions) DeviceSessions() map[string]int64 {
@@ -251,67 +288,98 @@ func (c *ClientSessions) DisconnectAll() {
 // and starts a background upgrade to WebRTC P2P.
 func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm,
 	cfgDirectory string) (*xconn.Session, error) {
-	sess, _, err := c.EnsureDeviceSessionWithUpgrade(ctx, realm, cfgDirectory)
+	sess, _, err := c.ensureDeviceSession(ctx, realm, cfgDirectory, false)
 	return sess, err
 }
 
-// EnsureDeviceSessionWithUpgrade is like EnsureDeviceSession but also returns a channel
-// that receives the WebRTC session once the background upgrade completes. If the session
-// is already a connected P2P session the channel is closed immediately.
+// EnsureDeviceSessionWithUpgrade is like EnsureDeviceSession but also subscribes to the
+// realm's session entry being replaced — by the background QUIC-to-P2P upgrade this starts,
+// or by a later reconnect after a network blip — and returns that subscription. Every
+// concurrent caller gets its own subscription and is independently notified, which matters
+// because "deskconn shell -A" runs two such callers (the shell call and the agent-forward
+// call) at once; both need to learn about a swap, not just whichever happened to trigger it.
+// Callers that use this must eventually stop reading it (the call ending is enough — the
+// channel is buffered so a delivery to an abandoned subscriber never blocks), unlike
+// EnsureDeviceSession, which is for callers with no such lifecycle to hang a subscription off.
 func (c *ClientSessions) EnsureDeviceSessionWithUpgrade(ctx context.Context, realm,
 	cfgDirectory string) (*xconn.Session, <-chan *xconn.Session, error) {
+	return c.ensureDeviceSession(ctx, realm, cfgDirectory, true)
+}
+
+func (c *ClientSessions) ensureDeviceSession(ctx context.Context, realm, cfgDirectory string,
+	subscribe bool) (*xconn.Session, <-chan *xconn.Session, error) {
 	c.Lock()
 	delete(c.disconnected, realm)
 	if ds, ok := c.sessions[realm]; ok {
 		if ds.session.Connected() {
+			var upgradeCh <-chan *xconn.Session
+			if subscribe {
+				upgradeCh = ds.subscribeUpgrade()
+			}
 			c.Unlock()
-			ch := make(chan *xconn.Session)
-			close(ch) // already connected (P2P or QUIC with upgrade in flight); caller need not migrate
-			return ds.session, ch, nil
+			return ds.session, upgradeCh, nil
 		}
 		ds.cancel()
 		delete(c.sessions, realm)
+		c.Unlock()
+		return c.connectAndUpgrade(ctx, realm, cfgDirectory, ds, subscribe)
 	}
 	c.Unlock()
 
+	return c.connectAndUpgrade(ctx, realm, cfgDirectory, nil, subscribe)
+}
+
+// connectAndUpgrade establishes a fresh QUIC session for realm and starts the background
+// upgrade to P2P. staleEntry, if non-nil, is a disconnected entry the caller just evicted —
+// its subscribers are notified with the fresh session (or, if even the QUIC connect fails,
+// with nil, the same "give up" signal a failed P2P upgrade sends) once the outcome is known,
+// so nobody who subscribed to it is left waiting on a channel that would otherwise never fire.
+func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirectory string,
+	staleEntry *deviceSession, subscribe bool) (*xconn.Session, <-chan *xconn.Session, error) {
 	quicSess, err := ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
+		if staleEntry != nil {
+			staleEntry.notifyReplaced(nil)
+		}
 		return nil, nil, err
 	}
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-	c.Lock()
-	delete(c.disconnected, realm)
-	if old, ok := c.sessions[realm]; ok {
-		old.cancel()
-	}
-	c.sessions[realm] = &deviceSession{
+	entry := &deviceSession{
 		session:     quicSess.Session,
 		connectedAt: time.Now(),
 		ctx:         sessCtx,
 		cancel:      cancel,
 	}
+
+	c.Lock()
+	delete(c.disconnected, realm)
+	if old, ok := c.sessions[realm]; ok {
+		old.cancel()
+	}
+	c.sessions[realm] = entry
 	c.Unlock()
 
-	upgradeCh := make(chan *xconn.Session, 1)
-	go func() { //nolint
-		if sess := c.upgradeToWebRTC(quicSess, realm, cfgDirectory); sess != nil {
-			upgradeCh <- sess
-		}
-		close(upgradeCh)
-	}()
+	if staleEntry != nil {
+		staleEntry.notifyReplaced(quicSess.Session)
+	}
+
+	var upgradeCh <-chan *xconn.Session
+	if subscribe {
+		upgradeCh = entry.subscribeUpgrade()
+	}
+	go c.upgradeToWebRTC(quicSess, realm, cfgDirectory) //nolint
 	return quicSess.Session, upgradeCh, nil
 }
 
-// upgradeToWebRTC negotiates a WebRTC session using quicSess for signalling. On success
-// it atomically replaces the stored session, closes the QUIC connection, starts the
-// reconnect loop, and returns the WebRTC session. Returns nil on failure.
-func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfgDirectory string) *xconn.Session {
+// upgradeToWebRTC negotiates a WebRTC session using quicSess for signaling. On success, it atomically
+// replaces the stored session, closes the QUIC connection, starts the reconnect loop.
+func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfgDirectory string) {
 	authid, privKey, err := ReadCredentials(cfgDirectory)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)
 		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
-		return nil
+		return
 	}
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
@@ -320,20 +388,19 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfg
 		log.Printf("p2p upgrade %s: %v", realm, err)
 		cancel()
 		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
-		return nil
+		return
 	}
 
 	if c.isDisconnected(realm) {
 		cancel()
 		_ = webrtcSess.Leave()
-		return nil
+		return
 	}
 
 	c.StoreDeviceSession(realm, webrtcSess, sessCtx, cancel)
 	log.Printf("p2p upgrade %s: upgraded to WebRTC", realm)
 
 	go c.reconnectLoop(webrtcSess, nil, realm, cfgDirectory) //nolint
-	return webrtcSess
 }
 
 // reconnectLoop waits for session to disconnect then reconnects via QUIC and retries the P2P upgrade.
