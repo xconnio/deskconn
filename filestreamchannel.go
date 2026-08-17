@@ -41,14 +41,13 @@ type fileStreamHeader struct {
 
 // HandleFileStreamChannel must not block, so it defers the actual work to
 // serveFileStreamChannel, which serves one byte-range read per channel.
-func (d *Deskconn) HandleFileStreamChannel(_ string, channel *webrtc.DataChannel) {
+// firstMessage is the channel's request frame, already consumed by
+// xconn-webrtc-go to classify the channel as non-WAMP before handing it to
+// us; it will not be redelivered via channel.OnMessage, so it's fed to
+// serveFileStreamChannel directly instead of waiting to receive it again.
+func (d *Deskconn) HandleFileStreamChannel(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
 	msgCh := make(chan []byte, 1)
-	var once sync.Once
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		once.Do(func() {
-			msgCh <- append([]byte(nil), msg.Data...)
-		})
-	})
+	msgCh <- append([]byte(nil), firstMessage...)
 
 	go d.serveFileStreamChannel(channel, msgCh)
 }
