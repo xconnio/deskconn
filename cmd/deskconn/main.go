@@ -1547,7 +1547,7 @@ func main() {
 		fmt.Println("screenshot disabled")
 
 	case selfUpdateCmd.FullCommand():
-		if err := updateApp(cfgDirectory); err != nil {
+		if err := updateApp(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
@@ -1568,41 +1568,17 @@ type appUpdateResponse struct {
 	LatestVersion string `json:"latest_version"`
 }
 
-func updateApp(cfgDirectory string) error {
+func updateApp() error {
 	fmt.Printf("Checking for updates for %s on %s-%s...\n", version, runtime.GOOS, runtime.GOARCH)
 
-	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
+	updateResp, err := latestAppUpdate()
 	if err != nil {
-		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) {
-			_ = deskconn.RemoveCredentialsFiles(cfgDirectory)
-			return fmt.Errorf("invalid credentials, please login again")
-		}
 		return err
 	}
 
-	callResp := cloudSession.Call(deskconn.ProcedureAppUpdateCheck).Args("deskconn", version, runtime.GOOS,
-		runtime.GOARCH).Do()
-	if callResp.Err != nil {
-		return callResp.Err
-	}
-
-	if len(callResp.Args()) == 0 {
+	if updateResp.DownloadURL == "" {
 		fmt.Printf("You're already on version %s of deskconn (the latest version).\n", version)
 		return nil
-	}
-
-	var updateResp appUpdateResponse
-	jsonData, err := json.Marshal(callResp.Args()[0])
-	if err != nil {
-		return fmt.Errorf("failed to marshal update response: %w", err)
-	}
-
-	if err := json.Unmarshal(jsonData, &updateResp); err != nil {
-		return fmt.Errorf("failed to parse update response: %w", err)
-	}
-
-	if updateResp.DownloadURL == "" {
-		return fmt.Errorf("update response missing download_url")
 	}
 
 	fmt.Printf("Found update at %s.\n", updateResp.DownloadURL)
@@ -1621,6 +1597,64 @@ func updateApp(cfgDirectory string) error {
 
 	fmt.Printf("Updated deskconn from version %s to %s.\n", version, updateResp.LatestVersion)
 	return nil
+}
+
+func latestAppUpdate() (appUpdateResponse, error) {
+	const releaseURL = "https://api.github.com/repos/xconnio/deskconn/releases/latest"
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	req, err := http.NewRequest(http.MethodGet, releaseURL, nil)
+	if err != nil {
+		return appUpdateResponse{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "deskconn-self-update")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return appUpdateResponse{}, fmt.Errorf("failed to check latest release: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return appUpdateResponse{}, fmt.Errorf("failed to check latest release: unexpected status %s", resp.Status)
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return appUpdateResponse{}, fmt.Errorf("failed to parse latest release: %w", err)
+	}
+
+	if release.TagName == "" {
+		return appUpdateResponse{}, fmt.Errorf("latest release response missing tag_name")
+	}
+	if strings.TrimPrefix(version, "v") == strings.TrimPrefix(release.TagName, "v") {
+		return appUpdateResponse{LatestVersion: release.TagName}, nil
+	}
+
+	assetName := fmt.Sprintf("deskconn_%s_%s_%s.tar.gz", strings.TrimPrefix(release.TagName, "v"),
+		runtime.GOOS, runtime.GOARCH)
+	for _, asset := range release.Assets {
+		if asset.Name == assetName {
+			if asset.BrowserDownloadURL == "" {
+				return appUpdateResponse{}, fmt.Errorf("latest release asset %s missing browser_download_url", assetName)
+			}
+			return appUpdateResponse{
+				DownloadURL:   asset.BrowserDownloadURL,
+				LatestVersion: release.TagName,
+			}, nil
+		}
+	}
+
+	return appUpdateResponse{}, fmt.Errorf("latest release %s missing asset %s", release.TagName, assetName)
 }
 
 const pathInstallerBlock = "\n# Added by deskconn installer\nexport PATH=\"$HOME/.local/bin:$PATH\"\n"
