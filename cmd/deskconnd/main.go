@@ -301,23 +301,35 @@ start:
 		log.Fatal(err)
 	}
 
-	systemBus, err := dbus.ConnectSystemBus()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer systemBus.Close()
+	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
-	sessionBus, err := dbus.ConnectSessionBus()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer sessionBus.Close()
+	var screen *deskconn.Screen
+	var mpris *deskconn.MPRIS
+	var audio *deskconn.Audio
 
-	screen := deskconn.NewScreen(sessionBus, systemBus, cfgDirectory)
-	mpris := deskconn.NewMPRIS(sessionBus)
-	audio := deskconn.NewAudio()
-	defer audio.Close()
-	deskconnApis := deskconn.NewDeskconn(screen, mpris, audio)
+	if isDesktop {
+		systemBus, err := dbus.ConnectSystemBus()
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer systemBus.Close()
+
+		sessionBus, err := dbus.ConnectSessionBus()
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer sessionBus.Close()
+
+		screen = deskconn.NewScreen(sessionBus, systemBus, cfgDirectory)
+		mpris = deskconn.NewMPRIS(sessionBus)
+		audio = deskconn.NewAudio()
+		defer audio.Close()
+	} else {
+		log.Println("no display detected (DISPLAY/WAYLAND_DISPLAY unset), " +
+			"running in server mode: display APIs disabled")
+	}
+
+	deskconnApis := deskconn.NewDeskconn(screen, mpris, audio, isDesktop)
 
 	if err := deskconnApis.Register(localSession); err != nil {
 		log.Fatal(err)
