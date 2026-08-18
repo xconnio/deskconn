@@ -98,3 +98,31 @@ func TestDeviceInfoIncludesBattery(t *testing.T) {
 	require.Equal(t, "Full", deviceInfo.Battery.Status)
 	require.Equal(t, 100, deviceInfo.Battery.Percentage)
 }
+
+func TestDeviceIsDesktop(t *testing.T) {
+	callee, caller := setupRouterAndConnectSessions(t)
+
+	d := deskconn.NewDeskconn(nil, nil, nil, true)
+	require.NoError(t, d.Register(callee))
+
+	callResp := caller.Call(deskconn.ProcedureDeviceIsDesktop).Do()
+	require.NoError(t, callResp.Err)
+
+	isDesktop, err := callResp.ArgBool(0)
+	require.NoError(t, err)
+	require.True(t, isDesktop)
+}
+
+func TestDeviceIsDesktopFalseOnServer(t *testing.T) {
+	callee, caller := setupRouterAndConnectSessions(t)
+
+	d := deskconn.NewDeskconn(nil, nil, nil, false)
+	require.NoError(t, d.Register(callee))
+
+	callResp := caller.Call(deskconn.ProcedureDeviceIsDesktop).Do()
+	require.NoError(t, callResp.Err)
+
+	isDesktop, err := callResp.ArgBool(0)
+	require.NoError(t, err)
+	require.False(t, isDesktop)
+}

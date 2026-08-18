@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	ProcedureDeviceInfo    = "io.xconn.deskconn.deskconnd.device.info"
-	ProcedureProcessList   = "io.xconn.deskconn.deskconnd.process.list"
-	ProcedureProcessSignal = "io.xconn.deskconn.deskconnd.process.signal"
-	ProcedureAppList       = "io.xconn.deskconn.deskconnd.app.list"
-	ProcedureAppIcon       = "io.xconn.deskconn.deskconnd.app.icon"
+	ProcedureDeviceInfo      = "io.xconn.deskconn.deskconnd.device.info"
+	ProcedureDeviceIsDesktop = "io.xconn.deskconn.deskconnd.device.is_desktop"
+	ProcedureProcessList     = "io.xconn.deskconn.deskconnd.process.list"
+	ProcedureProcessSignal   = "io.xconn.deskconn.deskconnd.process.signal"
+	ProcedureAppList         = "io.xconn.deskconn.deskconnd.app.list"
+	ProcedureAppIcon         = "io.xconn.deskconn.deskconnd.app.icon"
 )
 
 func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
@@ -29,6 +30,10 @@ func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xco
 	}
 
 	return xconn.NewInvocationResult(data)
+}
+
+func (d *Deskconn) handleDeviceIsDesktop(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	return xconn.NewInvocationResult(d.desktop)
 }
 
 func (d *Deskconn) handleProcessList(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
