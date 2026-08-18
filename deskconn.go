@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -76,9 +77,10 @@ type Deskconn struct {
 	wallpaper            *Wallpaper
 	processes            *info.ProcessMonitor
 	appRegistry          *info.AppRegistry
+	desktop              bool
 }
 
-func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio) *Deskconn {
+func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment bool) *Deskconn {
 	d := &Deskconn{
 		shellSession:         newInteractiveShellSession(),
 		keys:                 newKeyManager(),
@@ -94,6 +96,7 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio) *Deskconn {
 		logs:                 newLogSessions(),
 		processes:            info.NewProcessMonitor(),
 		appRegistry:          info.NewAppRegistry(),
+		desktop:              desktopEnvironment,
 	}
 	d.shellSession.agentForward = d.agentForwardSessions
 	if screen != nil {
@@ -124,58 +127,68 @@ func (d *Deskconn) StartIndexer(ctx context.Context) {
 }
 
 func (d *Deskconn) Register(session *xconn.Session) error {
-	for uri, handler := range map[string]xconn.InvocationHandler{
-		ProcedureKeyExchange:          d.handleKeyExchange,
-		ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
-		ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
-		ProcedureScreenLock:           d.lockScreenLockHandler,
-		ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
-		ProcedureShell:                d.shellSession.handleShell(),
-		ProcedureShellIsBusy:          d.shellSession.handleShellIsBusy(),
-		ProcedureExec:                 d.shellSession.handleExec(),
-		ProcedureFileBrowse:           d.handleFileBrowse,
-		ProcedureFileRename:           d.handleFileRename,
-		ProcedureFileDelete:           d.handleFileDelete,
-		ProcedureFileCopy:             d.handleFileCopy,
-		ProcedureFileEdit:             d.handleFileEdit,
-		ProcedureFileDownload:         d.handleFileDownload,
-		ProcedureFileUpload:           d.handleFileUpload,
-		ProcedureFileCat:              d.handleFileCat,
-		ProcedureFileSearch:           d.handleFileSearch,
-		ProcedureGitStatus:            d.handleGitStatus,
-		ProcedureGitOriginal:          d.handleGitOriginal,
-		ProcedurePrinterList:          d.printer.handleListPrinters,
-		ProcedurePrinterPrint:         d.printer.handlePrint(),
-		ProcedurePortForward:          d.handlePortForward,
-		ProcedurePortReverse:          d.handlePortReverse,
-		ProcedureAgentForward:         d.handleAgentForward,
-		ProcedureDeviceInfo:           d.handleDeviceInfo,
-		ProcedureProcessList:          d.handleProcessList,
-		ProcedureProcessSignal:        d.handleProcessSignal,
-		ProcedureAppList:              d.handleAppList,
-		ProcedureAppIcon:              d.handleAppIcon,
-		ProcedureMPRISPlayers:         d.handleListPlayers,
-		ProcedureMPRISPlayPause:       d.handlePlayPause,
-		ProcedureMPRISPlay:            d.handlePlay,
-		ProcedureMPRISPause:           d.handlePause,
-		ProcedureMPRISNext:            d.handleNext,
-		ProcedureMPRISPrevious:        d.handlePrevious,
-		ProcedureAudioMute:            d.handleAudioMute,
-		ProcedureAudioUnmute:          d.handleAudioUnmute,
-		ProcedureAudioToggleMute:      d.handleAudioToggleMute,
-		ProcedureAudioIsMuted:         d.handleAudioIsMuted,
-		ProcedureScreenshot:           d.handleScreenshot,
-		ProcedureScreenshotPermission: d.handleScreenShotPermission,
-		ProcedureLogs:                 d.handleLogs,
-		ProcedureIndexQuery:           d.handleIndexQuery,
-		ProcedureWallpaperGet:         d.wallpaper.HandleGet,
-		ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
-		ProcedureAISessionList:        d.handleAISessionList,
-		ProcedureAISessionPull:        d.handleAISessionPull,
+	handlers := map[string]xconn.InvocationHandler{
+		ProcedureKeyExchange:   d.handleKeyExchange,
+		ProcedureShell:         d.shellSession.handleShell(),
+		ProcedureShellIsBusy:   d.shellSession.handleShellIsBusy(),
+		ProcedureExec:          d.shellSession.handleExec(),
+		ProcedureFileBrowse:    d.handleFileBrowse,
+		ProcedureFileRename:    d.handleFileRename,
+		ProcedureFileDelete:    d.handleFileDelete,
+		ProcedureFileCopy:      d.handleFileCopy,
+		ProcedureFileEdit:      d.handleFileEdit,
+		ProcedureFileDownload:  d.handleFileDownload,
+		ProcedureFileUpload:    d.handleFileUpload,
+		ProcedureFileCat:       d.handleFileCat,
+		ProcedureFileSearch:    d.handleFileSearch,
+		ProcedureGitStatus:     d.handleGitStatus,
+		ProcedureGitOriginal:   d.handleGitOriginal,
+		ProcedurePrinterList:   d.printer.handleListPrinters,
+		ProcedurePrinterPrint:  d.printer.handlePrint(),
+		ProcedurePortForward:   d.handlePortForward,
+		ProcedurePortReverse:   d.handlePortReverse,
+		ProcedureAgentForward:  d.handleAgentForward,
+		ProcedureDeviceInfo:    d.handleDeviceInfo,
+		ProcedureProcessList:   d.handleProcessList,
+		ProcedureProcessSignal: d.handleProcessSignal,
+		ProcedureAppList:       d.handleAppList,
+		ProcedureAppIcon:       d.handleAppIcon,
+		ProcedureLogs:          d.handleLogs,
+		ProcedureIndexQuery:    d.handleIndexQuery,
+		ProcedureAISessionList: d.handleAISessionList,
+		ProcedureAISessionPull: d.handleAISessionPull,
 		ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
-	} {
+	}
+
+	// Display-related RPCs depend on a session D-Bus connection (screen,
+	// wallpaper, MPRIS) or PulseAudio (audio), neither of which is available
+	// on a headless server. Skip registering them there.
+	if d.desktop {
+		maps.Copy(handlers, map[string]xconn.InvocationHandler{
+			ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
+			ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
+			ProcedureScreenLock:           d.lockScreenLockHandler,
+			ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
+			ProcedureMPRISPlayers:         d.handleListPlayers,
+			ProcedureMPRISPlayPause:       d.handlePlayPause,
+			ProcedureMPRISPlay:            d.handlePlay,
+			ProcedureMPRISPause:           d.handlePause,
+			ProcedureMPRISNext:            d.handleNext,
+			ProcedureMPRISPrevious:        d.handlePrevious,
+			ProcedureAudioMute:            d.handleAudioMute,
+			ProcedureAudioUnmute:          d.handleAudioUnmute,
+			ProcedureAudioToggleMute:      d.handleAudioToggleMute,
+			ProcedureAudioIsMuted:         d.handleAudioIsMuted,
+			ProcedureScreenshot:           d.handleScreenshot,
+			ProcedureScreenshotPermission: d.handleScreenShotPermission,
+			ProcedureWallpaperGet:         d.wallpaper.HandleGet,
+			ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
+		})
+	}
+
+	for uri, handler := range handlers {
 		response := session.Register(uri, handler).Invoke(wampproto.InvokeLast).Do()
 		if response.Err != nil {
 			return response.Err

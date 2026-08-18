@@ -24,7 +24,7 @@ func claudeProjectDir(homeDir, path string) string {
 func setupDeskconnWithInstance(t *testing.T) *xconn.Session {
 	t.Helper()
 	callee, caller := setupRouterAndConnectSessions(t)
-	d := deskconn.NewDeskconn(nil, nil, nil)
+	d := deskconn.NewDeskconn(nil, nil, nil, false)
 	require.NoError(t, d.Register(callee))
 	return caller
 }

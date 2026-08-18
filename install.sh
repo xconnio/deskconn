@@ -141,6 +141,22 @@ esac
 echo "Setting up systemd user service for $SERVICE_NAME..."
 mkdir -p "$(dirname "$SERVICE_FILE")"
 
+# systemd --user services don't reliably inherit DISPLAY/WAYLAND_DISPLAY from
+# the desktop session, so deskconnd can't tell a desktop from a headless
+# server apart without them being exported explicitly. Capture them from the
+# installer's own environment: on a real desktop session they'll be set here;
+# on a headless server they won't, and deskconnd will register server-only
+# APIs (no screenshot/display RPCs).
+ENV_LINES="Environment=TERM=xterm-256color"
+if [ -n "${DISPLAY:-}" ]; then
+    ENV_LINES="$ENV_LINES
+Environment=DISPLAY=$DISPLAY"
+fi
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    ENV_LINES="$ENV_LINES
+Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+fi
+
 cat > "$SERVICE_FILE" <<EOL
 [Unit]
 Description=DeskConn Daemon
@@ -150,7 +166,7 @@ After=network.target
 ExecStart=$EXEC_DIR/deskconnd
 Restart=always
 RestartSec=5
-Environment=TERM=xterm-256color
+$ENV_LINES
 
 [Install]
 WantedBy=default.target

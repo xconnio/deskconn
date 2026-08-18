@@ -298,7 +298,7 @@ func TestRunAgentForwardReadySignal(t *testing.T) {
 
 func TestAgentForwardProxyReadySignal(t *testing.T) {
 	deviceCallee, deviceCallerForProxy := setupRouterAndConnectSessions(t)
-	d := deskconn.NewDeskconn(nil, nil, nil)
+	d := deskconn.NewDeskconn(nil, nil, nil, false)
 	require.NoError(t, d.Register(deviceCallee))
 
 	localCallee, cliCaller := setupRouterAndConnectSessions(t)
@@ -366,7 +366,7 @@ func TestAgentForwardMigrationReusesSocket(t *testing.T) {
 
 	callee, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
-	d := deskconn.NewDeskconn(nil, nil, nil)
+	d := deskconn.NewDeskconn(nil, nil, nil, false)
 	require.NoError(t, d.Register(callee))
 
 	const sharedAuthID = "same-machine-identity"
