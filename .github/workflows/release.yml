@@ -27,7 +27,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Setup go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
           cache: true
@@ -47,7 +47,7 @@ jobs:
           git push origin "$TAG_NAME"
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: release --clean
