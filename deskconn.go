@@ -32,6 +32,7 @@ const (
 	ProcedureFileCopy            = "io.xconn.deskconn.deskconnd.file.copy"
 	ProcedureFileEdit            = "io.xconn.deskconn.deskconnd.file.edit"
 	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
+	ProcedureFileStreamRange     = "io.xconn.deskconn.deskconnd.file.stream_range"
 	ProcedureLogs                = "io.xconn.deskconn.deskconnd.logs"
 	ProcedurePing                = "io.xconn.deskconn.deskconnd.ping"
 	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
@@ -138,6 +139,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureFileCopy:        d.handleFileCopy,
 		ProcedureFileEdit:        d.handleFileEdit,
 		ProcedureFileDownload:    d.handleFileDownload,
+		ProcedureFileStreamRange: d.handleFileStreamRange,
 		ProcedureFileUpload:      d.handleFileUpload,
 		ProcedureFileCat:         d.handleFileCat,
 		ProcedureFileSearch:      d.handleFileSearch,

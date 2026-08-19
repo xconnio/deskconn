@@ -234,6 +234,108 @@ func dlStreamFile(ctx context.Context, inv *xconn.Invocation, filePath, basePath
 	return nil
 }
 
+type fileRangeHeaderMsg struct {
+	Size   int64 `json:"size"`
+	Offset int64 `json:"offset"`
+	Length int64 `json:"length"`
+}
+
+// handleFileStreamRange serves a byte range of a single file over the
+// existing WAMP session, chunked the same way as handleFileDownload. It
+// exists alongside HandleFileStreamChannel (a raw WebRTC data channel per
+// request) because clients whose WebRTC stack can't reliably open additional
+// data channels post-connection (observed on Android) have no other way to
+// stream a range without buffering the whole file first.
+func (d *Deskconn) handleFileStreamRange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	remotePath, err := inv.ArgString(0)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	offsetArg, err := inv.ArgInt64(1)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	lengthArg, err := inv.ArgInt64(2)
+	if err != nil {
+		return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+	}
+
+	enc, invErr := serverStreamKeyExchange(inv, 3)
+	if invErr != nil {
+		return invErr
+	}
+	sendKey := enc.sendKey
+
+	resolvedPath, info, pathErr := resolveAndStatPath(remotePath)
+	if pathErr != nil {
+		return pathErr
+	}
+	if info.IsDir() {
+		return xconn.NewInvocationError(ErrInvalidArgument, fmt.Sprintf("%s: is a directory", remotePath))
+	}
+
+	totalSize := info.Size()
+	offset := offsetArg
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > totalSize {
+		offset = totalSize
+	}
+	length := lengthArg
+	if length < 0 || offset+length > totalSize {
+		length = totalSize - offset
+	}
+
+	if err := dlSendProgress(inv, sendKey, msgHeader, fileRangeHeaderMsg{
+		Size:   totalSize,
+		Offset: offset,
+		Length: length,
+	}); err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+
+	f, err := os.Open(resolvedPath)
+	if err != nil {
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+	}
+	defer f.Close()
+
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+	}
+
+	remaining := length
+	buf := make([]byte, fileChunkSize)
+	for remaining > 0 {
+		toRead := int64(len(buf))
+		if toRead > remaining {
+			toRead = remaining
+		}
+		n, readErr := f.Read(buf[:toRead])
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			if err := dlSendProgress(inv, sendKey, msgData, chunk); err != nil {
+				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+			}
+			remaining -= int64(n)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, readErr.Error())
+		}
+	}
+
+	return xconn.NewInvocationResult()
+}
+
 func PullFiles(session *xconn.Session, remotePath, localPath string, recursive bool) error {
 	return pullFilesInternal(session, "", remotePath, localPath, recursive)
 }
