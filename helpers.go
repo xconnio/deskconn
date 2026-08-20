@@ -198,6 +198,20 @@ func Login(session *xconn.Session, username, otp string) error {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
+	devices, err := FetchDevicesFromCloud(cfgDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to fetch devices: %w", err)
+	}
+
+	devicesYAML, err := yaml.Marshal(Config{Devices: devices})
+	if err != nil {
+		return fmt.Errorf("failed to marshal devices: %w", err)
+	}
+
+	if err = os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), devicesYAML, 0600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
 	return nil
 }
 
