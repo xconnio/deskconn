@@ -27,9 +27,11 @@ const (
 	TopicAnswererOnCandidate = "io.xconn.webrtc.answerer.on_candidate"
 	TopicOffererOnCandidate  = "io.xconn.webrtc.offerer.on_candidate"
 
-	ProcedurePrincipalCreate = "io.xconn.deskconn.account.principal.create"
-	ProcedurePrincipalDelete = "io.xconn.deskconn.account.principal.delete"
-	ProcedureAccountGet      = "io.xconn.deskconn.account.get"
+	ProcedurePrincipalCreate    = "io.xconn.deskconn.account.principal.create"
+	ProcedurePrincipalDelete    = "io.xconn.deskconn.account.principal.delete"
+	ProcedureAccountGet         = "io.xconn.deskconn.account.get"
+	ProcedureAccountLogin       = "io.xconn.deskconn.account.login"
+	ProcedureAccountLoginVerify = "io.xconn.deskconn.account.login.verify"
 
 	ProcedureProxyShell        = "io.xconn.deskconn.deskconnd.proxy.shell"
 	ProcedureProxyShellMigrate = "io.xconn.deskconn.deskconnd.proxy.shell.migrate"
@@ -150,7 +152,12 @@ func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
 	return config.Devices, nil
 }
 
-func Login(session *xconn.Session, username string) error {
+func Login(session *xconn.Session, username, otp string) error {
+	callResp := session.Call(ProcedureAccountLoginVerify).Args(username, otp).Do()
+	if callResp.Err != nil {
+		return fmt.Errorf("failed to verify otp: %w", callResp.Err)
+	}
+
 	cfgDirectory, err := CfgDirectory()
 	if err != nil {
 		return err
@@ -164,12 +171,12 @@ func Login(session *xconn.Session, username string) error {
 		return fmt.Errorf("failed to generate keypair: %w", err)
 	}
 
-	callResp := session.Call(ProcedurePrincipalCreate).Arg(pub).Do()
-	if callResp.Err != nil {
-		return fmt.Errorf("failed to create principal: %w", callResp.Err)
+	principalResp := session.Call(ProcedurePrincipalCreate).Arg(pub).Do()
+	if principalResp.Err != nil {
+		return fmt.Errorf("failed to create principal: %w", principalResp.Err)
 	}
 
-	principal, err := callResp.ArgDict(0)
+	principal, err := principalResp.ArgDict(0)
 	if err != nil {
 		return fmt.Errorf("unexpected response from principal create: %w", err)
 	}
@@ -943,10 +950,8 @@ func ProxyPortForwardHandler(clientSessions *ClientSessions, cfgDirectory string
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
 
-		if err := ForwardLocalPort(ctx, deviceSess, remotePort, localPort); err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-		return xconn.NewInvocationResult()
+		err = ForwardLocalPort(ctx, deviceSess, remotePort, localPort)
+		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 	}
 }
 

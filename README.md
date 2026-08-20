@@ -69,11 +69,12 @@ daemon picks these up automatically and connects to the cloud router.
 ### 3. Log in from the CLI
 
 ```bash
-deskconn login --username <email> --password <password>
+deskconn login --username <username> --password <password>
 ```
 
-Generates an Ed25519 keypair, registers it with the account service, and stores it locally. You only need to do this
-once per machine; the key is valid for 30 days and is renewed on the next login.
+You'll then be prompted for the one-time password emailed to you. Once verified, deskconn generates an Ed25519
+keypair, registers it with the account service, and stores it locally. You only need to do this once per machine;
+the key is valid for 30 days and is renewed on the next login.
 
 ### 4. List your devices
 

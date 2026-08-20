@@ -2099,7 +2099,17 @@ func login(flagUsername, flagPassword string, useStdin bool) error {
 	}()
 	defer quicSess.Connection().Close()
 
-	return deskconn.Login(quicSess.Session, username)
+	callResp := quicSess.Call(deskconn.ProcedureAccountLogin).Args(username).Do()
+	if callResp.Err != nil {
+		return fmt.Errorf("failed to login: %w", callResp.Err)
+	}
+
+	otp, err := readOTP()
+	if err != nil {
+		return err
+	}
+
+	return deskconn.Login(quicSess.Session, username, otp)
 }
 
 func logout(cfgDirectory string) error {
@@ -2209,6 +2219,26 @@ func readCredentials(flagUsername, flagPassword string, useStdin bool) (username
 	}
 
 	return flagUsername, flagPassword, nil
+}
+
+func readOTP() (string, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
+		return "", fmt.Errorf("otp required: rerun interactively to enter the one-time password emailed to you")
+	}
+
+	fmt.Fprint(os.Stderr, "OTP: ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+
+	otp := strings.TrimSpace(line)
+	if otp == "" {
+		return "", fmt.Errorf("otp cannot be empty")
+	}
+
+	return otp, nil
 }
 
 func readPassword() (string, error) {
