@@ -420,6 +420,14 @@ start:
 				continue
 			}
 
+			if len(callResp.Args()) == 0 {
+				log.Println("unexpected response from list keys: no args")
+				_ = deviceSess.Connection().Close()
+				retryDelay = min(retryDelay*2, maxDelay)
+				time.Sleep(retryDelay)
+				continue
+			}
+
 			jsonData, err := json.MarshalIndent(callResp.Args()[0], "", "  ")
 			if err != nil {
 				log.Println(err)

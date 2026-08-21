@@ -183,7 +183,14 @@ func Login(session *xconn.Session, username, otp string) error {
 	if accountGetResp.Err != nil {
 		return fmt.Errorf("failed to get account: %w", accountGetResp.Err)
 	}
-	name := accountGetResp.Args()[0].(map[string]any)["name"].(string)
+	account, err := accountGetResp.ArgDict(0)
+	if err != nil {
+		return fmt.Errorf("unexpected response from account get: %w", err)
+	}
+	name, err := account.String("name")
+	if err != nil {
+		return fmt.Errorf("missing name in account get response: %w", err)
+	}
 	if err = os.WriteFile(privPath, []byte(priv+" "+username+" "+expiresAtStr+"\n"), 0600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
@@ -221,6 +228,9 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 	}
 
 	credentials := strings.Split(string(credentialsStr), " ")
+	if len(credentials) < 2 {
+		return "", "", fmt.Errorf("malformed credentials file: %s", path)
+	}
 	privKey := strings.TrimSpace(credentials[0])
 	authid := strings.TrimSpace(credentials[1])
 
