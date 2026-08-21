@@ -152,10 +152,10 @@ func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
 	return config.Devices, nil
 }
 
-func Login(session *xconn.Session, username, otp string) error {
+func Login(session *xconn.Session, username, otp string) ([]Device, error) {
 	cfgDirectory, err := CfgDirectory()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	privPath := filepath.Join(cfgDirectory, "id_ed25519")
@@ -163,58 +163,53 @@ func Login(session *xconn.Session, username, otp string) error {
 
 	pub, priv, err := auth.GenerateCryptoSignKeyPair()
 	if err != nil {
-		return fmt.Errorf("failed to generate keypair: %w", err)
+		return nil, fmt.Errorf("failed to generate keypair: %w", err)
 	}
 
 	callResp := session.Call(ProcedureAccountLoginVerify).Args(username, otp, pub).Do()
 	if callResp.Err != nil {
-		return fmt.Errorf("failed to verify otp: %w", callResp.Err)
+		return nil, fmt.Errorf("failed to verify otp: %w", callResp.Err)
 	}
 
 	principal, err := callResp.ArgDict(0)
 	if err != nil {
-		return fmt.Errorf("unexpected response from login verify: %w", err)
+		return nil, fmt.Errorf("unexpected response from login verify: %w", err)
 	}
 	expiresAtStr, err := principal.String("expires_at")
 	if err != nil {
-		return fmt.Errorf("missing expires_at in login verify response: %w", err)
+		return nil, fmt.Errorf("missing expires_at in login verify response: %w", err)
 	}
 
 	accountGetResp := session.Call(ProcedureAccountGet).Do()
 	if accountGetResp.Err != nil {
-		return fmt.Errorf("failed to get account: %w", accountGetResp.Err)
+		return nil, fmt.Errorf("failed to get account: %w", accountGetResp.Err)
 	}
 	account, err := accountGetResp.ArgDict(0)
 	if err != nil {
-		return fmt.Errorf("unexpected response from account get: %w", err)
+		return nil, fmt.Errorf("unexpected response from account get: %w", err)
 	}
 	name, err := account.String("name")
 	if err != nil {
-		return fmt.Errorf("missing name in account get response: %w", err)
+		return nil, fmt.Errorf("missing name in account get response: %w", err)
 	}
 	if err = os.WriteFile(privPath, []byte(priv+" "+username+" "+expiresAtStr+"\n"), 0600); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
 	if err = os.WriteFile(pubPath, []byte(pub+" "+username+" "+name+"\n"), 0600); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
 	devices, err := FetchDevicesFromCloud(cfgDirectory)
 	if err != nil {
-		return fmt.Errorf("failed to fetch devices: %w", err)
+		return nil, fmt.Errorf("failed to fetch devices: %w", err)
 	}
 
-	devicesYAML, err := yaml.Marshal(Config{Devices: devices})
-	if err != nil {
-		return fmt.Errorf("failed to marshal devices: %w", err)
+	if err := CacheDevices(cfgDirectory, devices); err != nil {
+		return nil, err
 	}
 
-	if err = os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), devicesYAML, 0600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
+	return devices, nil
 }
 
 func ReadCredentials(cfgDirectory string) (string, string, error) {
@@ -413,9 +408,14 @@ func FetchDevicesFromCloud(cfgDirectory string) ([]Device, error) {
 		return []Device{}, err
 	}
 
-	callResp := cloudSession.Call(ProcedureListDesktop).Do()
+	return fetchDevices(cloudSession)
+}
+
+// fetchDevices lists the devices on the account authenticated on session.
+func fetchDevices(session *xconn.Session) ([]Device, error) {
+	callResp := session.Call(ProcedureListDesktop).Do()
 	if callResp.Err != nil {
-		return []Device{}, err
+		return []Device{}, callResp.Err
 	}
 
 	var devices []Device
@@ -428,6 +428,19 @@ func FetchDevicesFromCloud(cfgDirectory string) ([]Device, error) {
 	}
 
 	return devices, nil
+}
+
+func CacheDevices(cfgDirectory string, devices []Device) error {
+	devicesYAML, err := yaml.Marshal(Config{Devices: devices})
+	if err != nil {
+		return fmt.Errorf("failed to marshal devices: %w", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), devicesYAML, 0600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
 }
 
 func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,

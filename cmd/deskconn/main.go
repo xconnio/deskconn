@@ -2022,31 +2022,76 @@ func attach(flagUsername, flagPassword, name string, useStdin bool) error {
 		return err
 	}
 
-	deviceName := name
-
-	if deviceName == "" {
-		host, err := os.Hostname()
-		if err != nil {
-			return fmt.Errorf("failed to get hostname: %w", err)
-		}
-
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Printf("Name of the new device [default=%s]: ", host)
-
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return err
-		}
-
-		input = strings.TrimSpace(input)
-		if input == "" {
-			deviceName = host
-		} else {
-			deviceName = input
-		}
+	deviceName, err := resolveDeviceName(name)
+	if err != nil {
+		return err
 	}
 
 	return deskconn.Attach(username, password, deviceName)
+}
+
+func resolveDeviceName(name string) (string, error) {
+	if name != "" {
+		return name, nil
+	}
+
+	host, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("failed to get hostname: %w", err)
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Printf("Name of the new device [default=%s]: ", host)
+
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return host, nil
+	}
+	return input, nil
+}
+
+func promptAttachDevice(username, password string) error {
+	file, err := deskconn.CredentialsFilePath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(file); err == nil {
+		return nil
+	}
+
+	confirmed, err := confirmPrompt("No devices found on your account. Attach this device now? (Y/n): ", true)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return nil
+	}
+
+	deviceName, err := resolveDeviceName("")
+	if err != nil {
+		return err
+	}
+
+	if err := deskconn.Attach(username, password, deviceName); err != nil {
+		return err
+	}
+
+	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		return err
+	}
+
+	devices, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to fetch devices: %w", err)
+	}
+
+	return deskconn.CacheDevices(cfgDirectory, devices)
 }
 
 func detach(flagUsername, flagPassword string, useStdin bool) error {
@@ -2109,7 +2154,16 @@ func login(flagUsername, flagPassword string, useStdin bool) error {
 		return err
 	}
 
-	return deskconn.Login(quicSess.Session, username, otp)
+	devices, err := deskconn.Login(quicSess.Session, username, otp)
+	if err != nil {
+		return err
+	}
+
+	if len(devices) == 0 {
+		return promptAttachDevice(username, password)
+	}
+
+	return nil
 }
 
 func logout(cfgDirectory string) error {
