@@ -27,7 +27,6 @@ const (
 	TopicAnswererOnCandidate = "io.xconn.webrtc.answerer.on_candidate"
 	TopicOffererOnCandidate  = "io.xconn.webrtc.offerer.on_candidate"
 
-	ProcedurePrincipalCreate    = "io.xconn.deskconn.account.principal.create"
 	ProcedurePrincipalDelete    = "io.xconn.deskconn.account.principal.delete"
 	ProcedureAccountGet         = "io.xconn.deskconn.account.get"
 	ProcedureAccountLogin       = "io.xconn.deskconn.account.login"
@@ -153,11 +152,6 @@ func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
 }
 
 func Login(session *xconn.Session, username, otp string) error {
-	callResp := session.Call(ProcedureAccountLoginVerify).Args(username, otp).Do()
-	if callResp.Err != nil {
-		return fmt.Errorf("failed to verify otp: %w", callResp.Err)
-	}
-
 	cfgDirectory, err := CfgDirectory()
 	if err != nil {
 		return err
@@ -171,23 +165,23 @@ func Login(session *xconn.Session, username, otp string) error {
 		return fmt.Errorf("failed to generate keypair: %w", err)
 	}
 
-	principalResp := session.Call(ProcedurePrincipalCreate).Arg(pub).Do()
-	if principalResp.Err != nil {
-		return fmt.Errorf("failed to create principal: %w", principalResp.Err)
+	callResp := session.Call(ProcedureAccountLoginVerify).Args(username, otp, pub).Do()
+	if callResp.Err != nil {
+		return fmt.Errorf("failed to verify otp: %w", callResp.Err)
 	}
 
-	principal, err := principalResp.ArgDict(0)
+	principal, err := callResp.ArgDict(0)
 	if err != nil {
-		return fmt.Errorf("unexpected response from principal create: %w", err)
+		return fmt.Errorf("unexpected response from login verify: %w", err)
 	}
 	expiresAtStr, err := principal.String("expires_at")
 	if err != nil {
-		return fmt.Errorf("missing expires_at in principal response from create principal: %w", err)
+		return fmt.Errorf("missing expires_at in login verify response: %w", err)
 	}
 
 	accountGetResp := session.Call(ProcedureAccountGet).Do()
 	if accountGetResp.Err != nil {
-		return fmt.Errorf("failed to create principal: %w", accountGetResp.Err)
+		return fmt.Errorf("failed to get account: %w", accountGetResp.Err)
 	}
 	name := accountGetResp.Args()[0].(map[string]any)["name"].(string)
 	if err = os.WriteFile(privPath, []byte(priv+" "+username+" "+expiresAtStr+"\n"), 0600); err != nil {
