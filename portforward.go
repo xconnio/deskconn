@@ -213,7 +213,7 @@ func (d *Deskconn) handlePortForward(_ context.Context, inv *xconn.Invocation) *
 		}
 
 		pf.wg.Add(1)
-		go func() {
+		SafeGo(func() {
 			defer pf.wg.Done()
 			buf := make([]byte, 32*1024)
 			for {
@@ -247,7 +247,7 @@ func (d *Deskconn) handlePortForward(_ context.Context, inv *xconn.Invocation) *
 					return
 				}
 			}
-		}()
+		})
 
 	case msgData:
 		pf, ok := d.forwardSessions.fetch(callerID, connID)
@@ -286,10 +286,10 @@ func ForwardLocalPort(ctx context.Context, session *xconn.Session, remotePort, l
 	if err != nil {
 		return fmt.Errorf("listen 127.0.0.1:%s: %w", localPort, err)
 	}
-	go func() {
+	SafeGo(func() {
 		<-ctx.Done()
 		ln.Close()
-	}()
+	})
 
 	var connCounter atomic.Uint64
 	for {
@@ -300,7 +300,7 @@ func ForwardLocalPort(ctx context.Context, session *xconn.Session, remotePort, l
 			}
 			return err
 		}
-		go forwardConnection(ctx, session, conn, "localhost", remotePort, &connCounter)
+		SafeGo(func() { forwardConnection(ctx, session, conn, "localhost", remotePort, &connCounter) })
 	}
 }
 
@@ -335,7 +335,7 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 	var sendKey, receiveKey []byte
 	keyExchanged := false
 
-	go func() {
+	SafeGo(func() {
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := localConn.Read(buf)
@@ -353,7 +353,7 @@ func forwardConnection(ctx context.Context, session *xconn.Session, localConn ne
 				return
 			}
 		}
-	}()
+	})
 
 	firstSent := false
 	callResp := session.Call(ProcedurePortForward).

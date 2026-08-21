@@ -79,7 +79,7 @@ func (d *Deskconn) AcceptQUICStreams(sess *xconn.QUICSession) {
 		if err != nil {
 			return
 		}
-		go d.HandleQUICStream(nil, stream)
+		SafeGo(func() { d.HandleQUICStream(nil, stream) })
 	}
 }
 

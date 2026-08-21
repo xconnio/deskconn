@@ -164,7 +164,7 @@ func (d *Deskconn) handlePortReverse(_ context.Context, inv *xconn.Invocation) *
 		d.reverseSessions.store(callerID, ln)
 
 		var connCounter atomic.Uint64
-		go func() {
+		SafeGo(func() {
 			for {
 				conn, acceptErr := ln.Accept()
 				if acceptErr != nil {
@@ -186,7 +186,7 @@ func (d *Deskconn) handlePortReverse(_ context.Context, inv *xconn.Invocation) *
 					return
 				}
 			}
-		}()
+		})
 
 	case msgKeyExchange:
 		connID, err := inv.ArgUInt64(1)
@@ -213,7 +213,7 @@ func (d *Deskconn) handlePortReverse(_ context.Context, inv *xconn.Invocation) *
 		d.reverseSessions.activateConn(callerID, connID, pf)
 
 		pf.wg.Add(1)
-		go func() {
+		SafeGo(func() {
 			defer pf.wg.Done()
 			buf := make([]byte, 32*1024)
 			for {
@@ -246,7 +246,7 @@ func (d *Deskconn) handlePortReverse(_ context.Context, inv *xconn.Invocation) *
 					return
 				}
 			}
-		}()
+		})
 
 	case msgData:
 		connID, err := inv.ArgUInt64(1)
@@ -394,7 +394,7 @@ func ReverseLocalPort(ctx context.Context, session *xconn.Session, remotePort, l
 				}
 
 				pf.wg.Add(1)
-				go func() {
+				SafeGo(func() {
 					defer pf.wg.Done()
 					defer func() {
 						mu.Lock()
@@ -438,7 +438,7 @@ func ReverseLocalPort(ctx context.Context, session *xconn.Session, remotePort, l
 							return
 						}
 					}
-				}()
+				})
 
 			case msgData:
 				connID, err := result.ArgUInt64(1)

@@ -260,7 +260,7 @@ func (d *Deskconn) handleAgentForward(_ context.Context, inv *xconn.Invocation) 
 		}
 
 		var connCounter atomic.Uint64
-		go func() {
+		SafeGo(func() {
 			for {
 				conn, acceptErr := ln.Accept()
 				if acceptErr != nil {
@@ -285,7 +285,7 @@ func (d *Deskconn) handleAgentForward(_ context.Context, inv *xconn.Invocation) 
 					continue
 				}
 			}
-		}()
+		})
 
 	case msgKeyExchange:
 		session, ok := d.agentForwardSessions.fetch(authID)
@@ -316,7 +316,7 @@ func (d *Deskconn) handleAgentForward(_ context.Context, inv *xconn.Invocation) 
 		d.agentForwardSessions.activateConn(authID, connID, pf)
 
 		pf.wg.Add(1)
-		go func() {
+		SafeGo(func() {
 			defer pf.wg.Done()
 			buf := make([]byte, 32*1024)
 			for {
@@ -350,7 +350,7 @@ func (d *Deskconn) handleAgentForward(_ context.Context, inv *xconn.Invocation) 
 					return
 				}
 			}
-		}()
+		})
 
 	case msgData:
 		connID, err := inv.ArgUInt64(1)
@@ -448,7 +448,7 @@ func ProxyAgentForwardHandler(proxyCalls *ProxyCalls, clientSessions *ClientSess
 			}
 			proxyCall.setCloseFunc(closeCloud)
 
-			go func() {
+			SafeGo(func() {
 				callResp := deviceSession.Call(ProcedureAgentForward).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
 						p, ok := <-cloudCh
@@ -483,10 +483,10 @@ func ProxyAgentForwardHandler(proxyCalls *ProxyCalls, clientSessions *ClientSess
 					default:
 					}
 				}
-			}()
+			})
 
 			// Migration goroutine: fires when QUIC upgrades to WebRTC in the background.
-			go func() { //nolint:gosec
+			SafeGo(func() { //nolint:gosec
 				var webrtcSession *xconn.Session
 				select {
 				case ws, ok := <-upgradeCh:
@@ -551,7 +551,7 @@ func ProxyAgentForwardHandler(proxyCalls *ProxyCalls, clientSessions *ClientSess
 				case resultCh <- xconn.NewInvocationResult():
 				default:
 				}
-			}()
+			})
 		}
 
 		if len(inv.Args()) > 2 {
@@ -694,7 +694,7 @@ func RunAgentForward(ctx context.Context, session *xconn.Session, realm, localSo
 				}
 
 				pf.wg.Add(1)
-				go func() {
+				SafeGo(func() {
 					defer pf.wg.Done()
 					defer func() {
 						mu.Lock()
@@ -738,7 +738,7 @@ func RunAgentForward(ctx context.Context, session *xconn.Session, realm, localSo
 							return
 						}
 					}
-				}()
+				})
 
 			case msgData:
 				connID, err := result.ArgUInt64(1)

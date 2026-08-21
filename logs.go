@@ -101,13 +101,13 @@ func StreamLogs(session *xconn.Session, realm, source string, follow bool, tailN
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
+	SafeGo(func() {
 		select {
 		case <-sigChan:
 			closeDone()
 		case <-done:
 		}
-	}()
+	})
 	defer signal.Stop(sigChan)
 
 	firstSent := false
@@ -175,9 +175,9 @@ func (d *Deskconn) handleLogs(ctx context.Context, inv *xconn.Invocation) *xconn
 	}
 
 	if strings.HasPrefix(source, "/") {
-		go d.streamFileLogs(ls, streamID, inv, source, follow, tailN)
+		SafeGo(func() { d.streamFileLogs(ls, streamID, inv, source, follow, tailN) })
 	} else {
-		go d.streamJournalLogs(ctx, ls, streamID, inv, source, follow, tailN, since)
+		SafeGo(func() { d.streamJournalLogs(ctx, ls, streamID, inv, source, follow, tailN, since) })
 	}
 
 	return xconn.NewInvocationError(xconn.ErrNoResult)
@@ -196,13 +196,13 @@ func (d *Deskconn) streamJournalLogs(ctx context.Context, ls *logSession, stream
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go func() {
+	SafeGo(func() {
 		select {
 		case <-ls.stop:
 			cancel()
 		case <-ctx.Done():
 		}
-	}()
+	})
 
 	args := journalctlArgs(service, follow, tailN, since)
 	cmd := exec.CommandContext(ctx, "journalctl", args...)

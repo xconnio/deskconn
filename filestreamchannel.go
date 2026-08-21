@@ -49,7 +49,7 @@ func (d *Deskconn) HandleFileStreamChannel(_ string, channel *webrtc.DataChannel
 	msgCh := make(chan []byte, 1)
 	msgCh <- append([]byte(nil), firstMessage...)
 
-	go d.serveFileStreamChannel(channel, msgCh)
+	SafeGo(func() { d.serveFileStreamChannel(channel, msgCh) })
 }
 
 func (d *Deskconn) serveFileStreamChannel(channel *webrtc.DataChannel, msgCh chan []byte) {

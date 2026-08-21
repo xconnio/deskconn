@@ -206,20 +206,20 @@ func generateThumbnails(entries []FileEntry) {
 		}
 		if isImageFile(e.Name) && e.Size <= maxThumbnailSourceSize {
 			wg.Add(1)
-			go func(entry *FileEntry) {
+			SafeGo(func() {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				entry.Thumbnail = generateThumbnail(entry.Path)
-			}(e)
+				e.Thumbnail = generateThumbnail(e.Path)
+			})
 		} else if isVideoFile(e.Name) {
 			wg.Add(1)
-			go func(entry *FileEntry) {
+			SafeGo(func() {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				entry.Thumbnail = generateVideoThumbnail(entry.Path)
-			}(e)
+				e.Thumbnail = generateVideoThumbnail(e.Path)
+			})
 		}
 	}
 	wg.Wait()
@@ -685,27 +685,27 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 
 	for _, p := range mediaPaths {
 		wg.Add(1)
-		go func(entryPath string) {
+		SafeGo(func() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			name := filepath.Base(entryPath)
+			name := filepath.Base(p)
 			var thumb string
 			if isImageFile(name) {
-				thumb = generateThumbnail(entryPath)
+				thumb = generateThumbnail(p)
 			} else {
-				thumb = generateVideoThumbnail(entryPath)
+				thumb = generateVideoThumbnail(p)
 			}
 			if thumb != "" {
-				results <- thumbResult{path: entryPath, thumb: thumb}
+				results <- thumbResult{path: p, thumb: thumb}
 			}
-		}(p)
+		})
 	}
 
-	go func() {
+	SafeGo(func() {
 		wg.Wait()
 		close(results)
-	}()
+	})
 
 	for tr := range results {
 		if err := sendSearchThumbnail(inv, sendKey, tr.path, tr.thumb); err != nil {
