@@ -368,7 +368,7 @@ func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirect
 	if subscribe {
 		upgradeCh = entry.subscribeUpgrade()
 	}
-	go c.upgradeToWebRTC(quicSess, realm, cfgDirectory) //nolint
+	SafeGo(func() { c.upgradeToWebRTC(quicSess, realm, cfgDirectory) }) //nolint
 	return quicSess.Session, upgradeCh, nil
 }
 
@@ -400,7 +400,7 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfg
 	c.StoreDeviceSession(realm, webrtcSess, sessCtx, cancel)
 	log.Printf("p2p upgrade %s: upgraded to WebRTC", realm)
 
-	go c.reconnectLoop(webrtcSess, nil, realm, cfgDirectory) //nolint
+	SafeGo(func() { c.reconnectLoop(webrtcSess, nil, realm, cfgDirectory) }) //nolint
 }
 
 // reconnectLoop waits for session to disconnect then reconnects via QUIC and retries the P2P upgrade.
@@ -433,7 +433,7 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
 		c.StoreDeviceSession(realm, newSess.Session, sessCtx, cancel)
 		log.Printf("reconnect %s: reconnected via QUIC", realm)
-		go c.upgradeToWebRTC(newSess, realm, cfgDirectory) //nolint
+		SafeGo(func() { c.upgradeToWebRTC(newSess, realm, cfgDirectory) }) //nolint
 		return
 	}
 }

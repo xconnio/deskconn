@@ -133,7 +133,7 @@ func (u *uploadSessions) ensure(callerID uint64, receiveKey []byte) *uploadState
 	}
 	s.cond = sync.NewCond(&s.Mutex)
 	u.sessions[callerID] = s
-	go s.processFrames()
+	SafeGo(s.processFrames)
 	return s
 }
 
@@ -445,7 +445,7 @@ func pushFilesInternal(session *xconn.Session, realm, localPath, remotePath stri
 	stream := newUploadProgressStream()
 	errCh := make(chan error, 1)
 
-	go func() {
+	SafeGo(func() {
 		defer close(stream.progressCh)
 		if err := <-keyExchangeResult; err != nil {
 			errCh <- err
@@ -477,7 +477,7 @@ func pushFilesInternal(session *xconn.Session, realm, localPath, remotePath stri
 			stream.final = xconn.NewFinalProgress(msgDone, seq)
 		}
 		errCh <- err
-	}()
+	})
 
 	procedure := ProcedureFileUpload
 	if realm != "" {

@@ -97,13 +97,13 @@ func streamCat(session *xconn.Session, procedure string, out io.Writer, prefixAr
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
-	go func() {
+	SafeGo(func() {
 		select {
 		case <-sigCh:
 			cancel()
 		case <-ctx.Done():
 		}
-	}()
+	})
 
 	publicKey, privateKey, err := CreateX25519KeyPair()
 	if err != nil {

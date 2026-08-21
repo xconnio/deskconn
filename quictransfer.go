@@ -21,6 +21,11 @@ const (
 
 	quicFrameHeader = "header"
 	quicFrameDone   = "done"
+
+	// maxMsgSize bounds readMsg's allocation. Messages are small JSON control
+	// frames (streamRequest/streamResponse/streamFileFrame), never file content,
+	// so this is generous headroom rather than a tight fit.
+	maxMsgSize = 1 << 20 // 1 MiB
 )
 
 type streamRequest struct {
@@ -64,6 +69,9 @@ func readMsg(r io.Reader, v any) error {
 		return err
 	}
 	n := binary.BigEndian.Uint32(length[:])
+	if n > maxMsgSize {
+		return fmt.Errorf("message too large: %d bytes", n)
+	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
@@ -79,7 +87,7 @@ func (d *Deskconn) AcceptQUICStreams(sess *xconn.QUICSession) {
 		if err != nil {
 			return
 		}
-		go d.HandleQUICStream(nil, stream)
+		SafeGo(func() { d.HandleQUICStream(nil, stream) })
 	}
 }
 

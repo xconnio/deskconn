@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -183,7 +184,14 @@ func Login(session *xconn.Session, username, otp string) error {
 	if accountGetResp.Err != nil {
 		return fmt.Errorf("failed to get account: %w", accountGetResp.Err)
 	}
-	name := accountGetResp.Args()[0].(map[string]any)["name"].(string)
+	account, err := accountGetResp.ArgDict(0)
+	if err != nil {
+		return fmt.Errorf("unexpected response from account get: %w", err)
+	}
+	name, err := account.String("name")
+	if err != nil {
+		return fmt.Errorf("missing name in account get response: %w", err)
+	}
 	if err = os.WriteFile(privPath, []byte(priv+" "+username+" "+expiresAtStr+"\n"), 0600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
@@ -221,6 +229,9 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 	}
 
 	credentials := strings.Split(string(credentialsStr), " ")
+	if len(credentials) < 2 {
+		return "", "", fmt.Errorf("malformed credentials file: %s", path)
+	}
 	privKey := strings.TrimSpace(credentials[0])
 	authid := strings.TrimSpace(credentials[1])
 
@@ -294,10 +305,10 @@ func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
 		return nil, err
 	}
 
-	go func() {
+	SafeGo(func() {
 		<-quicSess.Done()
 		_ = quicSess.Connection().Close()
-	}()
+	})
 	return quicSess.Session, nil
 }
 
@@ -456,7 +467,7 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 			}
 
 			ch := proxyCall.progressChan
-			go func() {
+			SafeGo(func() {
 				callResp := deviceSess.Call(procedure).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
 						p, ok := <-ch
@@ -474,7 +485,7 @@ func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *C
 					clientSessions.DeleteDeviceSession(realm)
 				}
 				_ = inv.SendProgress(nil, nil)
-			}()
+			})
 		}
 
 		if len(inv.Args()) > 2 {
@@ -545,7 +556,7 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			}
 			proxyCall.setCloseFunc(closeCloud)
 
-			go func() {
+			SafeGo(func() {
 				callResp := deviceSession.Call(ProcedureShell).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
 						p, ok := <-cloudCh
@@ -580,10 +591,10 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 					default:
 					}
 				}
-			}()
+			})
 
 			// Migration goroutine: fires when QUIC upgrades to WebRTC in the background.
-			go func() { //nolint:gosec
+			SafeGo(func() { //nolint:gosec
 				var webrtcSession *xconn.Session
 				select {
 				case ws, ok := <-upgradeCh:
@@ -664,7 +675,7 @@ func ProxyShellHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 				case resultCh <- xconn.NewInvocationResult():
 				default:
 				}
-			}()
+			})
 		}
 
 		if len(inv.Args()) > 2 {
@@ -1025,7 +1036,7 @@ func ProxyLogsHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 			}
 
 			ch := proxyCall.progressChan
-			go func() {
+			SafeGo(func() {
 				callResp := deviceSession.Call(ProcedureLogs).
 					ProgressSender(func(ctx context.Context) *xconn.Progress {
 						p, ok := <-ch
@@ -1041,7 +1052,7 @@ func ProxyLogsHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
 					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error() + "\n")}, nil)
 				}
 				_ = inv.SendProgress(nil, nil)
-			}()
+			})
 		}
 
 		args := append([]any(nil), inv.Args()[1:]...)
@@ -1070,4 +1081,18 @@ func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.
 		}
 		return xconn.NewInvocationResult()
 	}
+}
+
+// SafeGo runs f in a new goroutine, recovering any panic so a bug in one
+// background task (a file transfer, port-forward, shell session, etc.)
+// cannot take down the whole process.
+func SafeGo(f func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("recovered panic in goroutine: %v\n%s", r, debug.Stack())
+			}
+		}()
+		f()
+	}()
 }

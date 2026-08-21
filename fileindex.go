@@ -100,11 +100,11 @@ func NewIndexService(cfgDirectory string) (*IndexService, error) {
 // run) or an incremental sync (subsequent restarts). Guarded by sync.Once.
 func (s *IndexService) Start(ctx context.Context) {
 	s.once.Do(func() {
-		go s.runWatcher(ctx)
+		SafeGo(func() { s.runWatcher(ctx) })
 		if !s.ready.Load() {
-			go s.runIndexer(ctx)
+			SafeGo(func() { s.runIndexer(ctx) })
 		} else {
-			go s.runSync(ctx)
+			SafeGo(func() { s.runSync(ctx) })
 		}
 	})
 }

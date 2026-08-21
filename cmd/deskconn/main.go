@@ -958,7 +958,7 @@ func main() {
 				return
 			}
 			defer quicSess.Connection().Close()
-			go func() { errCh <- deskconn.ForwardLocalPort(ctx, quicSess.Session, remotePort, localPort) }()
+			deskconn.SafeGo(func() { errCh <- deskconn.ForwardLocalPort(ctx, quicSess.Session, remotePort, localPort) })
 		case ModeP2P:
 			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
@@ -966,18 +966,18 @@ func main() {
 				return
 			}
 			defer func() { _ = p2pSess.Leave() }()
-			go func() { errCh <- deskconn.ForwardLocalPort(ctx, p2pSess, remotePort, localPort) }()
+			deskconn.SafeGo(func() { errCh <- deskconn.ForwardLocalPort(ctx, p2pSess, remotePort, localPort) })
 		default:
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			go func() {
+			deskconn.SafeGo(func() {
 				resp := localSession.Call(deskconn.ProcedureProxyPortForward).
 					Args(realm, remotePort, localPort).DoContext(ctx)
 				errCh <- resp.Err
-			}()
+			})
 		}
 
 		select {
@@ -1039,7 +1039,7 @@ func main() {
 				return
 			}
 			defer quicSess.Connection().Close()
-			go func() { errCh <- deskconn.ReverseLocalPort(ctx, quicSess.Session, remotePort, localPort) }()
+			deskconn.SafeGo(func() { errCh <- deskconn.ReverseLocalPort(ctx, quicSess.Session, remotePort, localPort) })
 		case ModeP2P:
 			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
@@ -1047,18 +1047,18 @@ func main() {
 				return
 			}
 			defer func() { _ = p2pSess.Leave() }()
-			go func() { errCh <- deskconn.ReverseLocalPort(ctx, p2pSess, remotePort, localPort) }()
+			deskconn.SafeGo(func() { errCh <- deskconn.ReverseLocalPort(ctx, p2pSess, remotePort, localPort) })
 		default:
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			go func() {
+			deskconn.SafeGo(func() {
 				resp := localSession.Call(deskconn.ProcedureProxyPortReverse).
 					Args(realm, remotePort, localPort).DoContext(ctx)
 				errCh <- resp.Err
-			}()
+			})
 		}
 
 		select {
@@ -1677,9 +1677,9 @@ func setupAgentForward(session *xconn.Session, realm, agentSock string) func() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan error, 1)
-	go func() {
+	deskconn.SafeGo(func() {
 		_ = deskconn.RunAgentForward(ctx, session, realm, agentSock, ready)
-	}()
+	})
 
 	select {
 	case err := <-ready:
@@ -2059,10 +2059,10 @@ func detach(flagUsername, flagPassword string, useStdin bool) error {
 	if err != nil {
 		return err
 	}
-	go func() {
+	deskconn.SafeGo(func() {
 		<-quicSess.Done()
 		_ = quicSess.Connection().Close()
-	}()
+	})
 	defer quicSess.Connection().Close()
 
 	authID, name, err := selectDevice(quicSess.Session)
@@ -2093,10 +2093,10 @@ func login(flagUsername, flagPassword string, useStdin bool) error {
 	if err != nil {
 		return err
 	}
-	go func() {
+	deskconn.SafeGo(func() {
 		<-quicSess.Done()
 		_ = quicSess.Connection().Close()
-	}()
+	})
 	defer quicSess.Connection().Close()
 
 	callResp := quicSess.Call(deskconn.ProcedureAccountLogin).Args(username).Do()

@@ -344,7 +344,7 @@ start:
 	var cloudConnMu sync.Mutex
 	var activeDeviceSess, activeCloudSess *xconn.QUICSession
 
-	go func() {
+	deskconn.SafeGo(func() {
 		retryDelay := 1 * time.Second
 		maxDelay := 30 * time.Second
 		for {
@@ -400,7 +400,7 @@ start:
 			log.Println("connected to cloud")
 
 			// Accept file-transfer streams relayed from CLI clients.
-			go deskconnApis.AcceptQUICStreams(deviceSess)
+			deskconn.SafeGo(func() { deskconnApis.AcceptQUICStreams(deviceSess) })
 
 			if err := deskconnApis.Register(deviceSession); err != nil {
 				log.Printf("failed to register procedures on cloud, will retry in %v: %v", retryDelay, err)
@@ -414,6 +414,14 @@ start:
 			callResp := cloudSession.Call(deskconn.ProcedureListKeys).Do()
 			if callResp.Err != nil {
 				log.Println("failed to list keys:", callResp.Err)
+				_ = deviceSess.Connection().Close()
+				retryDelay = min(retryDelay*2, maxDelay)
+				time.Sleep(retryDelay)
+				continue
+			}
+
+			if len(callResp.Args()) == 0 {
+				log.Println("unexpected response from list keys: no args")
 				_ = deviceSess.Connection().Close()
 				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
@@ -499,7 +507,7 @@ start:
 			_ = deviceSess.Connection().Close()
 			log.Println("disconnected from cloud, retrying...")
 		}
-	}()
+	})
 
 	zeroconfServer, err := deskconn.AdvertiseService(host, port, cred.Realm)
 	if err != nil {

@@ -51,10 +51,10 @@ func Attach(username, password, desktopName string) error {
 	if err != nil {
 		return err
 	}
-	go func() {
+	SafeGo(func() {
 		<-quicSess.Done()
 		_ = quicSess.Connection().Close()
-	}()
+	})
 	defer quicSess.Connection().Close()
 	session := quicSess.Session
 

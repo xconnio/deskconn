@@ -276,7 +276,7 @@ func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey
 	p.pids[shellID] = cmd.Process.Pid
 	p.Unlock()
 
-	go p.startOutputReader(ptmx, ps, shellID)
+	SafeGo(func() { p.startOutputReader(ptmx, ps, shellID) })
 
 	return ptmx, nil
 }
@@ -640,10 +640,10 @@ func StartInteractiveCommand(session *xconn.Session, realm, procedureName string
 		return xconn.NewProgress(realm, payload, args)
 	}
 
-	go func() {
+	SafeGo(func() {
 		<-keyExchangeReady
 
-		go func() {
+		SafeGo(func() {
 			sigChan := make(chan os.Signal, 1)
 			signal.Notify(sigChan, syscall.SIGWINCH)
 			for range sigChan {
@@ -651,7 +651,7 @@ func StartInteractiveCommand(session *xconn.Session, realm, procedureName string
 					progressChan <- p
 				}
 			}
-		}()
+		})
 
 		buf := make([]byte, 1024)
 		for {
@@ -669,7 +669,7 @@ func StartInteractiveCommand(session *xconn.Session, realm, procedureName string
 				progressChan <- xconn.NewProgress(realm, payload)
 			}
 		}
-	}()
+	})
 
 	firstSent := false
 	callResp := session.Call(procedureName).
@@ -728,9 +728,9 @@ func StartInteractiveCommand(session *xconn.Session, realm, procedureName string
 				// only it and the device ever hold the key to open it.
 				if realm != "" {
 					blob := append([]byte(nil), data[len("MIGRATE:"):]...)
-					go func() {
+					SafeGo(func() {
 						_ = session.Call(ProcedureProxyShellMigrate).Args(blob).Do()
-					}()
+					})
 				}
 				return
 			}
