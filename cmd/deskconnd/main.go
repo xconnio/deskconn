@@ -42,6 +42,7 @@ func main() {
 
 	if err := localRouter.AddRealm(deskconn.LocalRealm, &xconn.RealmConfig{
 		AutoDiscloseCaller: true,
+		Meta:               true,
 		Roles: []xconn.RealmRole{{
 			Name: "anonymous",
 			Permissions: []xconn.Permission{{
@@ -75,6 +76,23 @@ func main() {
 	// calls clobber each other's state.
 	agentForwardProxyCalls := deskconn.NewProxyCalls()
 	clientSession := deskconn.NewClientSessions()
+
+	// If a caller's local WAMP session goes away mid-call (Ctrl-C, killed process, dropped
+	// connection) without ever sending its final non-progressive message, the goroutines
+	// spawned by ProxyShellHandler/ProxyProgressiveInvocationHandler/ProxyLogsHandler/
+	// ProxyAgentForwardHandler would otherwise block forever on proxyCall.progressChan and
+	// their ProxyCalls entries would never be freed. Clean both up on session leave.
+	subRespSessionLeave := sess.Subscribe(deskconn.MetaTopicSessionLeave, func(event *xconn.Event) {
+		sessionID, err := event.ArgUInt64(0)
+		if err != nil {
+			return
+		}
+		proxyCalls.DeleteAndClose(sessionID)
+		agentForwardProxyCalls.DeleteAndClose(sessionID)
+	}).Do()
+	if subRespSessionLeave.Err != nil {
+		log.Fatal(subRespSessionLeave.Err)
+	}
 
 	regRespShell := sess.Register(deskconn.ProcedureProxyShell, deskconn.ProxyShellHandler(proxyCalls,
 		clientSession, cfgDirectory)).Do()
@@ -231,13 +249,23 @@ func main() {
 		log.Fatal(regRespConnectedDevices.Err)
 	}
 
-start:
+	host, _ := os.Hostname()
+
+	for runDeviceSession(cfgDirectory, host, clientSession) {
+	}
+
+	localRouter.Close()
+}
+
+// runDeviceSession runs one connect/serve cycle against the device's cloud realm: it sets up
+// the realm router, local hardware APIs, and the cloud reconnect loop, then blocks until either
+// a shutdown signal or a detach event. It returns true if the caller should start another
+// cycle (detach happened), false to shut down.
+func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientSessions) bool {
 	cred, err := deskconn.EnsureCredentials()
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	host, _ := os.Hostname()
 
 	machineID, err := os.ReadFile(deskconn.MachineIDPath)
 	if err != nil {
@@ -517,6 +545,7 @@ start:
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	select {
 	case <-sigChan:
@@ -534,13 +563,22 @@ start:
 		cloudConnMu.Unlock()
 
 		router.Close()
-		localRouter.Close()
+		return false
 	case <-detachChan:
 		cancel()
 		_ = os.Remove(filepath.Join(cfgDirectory, "credentials.json"))
-		_ = listener.Close()
+
+		cloudConnMu.Lock()
+		if activeCloudSess != nil {
+			_ = activeCloudSess.Close()
+		}
+		if activeDeviceSess != nil {
+			_ = activeDeviceSess.Close()
+			_ = activeDeviceSess.Connection().Close()
+		}
+		cloudConnMu.Unlock()
+
 		router.Close()
-		signal.Stop(sigChan)
-		goto start
+		return true
 	}
 }
