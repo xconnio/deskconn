@@ -31,6 +31,7 @@ import (
 	"github.com/xconnio/deskconn"
 	sysinfo "github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-go/auth"
 )
 
 var version = "v0.1.0-alpha"
@@ -1712,6 +1713,49 @@ func confirmPrompt(prompt string, defaultYes bool) (bool, error) {
 	}
 }
 
+// detachIfAttached detaches this device from the cloud account if it is currently
+// attached. It is a no-op otherwise.
+func detachIfAttached() error {
+	credFile, err := deskconn.CredentialsFilePath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(credFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var cred deskconn.Credentials
+	if err := json.Unmarshal(data, &cred); err != nil {
+		return fmt.Errorf("failed to parse credentials file: %w", err)
+	}
+
+	fmt.Println("Detaching this device from your account...")
+
+	cryptosignAuth, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
+	if err != nil {
+		return fmt.Errorf("failed to initialize cryptosign authenticator: %w", err)
+	}
+
+	cloudSess, err := xconn.ConnectQUIC(context.Background(), deskconn.CloudQUICAddress(), deskconn.CloudRealm,
+		&xconn.QUICDialerConfig{Authenticator: cryptosignAuth, TLSConfig: deskconn.CloudQUICTLSConfig()})
+	if err != nil {
+		return fmt.Errorf("failed to connect to cloud: %w", err)
+	}
+	defer cloudSess.Connection().Close()
+
+	if err := deskconn.Detach(cloudSess.Session, cred.AuthID); err != nil {
+		return err
+	}
+
+	fmt.Println("Device detached.")
+	return nil
+}
+
 func removeApp(cfgDirectory string, skipConfirm bool) error {
 	if !skipConfirm {
 		confirmed, err := confirmPrompt("Are you sure you want to remove deskconn and all configuration, "+
@@ -1723,6 +1767,10 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 			fmt.Println("remove cancelled")
 			return nil
 		}
+	}
+
+	if err := detachIfAttached(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to detach this device from your account: %v\n", err)
 	}
 
 	homeDir, err := os.UserHomeDir()
