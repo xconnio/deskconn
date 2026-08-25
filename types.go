@@ -106,6 +106,16 @@ func (p *ProxyCalls) Delete(id uint64) {
 	delete(p.calls, id)
 }
 
+func (p *ProxyCalls) DeleteAndClose(id uint64) {
+	p.Lock()
+	c, ok := p.calls[id]
+	delete(p.calls, id)
+	p.Unlock()
+	if ok {
+		c.closeChannel()
+	}
+}
+
 type Organization struct {
 	ID   string `json:"id" yaml:"id"`
 	Name string `json:"name" yaml:"name"`
