@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -141,7 +142,12 @@ func TestFileBrowserBrowseSymlink(t *testing.T) {
 	target := filepath.Join(dir, "target.txt")
 	link := filepath.Join(dir, "link.txt")
 	require.NoError(t, os.WriteFile(target, []byte("target"), 0644))
-	require.NoError(t, os.Symlink(target, link))
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == goosWindows {
+			t.Skipf("symlink creation requires Administrator or Developer Mode on Windows: %v", err)
+		}
+		require.NoError(t, err)
+	}
 
 	fb := deskconn.NewFileBrowser()
 	result, err := fb.Browse(dir, "", 0)
@@ -301,6 +307,9 @@ func TestFileBrowserEditAppliesPatch(t *testing.T) {
 }
 
 func TestFileBrowserEditPreservesFileMode(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("Windows does not support POSIX permission bits")
+	}
 	dir := tempDirInHome(t)
 	path := filepath.Join(dir, "edit.sh")
 	original := []byte("echo one\n")

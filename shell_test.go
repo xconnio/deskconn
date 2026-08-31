@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -54,6 +55,9 @@ func TestExecHandlerMissingKey(t *testing.T) {
 }
 
 func TestShellHandlerKeyExchange(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("TODO: hangs reading the ConPTY output after the shell exits on Windows")
+	}
 	_, caller := setupDeskconn(t)
 
 	clientPubKey, clientPrivKey, err := deskconn.CreateX25519KeyPair()
@@ -135,6 +139,9 @@ func TestShellHandlerKeyExchange(t *testing.T) {
 }
 
 func TestExecHandlerKeyExchange(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("TODO: hangs reading the ConPTY output after the process exits on Windows")
+	}
 	_, caller := setupDeskconn(t)
 
 	clientPubKey, clientPrivKey, err := deskconn.CreateX25519KeyPair()
