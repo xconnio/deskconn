@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,7 +175,7 @@ func (d *Deskconn) handleLogs(ctx context.Context, inv *xconn.Invocation) *xconn
 		old.kill()
 	}
 
-	if strings.HasPrefix(source, "/") {
+	if filepath.IsAbs(source) {
 		SafeGo(func() { d.streamFileLogs(ls, streamID, inv, source, follow, tailN) })
 	} else {
 		SafeGo(func() { d.streamJournalLogs(ctx, ls, streamID, inv, source, follow, tailN, since) })

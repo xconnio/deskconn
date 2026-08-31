@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/alecthomas/kingpin/v2 v2.4.0
-	github.com/creack/pty v1.1.24
+	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/godbus/dbus/v5 v5.2.0
@@ -37,6 +37,7 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
@@ -89,6 +90,7 @@ require (
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
+	github.com/u-root/u-root v0.16.0 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect

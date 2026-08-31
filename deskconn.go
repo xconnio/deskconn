@@ -128,6 +128,16 @@ func (d *Deskconn) StartIndexer(ctx context.Context) {
 	}
 }
 
+// Close releases resources held open for the lifetime of the process, such as the file
+// indexer's database handle. Callers that tear down a Deskconn instance before process exit
+// (tests, in particular - on Windows an open file blocks removal of its containing directory)
+// must call this to avoid leaking the handle.
+func (d *Deskconn) Close() {
+	if d.indexer != nil {
+		d.indexer.Close()
+	}
+}
+
 func (d *Deskconn) Register(session *xconn.Session) error {
 	handlers := map[string]xconn.InvocationHandler{
 		ProcedureKeyExchange:     d.handleKeyExchange,

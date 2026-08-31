@@ -405,8 +405,14 @@ func resolveOperationPath(homeDir, pathArg string) (string, error) {
 		return "", errors.New("path cannot be empty")
 	}
 
+	// filepath.IsAbs requires a drive letter on Windows, so a POSIX-style rooted path like
+	// "/etc/hosts" doesn't count as absolute there - without this, it would silently fall
+	// through to the homeDir-relative branch below instead of being treated as escaping home.
+	isRooted := filepath.IsAbs(pathArg) ||
+		strings.HasPrefix(pathArg, "/") || strings.HasPrefix(pathArg, `\`)
+
 	var resolved string
-	if filepath.IsAbs(pathArg) {
+	if isRooted {
 		resolved = filepath.Clean(pathArg)
 	} else {
 		resolved = filepath.Clean(filepath.Join(homeDir, pathArg))
@@ -414,7 +420,7 @@ func resolveOperationPath(homeDir, pathArg string) (string, error) {
 
 	rel, err := filepath.Rel(homeDir, resolved)
 	if err != nil {
-		return "", err
+		return "", errFilePathEscapesHome
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", errFilePathEscapesHome
