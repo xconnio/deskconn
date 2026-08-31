@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -89,7 +90,10 @@ func main() {
 
 	clientSessions := deskconnd.NewClientSessions()
 
-	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	// DISPLAY/WAYLAND_DISPLAY only distinguish a desktop from a headless server on Linux.
+	// macOS and Windows have no supported headless-server install path, so treat them as
+	// desktop unconditionally rather than misreading an unset X11/Wayland var as "server".
+	isDesktop := runtime.GOOS != "linux" || os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
 	var screen *deskconnd.Screen
 	var mpris *deskconnd.MPRIS
@@ -98,15 +102,19 @@ func main() {
 	if isDesktop {
 		systemBus, err := dbus.ConnectSystemBus()
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("system bus unavailable, screen features disabled: %v", err)
+			systemBus = nil
+		} else {
+			defer systemBus.Close()
 		}
-		defer systemBus.Close()
 
 		sessionBus, err := dbus.ConnectSessionBus()
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("session bus unavailable, screen lock/mpris features disabled: %v", err)
+			sessionBus = nil
+		} else {
+			defer sessionBus.Close()
 		}
-		defer sessionBus.Close()
 
 		screen = deskconnd.NewScreen(sessionBus, systemBus, cfgDirectory)
 		mpris = deskconnd.NewMPRIS(sessionBus)

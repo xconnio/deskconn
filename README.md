@@ -47,7 +47,17 @@ curl -fsSL https://get.deskconn.com | sh
 ```
 
 This installs `desk` and `deskconnd` to `~/.local/bin` and registers `deskconnd` as a systemd user service that
-starts automatically.
+starts automatically. On macOS it registers a launchd agent instead.
+
+On Windows, from an elevated PowerShell prompt:
+
+```powershell
+irm https://get.deskconn.com/install.ps1 | iex
+```
+
+This installs to `%LOCALAPPDATA%\deskconn`, adds the CLI to your `PATH`, and registers `deskconnd` as a Windows
+service via NSSM. Use `desk-cli` there instead of `desk` — `desk` is reserved by Windows for Display Settings
+(`desk.cpl`) and can't be safely overridden.
 
 ## Getting started
 
