@@ -10,6 +10,9 @@ case "$(uname -s)" in
     Linux)
         OS="linux"
         ;;
+    Darwin)
+        OS="darwin"
+        ;;
     *)
         echo "Unsupported OS: $(uname -s). For Windows, use install.ps1 instead."
         exit 1
@@ -199,8 +202,58 @@ EOL
     echo "Systemd service $SERVICE_NAME installed and started!"
 }
 
+install_service_darwin() {
+    local label="com.deskconn.deskconnd"
+    local plist_file="$HOME/Library/LaunchAgents/$label.plist"
+    local log_dir="$HOME/Library/Logs/deskconn"
+
+    echo "Setting up launchd agent for $SERVICE_NAME..."
+    mkdir -p "$(dirname "$plist_file")" "$log_dir"
+
+    cat > "$plist_file" <<EOL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$EXEC_DIR/deskconnd</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$log_dir/deskconnd.log</string>
+    <key>StandardErrorPath</key>
+    <string>$log_dir/deskconnd.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TERM</key>
+        <string>xterm-256color</string>
+    </dict>
+</dict>
+</plist>
+EOL
+
+    if launchctl print "gui/$(id -u)/$label" > /dev/null 2>&1; then
+        echo "Service exists. Restarting..."
+        launchctl bootout "gui/$(id -u)/$label" > /dev/null 2>&1 || true
+    fi
+
+    echo "Enabling and starting service..."
+    launchctl bootstrap "gui/$(id -u)" "$plist_file"
+    launchctl enable "gui/$(id -u)/$label"
+    echo "launchd agent $label installed and started!"
+}
+
 case "$OS" in
     linux)
         install_service_linux
+        ;;
+    darwin)
+        install_service_darwin
         ;;
 esac
