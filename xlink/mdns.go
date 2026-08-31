@@ -2,21 +2,21 @@ package xlink
 
 import (
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/grandcat/zeroconf"
+
+	"github.com/xconnio/deskconn/common"
 )
 
 func AdvertiseService(hostname string, port int, realm string) (*zeroconf.Server, error) {
-	mid, err := os.ReadFile("/etc/machine-id")
+	mid, err := common.MachineID()
 	if err != nil {
 		return nil, err
 	}
 
 	txt := []string{
 		"realm=" + realm,
-		"machineid=" + strings.TrimSpace(string(mid)),
+		"machineid=" + mid,
 		"path=/ws",
 	}
 
