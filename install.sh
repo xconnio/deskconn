@@ -5,6 +5,16 @@ REPO="xconnio/deskconn"
 BIN_DIR="$HOME/.local/bin"
 EXEC_DIR="$HOME/.local/lib/exec"
 
+case "$(uname -s)" in
+    Linux)
+        OS="linux"
+        ;;
+    *)
+        echo "Unsupported OS: $(uname -s). For Windows, use install.ps1 instead."
+        exit 1
+        ;;
+esac
+
 mkdir -p "$BIN_DIR"
 mkdir -p "$EXEC_DIR"
 
@@ -30,7 +40,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 VERSION_NO_V="${VERSION#v}"
-ARCHIVE="deskconn_${VERSION_NO_V}_linux_${GO_ARCH}.tar.gz"
+ARCHIVE="deskconn_${VERSION_NO_V}_${OS}_${GO_ARCH}.tar.gz"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/$ARCHIVE"
 
 TMP_DIR="$(mktemp -d)"
@@ -140,28 +150,30 @@ case ":$PATH:" in
         ;;
 esac
 
-# systemd --user services don't reliably inherit DISPLAY/WAYLAND_DISPLAY from
-# the desktop session, so deskconnd can't tell a desktop from a headless
-# server apart without them being exported explicitly. Capture them from the
-# installer's own environment: on a real desktop session they'll be set here;
-# on a headless server they won't, and deskconnd will register server-only
-# APIs (no screenshot/display RPCs). xlink itself never touches the display,
-# so this only needs to apply to deskconnd's unit.
-DESKCONND_ENV_LINES="Environment=TERM=xterm-256color"
-if [ -n "${DISPLAY:-}" ]; then
-    DESKCONND_ENV_LINES="$DESKCONND_ENV_LINES
+install_service_linux() {
+    local systemd_user_dir="$HOME/.config/systemd/user"
+
+    echo "Setting up systemd user services..."
+    mkdir -p "$systemd_user_dir"
+
+    # systemd --user services don't reliably inherit DISPLAY/WAYLAND_DISPLAY from
+    # the desktop session, so deskconnd can't tell a desktop from a headless
+    # server apart without them being exported explicitly. Capture them from the
+    # installer's own environment: on a real desktop session they'll be set here;
+    # on a headless server they won't, and deskconnd will register server-only
+    # APIs (no screenshot/display RPCs). xlink itself never touches the display,
+    # so this only needs to apply to deskconnd's unit.
+    local deskconnd_env_lines="Environment=TERM=xterm-256color"
+    if [ -n "${DISPLAY:-}" ]; then
+        deskconnd_env_lines="$deskconnd_env_lines
 Environment=DISPLAY=$DISPLAY"
-fi
-if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    DESKCONND_ENV_LINES="$DESKCONND_ENV_LINES
+    fi
+    if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        deskconnd_env_lines="$deskconnd_env_lines
 Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
-fi
+    fi
 
-echo "Setting up systemd user services..."
-SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
-mkdir -p "$SYSTEMD_USER_DIR"
-
-cat > "$SYSTEMD_USER_DIR/xlink.service" <<EOL
+    cat > "$systemd_user_dir/xlink.service" <<EOL
 [Unit]
 Description=xlink connectivity daemon (NAT tunnels, remote-client auth, QUIC/WebRTC streams)
 After=network.target
@@ -176,11 +188,11 @@ Environment=TERM=xterm-256color
 WantedBy=default.target
 EOL
 
-# Wants+After (not Requires) is deliberate: deskconnd and xlink each retry
-# their connection to the other with backoff and tolerate the other
-# restarting independently, so systemd doesn't need to (and shouldn't) tear
-# one down when the other stops -- see xlink/deskconnd's own reconnect loops.
-cat > "$SYSTEMD_USER_DIR/deskconnd.service" <<EOL
+    # Wants+After (not Requires) is deliberate: deskconnd and xlink each retry
+    # their connection to the other with backoff and tolerate the other
+    # restarting independently, so systemd doesn't need to (and shouldn't) tear
+    # one down when the other stops -- see xlink/deskconnd's own reconnect loops.
+    cat > "$systemd_user_dir/deskconnd.service" <<EOL
 [Unit]
 Description=deskconnd application daemon (shell, files, screen, printer, VPN control, ...)
 After=network.target xlink.service
@@ -190,22 +202,29 @@ Wants=xlink.service
 ExecStart=$EXEC_DIR/deskconnd
 Restart=always
 RestartSec=5
-$DESKCONND_ENV_LINES
+$deskconnd_env_lines
 
 [Install]
 WantedBy=default.target
 EOL
 
-systemctl --user daemon-reload
+    systemctl --user daemon-reload
 
-for service_name in xlink deskconnd; do
-    if systemctl --user is-enabled --quiet "$service_name"; then
-        echo "Service $service_name exists. Restarting..."
-        systemctl --user restart "$service_name"
-    else
-        echo "Enabling and starting $service_name..."
-        systemctl --user enable "$service_name"
-        systemctl --user start "$service_name"
-    fi
-done
-echo "Systemd services xlink and deskconnd installed and started!"
+    for service_name in xlink deskconnd; do
+        if systemctl --user is-enabled --quiet "$service_name"; then
+            echo "Service $service_name exists. Restarting..."
+            systemctl --user restart "$service_name"
+        else
+            echo "Enabling and starting $service_name..."
+            systemctl --user enable "$service_name"
+            systemctl --user start "$service_name"
+        fi
+    done
+    echo "Systemd services xlink and deskconnd installed and started!"
+}
+
+case "$OS" in
+    linux)
+        install_service_linux
+        ;;
+esac
