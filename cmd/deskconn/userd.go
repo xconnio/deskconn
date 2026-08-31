@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -94,15 +95,20 @@ func runUserd(args []string) {
 
 	clientSessions := deskconnd.NewClientSessions()
 
-	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	// DISPLAY/WAYLAND_DISPLAY only distinguish a desktop from a headless server on Linux.
+	// macOS and Windows have no supported headless-server install path, so treat them as
+	// desktop unconditionally rather than misreading an unset X11/Wayland var as "server".
+	isDesktop := runtime.GOOS != "linux" || os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
 	var sessionBus *dbus.Conn
 	if isDesktop {
 		sessionBus, err = dbus.ConnectSessionBus()
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("session bus unavailable, screen lock/mpris features disabled: %v", err)
+			sessionBus = nil
+		} else {
+			defer sessionBus.Close()
 		}
-		defer sessionBus.Close()
 	} else {
 		log.Println("no display detected (DISPLAY/WAYLAND_DISPLAY unset), " +
 			"running in server mode: display APIs disabled")

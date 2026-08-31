@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/wampproto-go/auth"
@@ -24,11 +23,10 @@ func Attach(username, password, desktopName string) error {
 	defer quicSess.Connection().Close()
 	session := quicSess.Session
 
-	machineID, err := os.ReadFile(common.MachineIDPath)
+	machineIDStr, err := common.MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}
-	machineIDStr := strings.TrimSpace(string(machineID))
 
 	publicKey, privateKey, err := auth.GenerateCryptoSignKeyPair()
 	if err != nil {

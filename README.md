@@ -54,6 +54,17 @@ This installs one multicall binary, `deskconn`, to `~/.local/lib/exec`. It runs 
 | `deskconn-userd` | `~/.local/lib/exec/deskconn-userd` (symlink) | User daemon, run by the `deskconn-userd` systemd user service at login   |
 | `deskconn-rootd` | `~/.local/lib/exec/deskconn-rootd` (symlink) | Root helper, started on demand with `sudo` as `deskconn-rootd.service`   |
 
+On Windows, from PowerShell:
+
+```powershell
+irm https://get.deskconn.com/install.ps1 | iex
+```
+
+This installs the same multicall binary to `%LOCALAPPDATA%\deskconn`, adds it to your `PATH`, and registers the
+user daemon as a scheduled task that starts at logon (there's no root helper on Windows yet — VPN serving is
+Linux-only for now). Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
+(`desk.cpl`) and can't be safely overridden.
+
 ## Getting started
 
 ### 1. Create an account
