@@ -16,6 +16,23 @@ func defaultShell() string {
 	return "bash"
 }
 
+// killShellProcessGroup forcibly terminates a shell/exec's whole process
+// group (the spawned command plus anything it started, e.g. background
+// jobs in an interactive shell). Closing the pty alone is not a reliable way
+// to do this: the kernel is supposed to deliver SIGHUP to the foreground
+// process group when a PTY's master side closes, but that can race with
+// startOutputReader's own concurrent blocked Read on the same file and --
+// empirically -- silently fail to happen at all, leaving the process
+// running forever. pid <= 0 is a no-op (never valid, just defensive). This
+// relies on go-pty's Cmd setting Setsid on Unix (cmd_unix.go), which makes
+// the child its own process group leader, so -pid reaches the whole group.
+func killShellProcessGroup(pid int) {
+	if pid <= 0 {
+		return
+	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+}
+
 func foregroundPGIDDiffers(ptmx pty.Pty, pid int) (bool, error) {
 	unixPtmx, ok := ptmx.(pty.UnixPty)
 	if !ok {
