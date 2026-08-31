@@ -44,8 +44,18 @@ func NewMPRIS(conn *dbus.Conn) *MPRIS {
 	return &MPRIS{conn: conn}
 }
 
+func (m *MPRIS) object(dest string, path dbus.ObjectPath) (dbus.BusObject, error) {
+	if m.conn == nil {
+		return nil, errors.New("mpris unavailable: no session bus connection")
+	}
+	return m.conn.Object(dest, path), nil
+}
+
 func (m *MPRIS) mprisPlayers() ([]string, error) {
-	obj := m.conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+	obj, err := m.object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+	if err != nil {
+		return nil, err
+	}
 
 	var names []string
 	if err := obj.Call("org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
@@ -63,11 +73,14 @@ func (m *MPRIS) mprisPlayers() ([]string, error) {
 }
 
 func (m *MPRIS) playerIdentity(bus string) (string, error) {
-	obj := m.conn.Object(bus, mprisPath)
+	obj, err := m.object(bus, mprisPath)
+	if err != nil {
+		return "", err
+	}
 
 	var v dbus.Variant
-	err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.mpris.MediaPlayer2", "Identity").Store(&v)
-	if err != nil {
+	if err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.mpris.MediaPlayer2", "Identity").
+		Store(&v); err != nil {
 		return "", err
 	}
 
@@ -75,10 +88,13 @@ func (m *MPRIS) playerIdentity(bus string) (string, error) {
 }
 
 func (m *MPRIS) playerProperties(bus string) (map[string]dbus.Variant, error) {
-	obj := m.conn.Object(bus, mprisPath)
+	obj, err := m.object(bus, mprisPath)
+	if err != nil {
+		return nil, err
+	}
 
 	var props map[string]dbus.Variant
-	err := obj.Call("org.freedesktop.DBus.Properties.GetAll", 0, playerIface).Store(&props)
+	err = obj.Call("org.freedesktop.DBus.Properties.GetAll", 0, playerIface).Store(&props)
 	return props, err
 }
 
@@ -294,26 +310,41 @@ func (m *MPRIS) Previous() error {
 }
 
 func (m *MPRIS) PlayPausePlayer(name string) error {
-	obj := m.conn.Object(name, mprisPath)
+	obj, err := m.object(name, mprisPath)
+	if err != nil {
+		return err
+	}
 	return obj.Call(playerIface+".PlayPause", 0).Err
 }
 
 func (m *MPRIS) PlayPlayer(name string) error {
-	obj := m.conn.Object(name, mprisPath)
+	obj, err := m.object(name, mprisPath)
+	if err != nil {
+		return err
+	}
 	return obj.Call(playerIface+".Play", 0).Err
 }
 
 func (m *MPRIS) PausePlayer(name string) error {
-	obj := m.conn.Object(name, mprisPath)
+	obj, err := m.object(name, mprisPath)
+	if err != nil {
+		return err
+	}
 	return obj.Call(playerIface+".Pause", 0).Err
 }
 
 func (m *MPRIS) NextPlayer(name string) error {
-	obj := m.conn.Object(name, mprisPath)
+	obj, err := m.object(name, mprisPath)
+	if err != nil {
+		return err
+	}
 	return obj.Call(playerIface+".Next", 0).Err
 }
 
 func (m *MPRIS) PreviousPlayer(name string) error {
-	obj := m.conn.Object(name, mprisPath)
+	obj, err := m.object(name, mprisPath)
+	if err != nil {
+		return err
+	}
 	return obj.Call(playerIface+".Previous", 0).Err
 }
