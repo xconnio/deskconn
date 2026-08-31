@@ -9,9 +9,7 @@ import (
 	"math"
 	"net"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -254,25 +252,23 @@ func shellStdinLoop(active *activeShellConn) {
 }
 
 func shellResizeLoop(active *activeShellConn, fd int) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGWINCH)
-	for range sigChan {
+	watchResize(fd, func() {
 		cols, rows, err := term.GetSize(fd)
 		if err != nil {
-			continue
+			return
 		}
 		conn, sendKey, _ := active.get()
 		msg := shellControlMsg{Op: shellOpSize, Cols: clampUint16(cols), Rows: clampUint16(rows)}
 		plaintext, err := json.Marshal(msg)
 		if err != nil {
-			continue
+			return
 		}
 		envelope, err := buildShellEnvelope(shellMsgControl, plaintext, sendKey)
 		if err != nil {
-			continue
+			return
 		}
 		_ = conn.sendEnvelope(envelope)
-	}
+	})
 }
 
 // shellPingInterval is how often shellPingLoop sends shellOpPing while

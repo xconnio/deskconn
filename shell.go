@@ -4,16 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/creack/pty"
+	pty "github.com/aymanbagabas/go-pty"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/sys/unix"
 
 	"github.com/xconnio/xconn-go"
 )
@@ -44,10 +43,23 @@ type shellTransport interface {
 type ptySession struct {
 	mu        sync.Mutex
 	transport shellTransport
+	closeOnce sync.Once
+}
+
+// closePty closes ptmx at most once, however many of startOutputReader's own
+// cleanup, cleanupShellID, and closePtyOnProcessExit race to call it --
+// double-closing a *nix pty is harmless, but double-closing a Windows ConPTY
+// handle is not (see closePtyOnProcessExit's doc comment in shell_windows.go).
+func (ps *ptySession) closePty(ptmx pty.Pty) {
+	ps.closeOnce.Do(func() {
+		if err := ptmx.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			log.Printf("Error closing PTY: %v", err)
+		}
+	})
 }
 
 type interactiveShellSession struct {
-	ptmx            map[string]*os.File
+	ptmx            map[string]pty.Pty
 	sessions        map[string]*ptySession
 	migrationTokens map[string]migrationToken
 	pids            map[string]int        // shell ID → PTY child PID, for /proc cwd lookups
@@ -57,7 +69,7 @@ type interactiveShellSession struct {
 
 func newInteractiveShellSession() *interactiveShellSession {
 	return &interactiveShellSession{
-		ptmx:            make(map[string]*os.File),
+		ptmx:            make(map[string]pty.Pty),
 		sessions:        make(map[string]*ptySession),
 		migrationTokens: make(map[string]migrationToken),
 		pids:            make(map[string]int),
@@ -83,8 +95,9 @@ func (p *interactiveShellSession) issueMigrationToken(shellID string) string {
 
 func (p *interactiveShellSession) cleanupShellID(shellID string) {
 	p.Lock()
-	if stored, ok := p.ptmx[shellID]; ok {
-		_ = stored.Close()
+	stored, hasPtmx := p.ptmx[shellID]
+	ps, hasSession := p.sessions[shellID]
+	if hasPtmx {
 		delete(p.ptmx, shellID)
 	}
 	killShellProcessGroup(p.pids[shellID])
@@ -92,21 +105,10 @@ func (p *interactiveShellSession) cleanupShellID(shellID string) {
 	delete(p.migrationTokens, shellID)
 	delete(p.pids, shellID)
 	p.Unlock()
-}
 
-// killShellProcessGroup forcibly terminates a shell/exec's whole process
-// group (the spawned command plus anything it started, e.g. background
-// jobs in an interactive shell). Closing ptmx alone is not a reliable way
-// to do this: the kernel is supposed to deliver SIGHUP to the foreground
-// process group when a PTY's master side closes, but that can race with
-// startOutputReader's own concurrent blocked Read on the same file and --
-// empirically -- silently fail to happen at all, leaving the process
-// running forever. pid <= 0 is a no-op (never valid, just defensive).
-func killShellProcessGroup(pid int) {
-	if pid <= 0 {
-		return
+	if hasPtmx && hasSession {
+		ps.closePty(stored)
 	}
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
 
 // cwdForShell reads the live working directory of an existing shell straight from
@@ -133,31 +135,7 @@ func (p *interactiveShellSession) isBusy(shellID string) (bool, error) {
 		return false, fmt.Errorf("no such shell: %s", shellID)
 	}
 
-	// SyscallConn (not Fd) so the pty stays non-blocking for the output reader
-	// goroutine that's continuously reading it — Fd() would flip that
-	// permanently to blocking mode for the rest of this file's lifetime.
-	rawConn, err := ptmx.SyscallConn()
-	if err != nil {
-		return false, fmt.Errorf("failed to access pty: %w", err)
-	}
-
-	var fgpgid int
-	var ioctlErr error
-	if err := rawConn.Control(func(fd uintptr) {
-		fgpgid, ioctlErr = unix.IoctlGetInt(int(fd), unix.TIOCGPGRP)
-	}); err != nil {
-		return false, fmt.Errorf("failed to access pty fd: %w", err)
-	}
-	if ioctlErr != nil {
-		return false, fmt.Errorf("failed to get foreground pgid: %w", ioctlErr)
-	}
-
-	shellPgid, err := syscall.Getpgid(pid)
-	if err != nil {
-		return false, fmt.Errorf("failed to get shell pgid: %w", err)
-	}
-
-	return fgpgid != shellPgid, nil
+	return foregroundPGIDDiffers(ptmx, pid)
 }
 
 func (p *interactiveShellSession) handleShellIsBusy() func(_ context.Context,
@@ -215,9 +193,10 @@ func (p *interactiveShellSession) agentSockForAuthID(authID string) string {
 // environment so tools run in the shell (git, ssh, ...) can use the caller's forwarded
 // local SSH agent — see RunAgentForward/handleAgentForward in agentforward.go.
 //
-// ws sets the PTY's initial size via pty.StartWithSize rather than a separate
-// pty.Setsize call after: Setsize racing the output-reader goroutine's first
-// Read is a genuine data race (both touch the os.File's internal fd state).
+// cols/rows set the PTY's initial size right after it's created, before anything can read
+// from it, rather than via a separate resize call once the reader is already running --
+// racing a resize against startOutputReader's first Read would touch the pty's internal
+// state concurrently from two goroutines.
 //
 // echo is left enabled (the PTY's default) for an interactive shell, where
 // the user needs to see what they type. For a one-shot exec, it's disabled:
@@ -228,32 +207,53 @@ func (p *interactiveShellSession) agentSockForAuthID(authID string) string {
 // otherwise leak extra bytes into the exec'd command's own output, racing
 // with and sometimes landing right before its real first output.
 func (p *interactiveShellSession) startPtySession(transport shellTransport, shellID, agentSockPath,
-	prevShellID, command string, ws *pty.Winsize, echo bool, args ...string) (
-	ptmx *os.File, startReader func(), err error) {
-	cmd := exec.Command(command, args...)
-	if agentSockPath != "" {
-		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+agentSockPath)
-	}
-
+	prevShellID, command string, cols, rows uint16, echo bool, args ...string) (
+	ptmx pty.Pty, startReader func(), err error) {
 	dir, err := p.resolveStartDir(prevShellID)
 	if err != nil {
 		return nil, nil, err
 	}
-	cmd.Dir = dir
 
-	ptmx, err = pty.StartWithSize(cmd, ws)
+	ptmx, err = pty.New()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to start PTY: %w", err)
 	}
+	_ = ptmx.Resize(int(cols), int(rows))
 	if !echo {
 		disablePTYEcho(ptmx)
 	}
+
+	if resolved, lookErr := exec.LookPath(command); lookErr == nil {
+		command = resolved
+	}
+
+	cmd := ptmx.Command(command, args...)
+	cmd.Dir = dir
+	if agentSockPath != "" {
+		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+agentSockPath)
+	}
+
+	if err := cmd.Start(); err != nil {
+		_ = ptmx.Close()
+		return nil, nil, fmt.Errorf("failed to start PTY: %w", err)
+	}
+	ps := &ptySession{transport: transport}
 	// Nothing else calls Wait, so without this the process stays a zombie
 	// (invisible to killShellProcessGroup, but still a process-table entry)
-	// forever after it exits, however that happens.
-	SafeGo(func() { _ = cmd.Wait() })
+	// forever after it exits, however that happens. closePtyOnProcessExit
+	// additionally unblocks startOutputReader's Read on platforms where the
+	// pty doesn't signal that on its own -- see its doc comment.
+	SafeGo(func() {
+		_ = cmd.Wait()
+		closePtyOnProcessExit(ps, ptmx)
+	})
+	// go-pty keeps its own slave fd open for the pty's lifetime; without closing
+	// it here, the master's Read never sees EOF/EIO after the child exits, since
+	// the kernel still sees an open slave reference in this process.
+	if unixPtmx, ok := ptmx.(pty.UnixPty); ok {
+		_ = unixPtmx.Slave().Close()
+	}
 
-	ps := &ptySession{transport: transport}
 	p.Lock()
 	p.ptmx[shellID] = ptmx
 	p.sessions[shellID] = ps
@@ -263,19 +263,7 @@ func (p *interactiveShellSession) startPtySession(transport shellTransport, shel
 	return ptmx, func() { SafeGo(func() { p.startOutputReader(ptmx, ps, shellID) }) }, nil
 }
 
-// disablePTYEcho turns off ptmx's line discipline echoing (see
-// startPtySession's doc comment for why). Best-effort: if the ioctl fails
-// there's nothing more useful to do than leave the default in place.
-func disablePTYEcho(ptmx *os.File) {
-	termios, err := unix.IoctlGetTermios(int(ptmx.Fd()), unix.TCGETS)
-	if err != nil {
-		return
-	}
-	termios.Lflag &^= unix.ECHO | unix.ECHOCTL | unix.ECHOE | unix.ECHOK | unix.ECHONL
-	_ = unix.IoctlSetTermios(int(ptmx.Fd()), unix.TCSETS, termios)
-}
-
-func (p *interactiveShellSession) startOutputReader(ptmx *os.File, ps *ptySession, shellID string) {
+func (p *interactiveShellSession) startOutputReader(ptmx pty.Pty, ps *ptySession, shellID string) {
 	defer func() {
 		p.Lock()
 		shouldClose := p.ptmx[shellID] == ptmx
@@ -285,9 +273,7 @@ func (p *interactiveShellSession) startOutputReader(ptmx *os.File, ps *ptySessio
 		delete(p.pids, shellID)
 		p.Unlock()
 		if shouldClose {
-			if err := ptmx.Close(); err != nil {
-				log.Printf("Error closing PTY: %v", err)
-			}
+			ps.closePty(ptmx)
 			// Usually a no-op (the read loop below ending almost always means
 			// the process already exited on its own); matters when it ended
 			// because writeOutput failed instead, with the process possibly

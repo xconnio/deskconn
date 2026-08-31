@@ -2,21 +2,19 @@ package deskconn
 
 import (
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/grandcat/zeroconf"
 )
 
 func AdvertiseService(hostname string, port int, realm string) (*zeroconf.Server, error) {
-	mid, err := os.ReadFile("/etc/machine-id")
+	mid, err := MachineID()
 	if err != nil {
 		return nil, err
 	}
 
 	txt := []string{
 		"realm=" + realm,
-		"machineid=" + strings.TrimSpace(string(mid)),
+		"machineid=" + mid,
 		"path=/ws",
 	}
 
