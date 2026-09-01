@@ -17,6 +17,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
+	"github.com/xconnio/deskconn/iptun"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 	xconnauth "github.com/xconnio/xconn-go/auth"
@@ -48,6 +49,8 @@ const (
 	ProcedureProxyPortReverse  = "io.xconn.deskconn.deskconnd.proxy.port.reverse"
 	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
 	ProcedureProxyPrinterPrint = "io.xconn.deskconn.deskconnd.proxy.printer.print"
+	ProcedureProxyVPNStart     = "io.xconn.deskconn.deskconnd.proxy.vpn.start"
+	ProcedureProxyVPNStop      = "io.xconn.deskconn.deskconnd.proxy.vpn.stop"
 	ProcedureLogin             = "io.xconn.deskconn.login"
 	ProcedureLogout            = "io.xconn.deskconn.logout"
 	ProcedureConnect           = "io.xconn.deskconn.connect"
@@ -350,6 +353,20 @@ func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*x
 
 // ConnectDeviceRealmP2P connects directly to a device via WebRTC P2P, using QUIC for signaling.
 func ConnectDeviceRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xconn.Session, error) {
+	webrtcSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	return webrtcSess.Session, nil
+}
+
+// ConnectDeviceRealmP2PSession is like ConnectDeviceRealmP2P but returns the
+// full WebRTC session instead of just the WAMP session on top of it, giving
+// access to the shared PeerConnection: OpenChannel (for raw, non-WAMP data
+// channels such as the IP tunnel) and Connection (e.g. to inspect the
+// selected ICE candidate pair).
+func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory string) (*xconnwebrtc.WebRTCSession, error) {
 	authid, privKey, err := ReadCredentials(cfgDirectory)
 	if err != nil {
 		return nil, err
@@ -360,7 +377,7 @@ func ConnectDeviceRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xc
 		return nil, err
 	}
 
-	webrtcSess, err := ConnectWebrtc(quicSess.Session, realm, authid, privKey, func() {})
+	webrtcSess, err := connectWebrtcSession(quicSess.Session, realm, authid, privKey, func() {})
 	quicSess.Connection().Close()
 	if err != nil {
 		return nil, err
@@ -371,6 +388,16 @@ func ConnectDeviceRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xc
 
 func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
 	onDisconnect func()) (*xconn.Session, error) {
+	webrtcSess, err := connectWebrtcSession(session, realm, authid, privateKey, onDisconnect)
+	if err != nil {
+		return nil, err
+	}
+
+	return webrtcSess.Session, nil
+}
+
+func connectWebrtcSession(session *xconn.Session, realm, authid, privateKey string,
+	onDisconnect func()) (*xconnwebrtc.WebRTCSession, error) {
 	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
 	if err != nil {
 		return nil, err
@@ -390,12 +417,7 @@ func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
 		OnDisconnect: onDisconnect,
 	}
 
-	finalSession, err := xconnwebrtc.ConnectWAMP(config)
-	if err != nil {
-		return nil, err
-	}
-
-	return finalSession.Session, nil
+	return xconnwebrtc.ConnectWAMP(config)
 }
 
 func FetchDevicesFromCloud(cfgDirectory string) ([]Device, error) {
@@ -1009,6 +1031,52 @@ func ProxyPortReverseHandler(clientSessions *ClientSessions, cfgDirectory string
 
 		if err := ReverseLocalPort(ctx, deviceSess, remotePort, localPort); err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+		return xconn.NewInvocationResult()
+	}
+}
+
+// ProxyVPNStartHandler proxies "deskconn vpn start": it arms the current Deskconn (fetched via
+// getDeskconn, since deskconnd rebuilds it on every reconnect/detach cycle) to accept inbound
+// VPN tunnel requests using helperSocket, a deskconn-vpnd socket the caller already started.
+// deskconnd has no capability or terminal of its own for the privileged setup work.
+//
+// Returns as soon as arming succeeds, without blocking, so the CLI can hand off immediately.
+// No tunnel can start at all until some caller has armed serving this way -- this feature's
+// only gate today, in place of a real consent prompt.
+func ProxyVPNStartHandler(getDeskconn func() *Deskconn) xconn.InvocationHandler {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		helperSocket, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		d := getDeskconn()
+		if d == nil {
+			return xconn.NewInvocationError(ErrOperationFailed, "not currently connected")
+		}
+
+		helper, err := iptun.DialClient(helperSocket)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		if err := d.ArmVPNServing(helper); err != nil {
+			_ = helper.Close()
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+		return xconn.NewInvocationResult()
+	}
+}
+
+// ProxyVPNStopHandler proxies "deskconn vpn stop": disarms serving, tearing down any active
+// tunnel and closing the helper connection so deskconn-vpnd unwinds and exits. Meant to run as
+// an independent command from "deskconn vpn start", not necessarily the same terminal.
+func ProxyVPNStopHandler(getDeskconn func() *Deskconn) xconn.InvocationHandler {
+	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
+		d := getDeskconn()
+		if d == nil || !d.DisarmVPNServing() {
+			return xconn.NewInvocationError(ErrOperationFailed, "not currently serving")
 		}
 		return xconn.NewInvocationResult()
 	}

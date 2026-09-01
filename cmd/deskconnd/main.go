@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -173,6 +174,24 @@ func main() {
 		log.Fatal(regRespPortReverse.Err)
 	}
 
+	// currentDeskconn tracks whichever *deskconn.Deskconn belongs to the current reconnect
+	// cycle (rebuilt fresh each time), so the VPN handlers below -- registered once, here --
+	// resolve it at call time instead of closing over one fixed instance.
+	var currentDeskconn atomic.Pointer[deskconn.Deskconn]
+	getCurrentDeskconn := func() *deskconn.Deskconn { return currentDeskconn.Load() }
+
+	regRespVPNStart := sess.Register(deskconn.ProcedureProxyVPNStart,
+		deskconn.ProxyVPNStartHandler(getCurrentDeskconn)).Do()
+	if regRespVPNStart.Err != nil {
+		log.Fatal(regRespVPNStart.Err)
+	}
+
+	regRespVPNStop := sess.Register(deskconn.ProcedureProxyVPNStop,
+		deskconn.ProxyVPNStopHandler(getCurrentDeskconn)).Do()
+	if regRespVPNStop.Err != nil {
+		log.Fatal(regRespVPNStop.Err)
+	}
+
 	regRespPrinterList := sess.Register(deskconn.ProcedureProxyPrinterList,
 		deskconn.ProxyPrinterListHandler(clientSession, cfgDirectory)).Do()
 	if regRespPrinterList.Err != nil {
@@ -251,7 +270,7 @@ func main() {
 
 	host, _ := os.Hostname()
 
-	for runDeviceSession(cfgDirectory, host, clientSession) {
+	for runDeviceSession(cfgDirectory, host, clientSession, &currentDeskconn) {
 	}
 
 	localRouter.Close()
@@ -261,7 +280,11 @@ func main() {
 // the realm router, local hardware APIs, and the cloud reconnect loop, then blocks until either
 // a shutdown signal or a detach event. It returns true if the caller should start another
 // cycle (detach happened), false to shut down.
-func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientSessions) bool {
+//
+// currentDeskconn is updated to this cycle's *deskconn.Deskconn as soon as it's built -- see
+// its registration in main.
+func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientSessions,
+	currentDeskconn *atomic.Pointer[deskconn.Deskconn]) bool {
 	cred, err := deskconn.EnsureCredentials()
 	if err != nil {
 		log.Fatal(err)
@@ -358,6 +381,8 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 	}
 
 	deskconnApis := deskconn.NewDeskconn(screen, mpris, audio, isDesktop)
+	currentDeskconn.Store(deskconnApis)
+	defer currentDeskconn.CompareAndSwap(deskconnApis, nil)
 
 	if err := deskconnApis.Register(localSession); err != nil {
 		log.Fatal(err)
@@ -516,7 +541,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 				continue
 			}
 
-			webRtcManager.OnDataChannel(deskconnApis.HandleFileStreamChannel)
+			webRtcManager.OnDataChannel(deskconnApis.HandleAuxDataChannel)
 
 			// Reset backoff after successful connection.
 			retryDelay = 1 * time.Second
@@ -550,6 +575,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 	select {
 	case <-sigChan:
 		cancel()
+		deskconnApis.CloseVPNTunnel()
 		clientSession.Logout()
 
 		cloudConnMu.Lock()
@@ -566,6 +592,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 		return false
 	case <-detachChan:
 		cancel()
+		deskconnApis.CloseVPNTunnel()
 		_ = os.Remove(filepath.Join(cfgDirectory, "credentials.json"))
 
 		cloudConnMu.Lock()

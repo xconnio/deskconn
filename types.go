@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/xconn-go"
+	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
 type ProxyCall struct {
@@ -151,6 +152,13 @@ type deviceSession struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 
+	// webrtcSession is non-nil once this entry has upgraded to a direct
+	// WebRTC P2P connection -- nil while it's still QUIC-only. It's the
+	// only form that exposes OpenChannel, so features that need a raw data
+	// channel (currently just VPN tunneling) key off this instead of
+	// session's presence.
+	webrtcSession *xconnwebrtc.WebRTCSession
+
 	upgradeSubs []chan *xconn.Session
 	sync.Mutex
 }
@@ -182,6 +190,7 @@ type ClientSessions struct {
 	sessions     map[string]*deviceSession
 	disconnected map[string]struct{}
 	loggedIn     bool
+
 	sync.Mutex
 }
 
@@ -226,17 +235,18 @@ func (c *ClientSessions) SessionContext(realm string) (context.Context, bool) {
 // long-lived proxied call sharing this device connection (e.g. a shell and its agent-forward
 // call under "-A") can independently re-issue itself on the new session.
 func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session,
-	ctx context.Context, cancel context.CancelFunc) {
+	webrtcSession *xconnwebrtc.WebRTCSession, ctx context.Context, cancel context.CancelFunc) {
 	c.Lock()
 	old, hadOld := c.sessions[realm]
 	if hadOld {
 		old.cancel()
 	}
 	c.sessions[realm] = &deviceSession{
-		session:     session,
-		connectedAt: time.Now(),
-		ctx:         ctx,
-		cancel:      cancel,
+		session:       session,
+		webrtcSession: webrtcSession,
+		connectedAt:   time.Now(),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 	c.Unlock()
 
@@ -393,7 +403,7 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfg
 	}
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-	webrtcSess, err := ConnectWebrtc(quicSess.Session, realm, authid, privKey, cancel)
+	webrtcSess, err := connectWebrtcSession(quicSess.Session, realm, authid, privKey, cancel)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)
 		cancel()
@@ -407,10 +417,10 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfg
 		return
 	}
 
-	c.StoreDeviceSession(realm, webrtcSess, sessCtx, cancel)
+	c.StoreDeviceSession(realm, webrtcSess.Session, webrtcSess, sessCtx, cancel)
 	log.Printf("p2p upgrade %s: upgraded to WebRTC", realm)
 
-	SafeGo(func() { c.reconnectLoop(webrtcSess, nil, realm, cfgDirectory) }) //nolint
+	SafeGo(func() { c.reconnectLoop(webrtcSess.Session, nil, realm, cfgDirectory) }) //nolint
 }
 
 // reconnectLoop waits for session to disconnect then reconnects via QUIC and retries the P2P upgrade.
@@ -441,7 +451,7 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 			continue
 		}
 		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-		c.StoreDeviceSession(realm, newSess.Session, sessCtx, cancel)
+		c.StoreDeviceSession(realm, newSess.Session, nil, sessCtx, cancel)
 		log.Printf("reconnect %s: reconnected via QUIC", realm)
 		SafeGo(func() { c.upgradeToWebRTC(newSess, realm, cfgDirectory) }) //nolint
 		return

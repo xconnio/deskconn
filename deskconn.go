@@ -78,6 +78,7 @@ type Deskconn struct {
 	processes            *info.ProcessMonitor
 	appRegistry          *info.AppRegistry
 	desktop              bool
+	vpn                  *vpnServer
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment bool) *Deskconn {
@@ -97,6 +98,7 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment 
 		processes:            info.NewProcessMonitor(),
 		appRegistry:          info.NewAppRegistry(),
 		desktop:              desktopEnvironment,
+		vpn:                  newVPNServer(),
 	}
 	d.shellSession.agentForward = d.agentForwardSessions
 	if screen != nil {
