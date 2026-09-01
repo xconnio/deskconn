@@ -1922,6 +1922,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 
 	foundDeskconn := false
 	foundDeskconnd := false
+	foundDeskconnVpnd := false
 
 	for {
 		header, err := tarReader.Next()
@@ -1963,10 +1964,18 @@ func downloadAndInstallUpdate(downloadURL string) error {
 				return err
 			}
 			foundDeskconnd = true
+		case "deskconn-vpnd":
+			fmt.Println("Installing deskconn-vpnd...")
+			// Next to deskconn itself, matching install.sh -- iptun.LaunchHelper looks for it
+			// there first.
+			if err := installBinaryFromReader(tarReader, filepath.Join(binDir, "deskconn-vpnd"), 0755); err != nil {
+				return err
+			}
+			foundDeskconnVpnd = true
 		}
 	}
 
-	if !foundDeskconn || !foundDeskconnd {
+	if !foundDeskconn || !foundDeskconnd || !foundDeskconnVpnd {
 		return fmt.Errorf("update archive missing required binaries")
 	}
 

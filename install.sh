@@ -57,10 +57,6 @@ chmod 755 "$BIN_DIR/deskconn"
 chmod 700 "$EXEC_DIR/deskconnd"
 chmod 755 "$BIN_DIR/deskconn-vpnd"
 
-# Neither deskconn nor deskconnd needs any network capability: "vpn connect"
-# and "vpn start" both do their privileged work through deskconn-vpnd
-# instead, run on demand via sudo. No setcap needed on either binary.
-
 ln -sf "$BIN_DIR/deskconn" "$BIN_DIR/desk"
 
 # dsh/dcp are shortcuts for a fixed subcommand. Forwarding "--completion-bash" keeps
