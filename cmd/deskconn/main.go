@@ -220,6 +220,13 @@ func main() {
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
 	).Enum(ModeQUIC, ModeP2P)
 
+	vpnCmd := app.Command("vpn", "Route internet traffic through a remote device, or serve as one")
+	vpnConnectCmd := vpnCmd.Command("connect", "Connect to a device and tunnel all traffic through it")
+	vpnConnectDevice := vpnConnectCmd.Arg("device", "ID, name or alias of device").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	vpnStartCmd := vpnCmd.Command("start", "Let other devices route their traffic through this machine")
+	vpnStopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
+
 	pingCmd := app.Command("ping", "Ping a device and measure round-trip time")
 	pingDevice := pingCmd.Arg("device", "ID, name or alias of device").Required().
 		HintAction(deviceCompletions(cfgDirectory)).String()
@@ -1211,6 +1218,25 @@ func main() {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
 
+	case vpnConnectCmd.FullCommand():
+		vpnRealm, err := deviceRealm(*vpnConnectDevice, cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		vpnCtx, vpnCancel := context.WithCancel(context.Background())
+		runVPNConnect(vpnCtx, cfgDirectory, vpnRealm, *vpnConnectDevice)
+		vpnCancel()
+
+	case vpnStartCmd.FullCommand():
+		vpnStartCtx, vpnStartCancel := context.WithCancel(context.Background())
+		runVPNStart(vpnStartCtx, cfgDirectory)
+		vpnStartCancel()
+
+	case vpnStopCmd.FullCommand():
+		runVPNStop(context.Background(), cfgDirectory)
+
 	case pingCmd.FullCommand():
 		realm, err := deviceRealm(*pingDevice, cfgDirectory)
 		if err != nil {
@@ -1896,6 +1922,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 
 	foundDeskconn := false
 	foundDeskconnd := false
+	foundDeskconnVpnd := false
 
 	for {
 		header, err := tarReader.Next()
@@ -1937,10 +1964,18 @@ func downloadAndInstallUpdate(downloadURL string) error {
 				return err
 			}
 			foundDeskconnd = true
+		case "deskconn-vpnd":
+			fmt.Println("Installing deskconn-vpnd...")
+			// Next to deskconn itself, matching install.sh -- iptun.LaunchHelper looks for it
+			// there first.
+			if err := installBinaryFromReader(tarReader, filepath.Join(binDir, "deskconn-vpnd"), 0755); err != nil {
+				return err
+			}
+			foundDeskconnVpnd = true
 		}
 	}
 
-	if !foundDeskconn || !foundDeskconnd {
+	if !foundDeskconn || !foundDeskconnd || !foundDeskconnVpnd {
 		return fmt.Errorf("update archive missing required binaries")
 	}
 

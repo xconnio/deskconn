@@ -29,11 +29,23 @@ builds:
       - amd64
       - arm64
 
+  - id: deskconn-vpnd
+    main: ./cmd/deskconn-vpnd
+    binary: deskconn-vpnd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
 archives:
   - id: release-bundle
     ids:
       - deskconn
       - deskconnd
+      - deskconn-vpnd
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

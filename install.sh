@@ -44,16 +44,18 @@ curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE"
 echo "Extracting archive..."
 tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
 
-if [ ! -f "$TMP_DIR/deskconn" ] || [ ! -f "$TMP_DIR/deskconnd" ]; then
-    echo "Release archive does not contain deskconn and deskconnd binaries."
+if [ ! -f "$TMP_DIR/deskconn" ] || [ ! -f "$TMP_DIR/deskconnd" ] || [ ! -f "$TMP_DIR/deskconn-vpnd" ]; then
+    echo "Release archive does not contain deskconn, deskconnd and deskconn-vpnd binaries."
     exit 1
 fi
 
 mv "$TMP_DIR/deskconn" "$BIN_DIR/deskconn"
 mv "$TMP_DIR/deskconnd" "$EXEC_DIR/deskconnd"
+mv "$TMP_DIR/deskconn-vpnd" "$BIN_DIR/deskconn-vpnd"
 
 chmod 755 "$BIN_DIR/deskconn"
 chmod 700 "$EXEC_DIR/deskconnd"
+chmod 755 "$BIN_DIR/deskconn-vpnd"
 
 ln -sf "$BIN_DIR/deskconn" "$BIN_DIR/desk"
 

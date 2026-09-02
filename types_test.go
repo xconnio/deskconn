@@ -22,7 +22,7 @@ func TestClientSessionsFanOutsUpgradeToAllSubscribers(t *testing.T) {
 	cs := deskconn.NewClientSessions()
 	initialCtx, initialCancel := context.WithCancel(context.Background())
 	t.Cleanup(initialCancel)
-	cs.StoreDeviceSession("device-realm", initial, initialCtx, initialCancel)
+	cs.StoreDeviceSession("device-realm", initial, nil, initialCtx, initialCancel)
 
 	// Two concurrent callers sharing the cached connection — e.g. deskconn shell -A's shell
 	// call and its agent-forward call — both ask for the current session and subscribe.
@@ -40,7 +40,7 @@ func TestClientSessionsFanOutsUpgradeToAllSubscribers(t *testing.T) {
 	require.NoError(t, err)
 	upgradedCtx, upgradedCancel := context.WithCancel(context.Background())
 	t.Cleanup(upgradedCancel)
-	cs.StoreDeviceSession("device-realm", upgraded, upgradedCtx, upgradedCancel)
+	cs.StoreDeviceSession("device-realm", upgraded, nil, upgradedCtx, upgradedCancel)
 
 	select {
 	case got := <-upgradeCh1:

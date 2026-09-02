@@ -21,3 +21,9 @@ build-deskconn:
 
 run-deskconn:
 	go run github.com/xconnio/deskconn/cmd/deskconn
+
+build-deskconn-vpnd:
+	CGO_ENABLED=0 go build github.com/xconnio/deskconn/cmd/deskconn-vpnd
+
+run-deskconn-vpnd:
+	go run github.com/xconnio/deskconn/cmd/deskconn-vpnd

@@ -306,7 +306,7 @@ func TestAgentForwardProxyReadySignal(t *testing.T) {
 	deviceCtx, deviceCancel := context.WithCancel(context.Background())
 	t.Cleanup(deviceCancel)
 	const deviceRealm = "device-realm"
-	clientSessions.StoreDeviceSession(deviceRealm, deviceCallerForProxy, deviceCtx, deviceCancel)
+	clientSessions.StoreDeviceSession(deviceRealm, deviceCallerForProxy, nil, deviceCtx, deviceCancel)
 
 	proxyCalls := deskconn.NewProxyCalls()
 	regResp := localCallee.Register(deskconn.ProcedureProxyAgentForward,
