@@ -143,25 +143,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 				common.ProcedureScreenshotPermission: d.handleScreenShotPermission,
 			})
 		}
-
-		// Brightness, MPRIS and screenshot all go through D-Bus (login1,
-		// MPRIS players, xdg-desktop-portal) with no Windows equivalent, so
-		// there's nothing to back them there - skip registering them rather
-		// than exposing procedures that could only ever return an error.
-		if runtime.GOOS != "windows" {
-			maps.Copy(handlers, map[string]xconn.InvocationHandler{
-				ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
-				ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
-				ProcedureMPRISPlayers:         d.handleListPlayers,
-				ProcedureMPRISPlayPause:       d.handlePlayPause,
-				ProcedureMPRISPlay:            d.handlePlay,
-				ProcedureMPRISPause:           d.handlePause,
-				ProcedureMPRISNext:            d.handleNext,
-				ProcedureMPRISPrevious:        d.handlePrevious,
-				ProcedureScreenshot:           d.handleScreenshot,
-				ProcedureScreenshotPermission: d.handleScreenShotPermission,
-			})
-		}
 	}
 
 	for uri, handler := range handlers {

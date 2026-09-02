@@ -1,6 +1,9 @@
+//go:build linux
+
 package deskconnd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/xconn-go"
 )
 
 // vpnServer tracks whether this Deskconn is currently willing to act as a
@@ -293,4 +297,44 @@ func ValidateIPv4Source(pkt []byte, expected net.IP) bool {
 		return false
 	}
 	return net.IP(pkt[12:16]).Equal(expected)
+}
+
+// ProxyVPNStartHandler proxies "deskconn vpn start": it arms d to accept
+// inbound VPN tunnel requests using helperSocket, a vpnd socket the
+// caller already started.
+//
+// Returns as soon as arming succeeds, without blocking, so the CLI can hand
+// off immediately. No tunnel can start at all until some caller has armed
+// serving this way -- this feature's only gate today, in place of a real
+// consent prompt.
+func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		helperSocket, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		}
+
+		helper, err := common.DialVPNHelper(helperSocket)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		}
+
+		if err := d.ArmVPNServing(helper); err != nil {
+			_ = helper.Close()
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		}
+		return xconn.NewInvocationResult()
+	}
+}
+
+// ProxyVPNStopHandler proxies "deskconn vpn stop": disarms serving, tearing down any active
+// tunnel and closing the helper connection so vpnd unwinds and exits. Meant to run as
+// an independent command from "deskconn vpn start", not necessarily the same terminal.
+func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
+	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
+		if !d.DisarmVPNServing() {
+			return xconn.NewInvocationError(common.ErrOperationFailed, "not currently serving")
+		}
+		return xconn.NewInvocationResult()
+	}
 }

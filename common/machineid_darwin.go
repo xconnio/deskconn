@@ -1,4 +1,4 @@
-package deskconn
+package common
 
 import (
 	"errors"
