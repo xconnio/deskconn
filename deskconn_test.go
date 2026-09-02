@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -34,6 +35,9 @@ func setupRouterAndConnectSessions(t *testing.T) (*xconn.Session, *xconn.Session
 }
 
 func TestBrightnessGetSet(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("brightness is D-Bus-based and not registered on windows")
+	}
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	// D-Bus isn't available on every platform/CI environment; NewScreen/NewMPRIS handle a
