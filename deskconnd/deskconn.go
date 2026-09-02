@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"os"
+	"runtime"
 
 	log "github.com/sirupsen/logrus"
 
@@ -114,25 +115,53 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	// on a headless server. Skip registering them there.
 	if d.desktop {
 		maps.Copy(handlers, map[string]xconn.InvocationHandler{
-			common.ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
-			common.ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
-			common.ProcedureScreenLock:           d.lockScreenLockHandler,
-			common.ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
-			common.ProcedureMPRISPlayers:         d.handleListPlayers,
-			common.ProcedureMPRISPlayPause:       d.handlePlayPause,
-			common.ProcedureMPRISPlay:            d.handlePlay,
-			common.ProcedureMPRISPause:           d.handlePause,
-			common.ProcedureMPRISNext:            d.handleNext,
-			common.ProcedureMPRISPrevious:        d.handlePrevious,
-			common.ProcedureAudioMute:            d.handleAudioMute,
-			common.ProcedureAudioUnmute:          d.handleAudioUnmute,
-			common.ProcedureAudioToggleMute:      d.handleAudioToggleMute,
-			common.ProcedureAudioIsMuted:         d.handleAudioIsMuted,
-			common.ProcedureScreenshot:           d.handleScreenshot,
-			common.ProcedureScreenshotPermission: d.handleScreenShotPermission,
-			common.ProcedureWallpaperGet:         d.wallpaper.HandleGet,
-			common.ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
+			common.ProcedureScreenLock:        d.lockScreenLockHandler,
+			common.ProcedureScreenIsLocked:    d.lockScreenIsLockedHandler,
+			common.ProcedureAudioMute:         d.handleAudioMute,
+			common.ProcedureAudioUnmute:       d.handleAudioUnmute,
+			common.ProcedureAudioToggleMute:   d.handleAudioToggleMute,
+			common.ProcedureAudioIsMuted:      d.handleAudioIsMuted,
+			common.ProcedureWallpaperGet:      d.wallpaper.HandleGet,
+			common.ProcedureWallpaperChecksum: d.wallpaper.HandleChecksum,
 		})
+
+		// Brightness, MPRIS and screenshot all go through D-Bus (login1,
+		// MPRIS players, xdg-desktop-portal) with no Windows equivalent, so
+		// there's nothing to back them there - skip registering them rather
+		// than exposing procedures that could only ever return an error.
+		if runtime.GOOS != "windows" {
+			maps.Copy(handlers, map[string]xconn.InvocationHandler{
+				common.ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
+				common.ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
+				common.ProcedureMPRISPlayers:         d.handleListPlayers,
+				common.ProcedureMPRISPlayPause:       d.handlePlayPause,
+				common.ProcedureMPRISPlay:            d.handlePlay,
+				common.ProcedureMPRISPause:           d.handlePause,
+				common.ProcedureMPRISNext:            d.handleNext,
+				common.ProcedureMPRISPrevious:        d.handlePrevious,
+				common.ProcedureScreenshot:           d.handleScreenshot,
+				common.ProcedureScreenshotPermission: d.handleScreenShotPermission,
+			})
+		}
+
+		// Brightness, MPRIS and screenshot all go through D-Bus (login1,
+		// MPRIS players, xdg-desktop-portal) with no Windows equivalent, so
+		// there's nothing to back them there - skip registering them rather
+		// than exposing procedures that could only ever return an error.
+		if runtime.GOOS != "windows" {
+			maps.Copy(handlers, map[string]xconn.InvocationHandler{
+				ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
+				ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
+				ProcedureMPRISPlayers:         d.handleListPlayers,
+				ProcedureMPRISPlayPause:       d.handlePlayPause,
+				ProcedureMPRISPlay:            d.handlePlay,
+				ProcedureMPRISPause:           d.handlePause,
+				ProcedureMPRISNext:            d.handleNext,
+				ProcedureMPRISPrevious:        d.handlePrevious,
+				ProcedureScreenshot:           d.handleScreenshot,
+				ProcedureScreenshotPermission: d.handleScreenShotPermission,
+			})
+		}
 	}
 
 	for uri, handler := range handlers {
