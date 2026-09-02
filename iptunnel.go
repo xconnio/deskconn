@@ -1,3 +1,5 @@
+//go:build linux
+
 package deskconn
 
 import (
@@ -13,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/iptun"
+	"github.com/xconnio/xconn-go"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
@@ -575,4 +578,50 @@ func ValidateIPv4Source(pkt []byte, expected net.IP) bool {
 		return false
 	}
 	return net.IP(pkt[12:16]).Equal(expected)
+}
+
+// ProxyVPNStartHandler proxies "deskconn vpn start": it arms the current Deskconn (fetched via
+// getDeskconn, since deskconnd rebuilds it on every reconnect/detach cycle) to accept inbound
+// VPN tunnel requests using helperSocket, a deskconn-vpnd socket the caller already started.
+// deskconnd has no capability or terminal of its own for the privileged setup work.
+//
+// Returns as soon as arming succeeds, without blocking, so the CLI can hand off immediately.
+// No tunnel can start at all until some caller has armed serving this way -- this feature's
+// only gate today, in place of a real consent prompt.
+func ProxyVPNStartHandler(getDeskconn func() *Deskconn) xconn.InvocationHandler {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		helperSocket, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
+		}
+
+		d := getDeskconn()
+		if d == nil {
+			return xconn.NewInvocationError(ErrOperationFailed, "not currently connected")
+		}
+
+		helper, err := iptun.DialClient(helperSocket)
+		if err != nil {
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+
+		if err := d.ArmVPNServing(helper); err != nil {
+			_ = helper.Close()
+			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
+		}
+		return xconn.NewInvocationResult()
+	}
+}
+
+// ProxyVPNStopHandler proxies "deskconn vpn stop": disarms serving, tearing down any active
+// tunnel and closing the helper connection so deskconn-vpnd unwinds and exits. Meant to run as
+// an independent command from "deskconn vpn start", not necessarily the same terminal.
+func ProxyVPNStopHandler(getDeskconn func() *Deskconn) xconn.InvocationHandler {
+	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
+		d := getDeskconn()
+		if d == nil || !d.DisarmVPNServing() {
+			return xconn.NewInvocationError(ErrOperationFailed, "not currently serving")
+		}
+		return xconn.NewInvocationResult()
+	}
 }

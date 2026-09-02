@@ -180,16 +180,8 @@ func main() {
 	var currentDeskconn atomic.Pointer[deskconn.Deskconn]
 	getCurrentDeskconn := func() *deskconn.Deskconn { return currentDeskconn.Load() }
 
-	regRespVPNStart := sess.Register(deskconn.ProcedureProxyVPNStart,
-		deskconn.ProxyVPNStartHandler(getCurrentDeskconn)).Do()
-	if regRespVPNStart.Err != nil {
-		log.Fatal(regRespVPNStart.Err)
-	}
-
-	regRespVPNStop := sess.Register(deskconn.ProcedureProxyVPNStop,
-		deskconn.ProxyVPNStopHandler(getCurrentDeskconn)).Do()
-	if regRespVPNStop.Err != nil {
-		log.Fatal(regRespVPNStop.Err)
+	if err := registerVPNProcedures(sess, getCurrentDeskconn); err != nil {
+		log.Fatal(err)
 	}
 
 	regRespPrinterList := sess.Register(deskconn.ProcedureProxyPrinterList,
@@ -547,7 +539,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 				continue
 			}
 
-			webRtcManager.OnDataChannel(deskconnApis.HandleAuxDataChannel)
+			webRtcManager.OnDataChannel(dataChannelHandler(deskconnApis))
 
 			// Reset backoff after successful connection.
 			retryDelay = 1 * time.Second
@@ -581,7 +573,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 	select {
 	case <-sigChan:
 		cancel()
-		deskconnApis.CloseVPNTunnel()
+		closeVPNTunnel(deskconnApis)
 		clientSession.Logout()
 
 		cloudConnMu.Lock()
@@ -598,7 +590,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 		return false
 	case <-detachChan:
 		cancel()
-		deskconnApis.CloseVPNTunnel()
+		closeVPNTunnel(deskconnApis)
 		_ = os.Remove(filepath.Join(cfgDirectory, "credentials.json"))
 
 		cloudConnMu.Lock()
