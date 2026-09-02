@@ -354,7 +354,13 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	}
 	defer func() { _ = term.Restore(fd, oldState) }()
 
-	cols, rows, err := term.GetSize(fd)
+	// Terminal dimensions are a property of the screen, not the keyboard: querying them
+	// needs stdout's fd, not stdin's. On Unix either works (both ends of the same tty
+	// answer the same ioctl), but on Windows only a console SCREEN BUFFER handle (stdout)
+	// answers GetConsoleScreenBufferInfo -- stdin's handle fails it with "the handle is
+	// invalid", breaking every shell/exec invocation.
+	sizeFd := int(os.Stdout.Fd()) // #nosec
+	cols, rows, err := term.GetSize(sizeFd)
 	if err != nil {
 		return fmt.Errorf("failed to get terminal size: %w", err)
 	}
@@ -385,7 +391,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	defer active.cleanupCurrent()
 
 	go shellStdinLoop(active)
-	go shellResizeLoop(active, fd)
+	go shellResizeLoop(active, sizeFd)
 	go shellPingLoop(active)
 
 	migrateCtrl := common.ShellControlMsg{
