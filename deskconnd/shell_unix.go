@@ -1,11 +1,9 @@
 //go:build !windows
 
-package deskconn
+package deskconnd
 
 import (
 	"fmt"
-	"os"
-	"os/signal"
 	"syscall"
 
 	pty "github.com/aymanbagabas/go-pty"
@@ -61,12 +59,4 @@ func foregroundPGIDDiffers(ptmx pty.Pty, pid int) (bool, error) {
 	}
 
 	return fgpgid != shellPgid, nil
-}
-
-func watchResize(_ int, onResize func()) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGWINCH)
-	for range sigChan {
-		onResize()
-	}
 }

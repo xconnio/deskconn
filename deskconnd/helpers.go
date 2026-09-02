@@ -299,46 +299,6 @@ func appCall(session *xconn.Session, appID, procedure string, req, out any) erro
 	return json.Unmarshal(result, out)
 }
 
-// ProxyVPNStartHandler proxies "desk vpn serve": it arms d to accept
-// inbound VPN tunnel requests using helperSocket, a deskconn-rootd socket the
-// caller already started.
-//
-// Returns as soon as arming succeeds, without blocking, so the CLI can hand
-// off immediately. No tunnel can start at all until some caller has armed
-// serving this way -- this feature's only gate today, in place of a real
-// consent prompt.
-func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
-	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		helperSocket, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-		}
-
-		helper, err := common.DialVPNHelper(helperSocket)
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-		}
-
-		if err := d.ArmVPNServing(helper); err != nil {
-			_ = helper.Close()
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-		}
-		return xconn.NewInvocationResult()
-	}
-}
-
-// ProxyVPNStopHandler proxies "desk vpn stop": disarms serving, tearing down any active
-// tunnel and closing the helper connection so deskconn-rootd unwinds and exits. Meant to run as
-// an independent command from "desk vpn serve", not necessarily the same terminal.
-func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
-	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-		if !d.DisarmVPNServing() {
-			return xconn.NewInvocationError(common.ErrOperationFailed, "not currently serving")
-		}
-		return xconn.NewInvocationResult()
-	}
-}
-
 // ProxyCatHandler streams a file from realm's machine to the local CLI: it encrypts the
 // path and decrypts the chunks with its cached keys for that machine, so they reach the
 // CLI in plain text over the local socket.

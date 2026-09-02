@@ -1,3 +1,5 @@
+//go:build linux
+
 package deskconn
 
 import (
@@ -10,11 +12,6 @@ import (
 )
 
 const (
-	// RootdName is the name the deskconn binary runs as its root helper under: main
-	// dispatches on it either as argv[0] (the installed symlink) or as the first argument
-	// (how LaunchVPNHelper invokes it).
-	RootdName = "deskconn-rootd"
-
 	// VPNServeUnit is the transient systemd unit deskconn-rootd runs as for "desk vpn
 	// serve", VPNConnectUnit the one for "desk vpn connect". Fixed names,
 	// so systemd itself refuses a second instance of either while one is
