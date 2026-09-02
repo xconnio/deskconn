@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"os"
+	"runtime"
 
 	log "github.com/sirupsen/logrus"
 
@@ -180,25 +181,34 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	// on a headless server. Skip registering them there.
 	if d.desktop {
 		maps.Copy(handlers, map[string]xconn.InvocationHandler{
-			ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
-			ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
-			ProcedureScreenLock:           d.lockScreenLockHandler,
-			ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
-			ProcedureMPRISPlayers:         d.handleListPlayers,
-			ProcedureMPRISPlayPause:       d.handlePlayPause,
-			ProcedureMPRISPlay:            d.handlePlay,
-			ProcedureMPRISPause:           d.handlePause,
-			ProcedureMPRISNext:            d.handleNext,
-			ProcedureMPRISPrevious:        d.handlePrevious,
-			ProcedureAudioMute:            d.handleAudioMute,
-			ProcedureAudioUnmute:          d.handleAudioUnmute,
-			ProcedureAudioToggleMute:      d.handleAudioToggleMute,
-			ProcedureAudioIsMuted:         d.handleAudioIsMuted,
-			ProcedureScreenshot:           d.handleScreenshot,
-			ProcedureScreenshotPermission: d.handleScreenShotPermission,
-			ProcedureWallpaperGet:         d.wallpaper.HandleGet,
-			ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
+			ProcedureScreenLock:        d.lockScreenLockHandler,
+			ProcedureScreenIsLocked:    d.lockScreenIsLockedHandler,
+			ProcedureAudioMute:         d.handleAudioMute,
+			ProcedureAudioUnmute:       d.handleAudioUnmute,
+			ProcedureAudioToggleMute:   d.handleAudioToggleMute,
+			ProcedureAudioIsMuted:      d.handleAudioIsMuted,
+			ProcedureWallpaperGet:      d.wallpaper.HandleGet,
+			ProcedureWallpaperChecksum: d.wallpaper.HandleChecksum,
 		})
+
+		// Brightness, MPRIS and screenshot all go through D-Bus (login1,
+		// MPRIS players, xdg-desktop-portal) with no Windows equivalent, so
+		// there's nothing to back them there - skip registering them rather
+		// than exposing procedures that could only ever return an error.
+		if runtime.GOOS != "windows" {
+			maps.Copy(handlers, map[string]xconn.InvocationHandler{
+				ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
+				ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
+				ProcedureMPRISPlayers:         d.handleListPlayers,
+				ProcedureMPRISPlayPause:       d.handlePlayPause,
+				ProcedureMPRISPlay:            d.handlePlay,
+				ProcedureMPRISPause:           d.handlePause,
+				ProcedureMPRISNext:            d.handleNext,
+				ProcedureMPRISPrevious:        d.handlePrevious,
+				ProcedureScreenshot:           d.handleScreenshot,
+				ProcedureScreenshotPermission: d.handleScreenShotPermission,
+			})
+		}
 	}
 
 	for uri, handler := range handlers {

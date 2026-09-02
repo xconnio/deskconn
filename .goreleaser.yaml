@@ -32,6 +32,13 @@ builds:
     goarch:
       - amd64
       - arm64
+    # deskconnd is a background daemon with no interactive console use, launched at logon
+    # with no console attached (Windows Task Scheduler, same as systemd/launchd on the
+    # other platforms). Without -H=windowsgui it's a normal console-subsystem binary, so
+    # Windows allocates and shows a console window for it anyway. deskconn (the CLI) must
+    # keep its console, so this only applies to this build.
+    ldflags:
+      - "{{ if eq .Os \"windows\" }}-H=windowsgui{{ end }}"
 
   - id: deskconn-vpnd
     main: ./cmd/deskconn-vpnd
