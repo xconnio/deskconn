@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -249,6 +250,12 @@ func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey
 		_ = ptmx.Close()
 		return nil, fmt.Errorf("failed to start PTY: %w", err)
 	}
+	// go-pty keeps its own slave fd open for the pty's lifetime; without closing
+	// it here, the master's Read never sees EOF/EIO after the child exits, since
+	// the kernel still sees an open slave reference in this process.
+	if unixPtmx, ok := ptmx.(pty.UnixPty); ok {
+		_ = unixPtmx.Slave().Close()
+	}
 
 	ps := &ptySession{inv: inv, sendKey: sendKey, authID: inv.CallerAuthID()}
 	p.Lock()
@@ -273,7 +280,10 @@ func (p *interactiveShellSession) startOutputReader(ptmx pty.Pty, ps *ptySession
 		delete(p.pids, shellID)
 		p.Unlock()
 		if shouldClose {
-			if err := ptmx.Close(); err != nil {
+			// The slave side was already closed in startPtySession (see comment there),
+			// so this always re-closes it and gets os.ErrClosed back; only the master
+			// side's close result is worth surfacing.
+			if err := ptmx.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 				log.Printf("Error closing PTY: %v", err)
 			}
 		}

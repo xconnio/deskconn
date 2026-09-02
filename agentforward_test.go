@@ -17,7 +17,11 @@ import (
 )
 
 func TestAgentForwardListenFailure(t *testing.T) {
+	// setupDeskconn itself needs a working t.TempDir() (for the index DB dir), so it must
+	// run before TMPDIR/TMP/TEMP are pointed at a nonexistent path below - otherwise
+	// t.TempDir() fails immediately instead of the agent-forward listen call we're testing.
 	_, caller := setupDeskconn(t)
+
 	// os.TempDir() reads $TMPDIR on Unix but %TMP%/%TEMP% (not $TMPDIR) on Windows via
 	// GetTempPath; set all three so the induced failure works on every platform.
 	t.Setenv("TMPDIR", "/nonexistent-deskconn-test-dir-xyz")
@@ -307,6 +311,7 @@ func TestRunAgentForwardReadySignal(t *testing.T) {
 func TestAgentForwardProxyReadySignal(t *testing.T) {
 	deviceCallee, deviceCallerForProxy := setupRouterAndConnectSessions(t)
 	d := deskconn.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(deviceCallee))
 
 	localCallee, cliCaller := setupRouterAndConnectSessions(t)
@@ -375,6 +380,7 @@ func TestAgentForwardMigrationReusesSocket(t *testing.T) {
 	callee, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
 	d := deskconn.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	const sharedAuthID = "same-machine-identity"
