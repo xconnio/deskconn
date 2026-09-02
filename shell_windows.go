@@ -35,6 +35,28 @@ func foregroundPGIDDiffers(_ pty.Pty, _ int) (bool, error) {
 	return false, errors.New("busy detection is not supported on windows")
 }
 
+// disablePTYEcho is a no-op here: echoing in a ConPTY session is done by the console app
+// running inside it (e.g. PowerShell's own line editor), not by a termios-like driver layer
+// the host process can toggle from outside like on *nix -- see startPtySession's doc comment
+// for what this is meant to suppress. exec commands may see a stray echoed control byte in
+// their output on Windows as a result; there's no ConPTY API to prevent it.
+func disablePTYEcho(pty.Pty) {}
+
+// closePtyOnProcessExit closes ptmx once the child has exited. Unlike a Unix
+// pty, ConPTY does not signal EOF on its output pipe when the attached
+// process exits on its own -- a ConPTY, like a real console host, is
+// designed to outlive any single process run inside it -- so
+// startOutputReader's blocked Read would otherwise never return for a
+// one-shot exec'd command, only for an interactive shell the user
+// explicitly exits. Forcing the close here is what makes both behave the
+// same way: the pty's lifetime always ends with its process's. Goes through
+// ps.closePty rather than ptmx.Close() directly since startOutputReader's
+// own cleanup closes the same ptmx too -- double-closing a ConPTY handle is
+// undefined behavior, unlike on *nix.
+func closePtyOnProcessExit(ps *ptySession, ptmx pty.Pty) {
+	ps.closePty(ptmx)
+}
+
 func watchResize(fd int, onResize func()) {
 	width, height, err := term.GetSize(fd)
 	if err != nil {

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -55,11 +54,10 @@ func runDeviceSession(cfgDirectory, host string) bool {
 		log.Fatal(err)
 	}
 
-	machineID, err := os.ReadFile(deskconn.MachineIDPath)
+	machineIDStr, err := deskconn.MachineID()
 	if err != nil {
 		log.Fatalln("failed to read machine-id: ", err)
 	}
-	machineIDStr := strings.TrimSpace(string(machineID))
 
 	// appRouter/appSession serve deskconn.LocalRealm on deskconn.sock:
 	// deskconnd and the CLI both dial in here, and appSession is the

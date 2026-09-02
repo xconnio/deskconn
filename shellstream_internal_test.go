@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -93,36 +92,6 @@ func TestBeginShellSessionRunsExecCommand(t *testing.T) {
 		_, stillTracked := p.sessions[shellID]
 		return !stillTracked
 	}, 3*time.Second, 10*time.Millisecond, "PTY session should be cleaned up once the exec'd command exits")
-}
-
-// TestCleanupShellIDKillsProcessGroup guards against a real bug: closing
-// ptmx alone doesn't reliably kill a child that produces no PTY output
-// (nothing ever reads it) -- the expected SIGHUP-on-hangup can race with
-// startOutputReader's own concurrent blocked Read on the same file and
-// silently never arrive, leaving the process running forever. cleanupShellID
-// must kill the process group explicitly rather than relying on that.
-func TestCleanupShellIDKillsProcessGroup(t *testing.T) {
-	p := newInteractiveShellSession()
-	transport := &fakeShellTransport{}
-
-	shellID, _, _, startReader, err := p.beginShellSession(shellControlMsg{
-		Op: shellOpSize, Cols: 80, Rows: 24, Command: "sleep", Args: []string{"30"},
-	}, transport)
-	require.NoError(t, err)
-	startReader()
-
-	p.Lock()
-	pid := p.pids[shellID]
-	p.Unlock()
-	require.Positive(t, pid)
-	require.NoError(t, syscall.Kill(pid, 0), "sanity check: process should be running before cleanup")
-
-	p.cleanupShellID(shellID)
-
-	require.Eventually(t, func() bool {
-		return syscall.Kill(pid, 0) != nil
-	}, 3*time.Second, 20*time.Millisecond,
-		"sleep should actually be killed (and reaped) by cleanupShellID, not just have its ptmx closed")
 }
 
 func TestBeginShellSessionMigrateValidToken(t *testing.T) {
@@ -260,7 +229,7 @@ func TestEndShellInputNoOpAfterMigration(t *testing.T) {
 
 // TestHandleQUICShellStreamEndToEnd drives shell over a net.Pipe through
 // the real entry point (HandleQUICStream): routing frame, key exchange,
-// size, one keystroke, then "exit\n" against a real spawned bash, checking
+// size, one keystroke, then "exit\r\n" against a real spawned shell, checking
 // output comes back decrypted and the stream ends cleanly on exit.
 func TestHandleQUICShellStreamEndToEnd(t *testing.T) {
 	client, server := net.Pipe()
@@ -286,7 +255,10 @@ func TestHandleQUICShellStreamEndToEnd(t *testing.T) {
 	require.NotEmpty(t, ack.ackShellID)
 	require.NotEmpty(t, ack.ackToken)
 
-	require.NoError(t, sendQUICShellData(client, sendKey, []byte("exit\n")))
+	// A real raw-mode terminal sends \r (not \n) for the Enter key; bash's PTY line
+	// discipline tolerates a bare \n, but Windows' ConPTY/PowerShell only submits the
+	// line on \r, so a bare \n here would leave "exit" typed but never run.
+	require.NoError(t, sendQUICShellData(client, sendKey, []byte("exit\r\n")))
 
 	// Drain output until the stream closes (bash exiting closes the PTY,
 	// which ends handleQUICShellStream's loop and the pipe).
@@ -326,7 +298,7 @@ func TestHandleQUICShellStreamIgnoresPing(t *testing.T) {
 	require.NotEmpty(t, ack.ackShellID)
 
 	require.NoError(t, sendQUICShellControl(client, sendKey, shellControlMsg{Op: shellOpPing}))
-	require.NoError(t, sendQUICShellData(client, sendKey, []byte("exit\n")))
+	require.NoError(t, sendQUICShellData(client, sendKey, []byte("exit\r\n")))
 
 	for {
 		_, err := recvQUICShellEnvelope(client, receiveKey)

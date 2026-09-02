@@ -23,6 +23,17 @@ func newVPNServer() *vpnServer { return &vpnServer{} }
 // never arms, see ProxyVPNStartHandler below).
 const VPNChannelLabel = "vpn"
 
+// VPNFrameOpen and VPNOpenFrame mirror iptunnel.go's declarations of the same name -- xlink
+// (cross-platform) needs these to classify an incoming channel as VPN-vs-file-stream (see
+// cmd/xlink's handleAuxDataChannel) regardless of which platform it itself runs on, even though
+// actually serving a VPN tunnel still requires the peer being dialed to be Linux.
+const VPNFrameOpen = "vpn-open"
+
+// VPNOpenFrame is the client's first message on a VPN data channel.
+type VPNOpenFrame struct {
+	Type string `json:"type"`
+}
+
 // handleVPNChannel mirrors iptunnel.go's method of the same name: streamrelay.go calls this
 // unconditionally on a VPNChannelLabel match, which never happens on this platform, but the
 // method still needs to exist to compile. Never actually invoked.

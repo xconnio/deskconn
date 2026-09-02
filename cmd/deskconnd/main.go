@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -161,7 +160,7 @@ func runXlinkSession(ctx context.Context, cfgDirectory string, deskconnApis *des
 		default:
 		}
 
-		session, err := xconn.ConnectAnonymous(ctx, fmt.Sprintf("unix://%s", localSockPath), deskconn.LocalRealm)
+		session, err := xconn.ConnectAnonymous(ctx, deskconn.UnixSocketURI(localSockPath), deskconn.LocalRealm)
 		if err != nil {
 			log.Printf("xlink session: failed to connect to xlink, will retry in %v: %v", retryDelay, err)
 			retryDelay = min(retryDelay*2, maxDelay)

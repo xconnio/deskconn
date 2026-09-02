@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -65,6 +66,26 @@ func CfgDirectory() (string, error) {
 
 	_ = os.MkdirAll(cfgDirectory, 0755)
 	return cfgDirectory, nil
+}
+
+// UnixSocketURI builds a "unix://" URI for a local unix-domain-socket path, for xconn.Connect*
+// functions -- which parse the URI with net/url and dial its .Path field directly.
+//
+// On Windows, net/url unconditionally prepends "/" to a hierarchical URI's path, and Windows'
+// AF_UNIX implementation rejects that leading slash once it's followed by a drive letter (e.g.
+// "/C:/Users/..."), regardless of which slash direction the rest of the path uses. Stripping
+// the drive letter and converting to forward slashes works around this: Windows resolves a
+// driveless absolute path against the dialing process's current drive, which is always correct
+// here since every caller builds path from CfgDirectory (the current user's own profile
+// directory) - always on the same drive as whatever deskconn process is doing the dialing.
+func UnixSocketURI(path string) string {
+	if runtime.GOOS == "windows" {
+		if len(path) >= 2 && path[1] == ':' {
+			path = path[2:]
+		}
+		path = strings.ReplaceAll(path, `\`, "/")
+	}
+	return "unix://" + path
 }
 
 func DevicesFromCfg(cfgDirectory string) ([]Device, error) {

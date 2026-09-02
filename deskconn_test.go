@@ -49,6 +49,7 @@ func TestBrightnessGetSet(t *testing.T) {
 	audio := deskconn.NewAudio()
 	defer audio.Close()
 	d := deskconn.NewDeskconn(screen, mpris, audio, true, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(deskconn.ProcedureScreenBrightnessGet).Do()
@@ -91,6 +92,7 @@ func TestDeviceInfoIncludesBattery(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	d := deskconn.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(deskconn.ProcedureDeviceInfo).Do()
@@ -110,6 +112,7 @@ func TestDeviceIsDesktop(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	d := deskconn.NewDeskconn(nil, nil, nil, true, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(deskconn.ProcedureDeviceIsDesktop).Do()
@@ -124,6 +127,7 @@ func TestDeviceIsDesktopFalseOnServer(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	d := deskconn.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(deskconn.ProcedureDeviceIsDesktop).Do()

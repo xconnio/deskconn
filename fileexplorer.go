@@ -255,8 +255,8 @@ func resolveBrowsePath(homeDir, pathArg string) (string, error) {
 		return filepath.Clean(homeDir), nil
 	}
 
-	if filepath.IsAbs(pathArg) {
-		return filepath.Clean(pathArg), nil
+	if isRootedPath(pathArg) {
+		return cleanRootedPath(pathArg), nil
 	}
 
 	resolvedPath := filepath.Clean(filepath.Join(homeDir, pathArg))
@@ -461,15 +461,9 @@ func resolveOperationPath(homeDir, pathArg string) (string, error) {
 		return "", errors.New("path cannot be empty")
 	}
 
-	// filepath.IsAbs requires a drive letter on Windows, so a POSIX-style rooted path like
-	// "/etc/hosts" doesn't count as absolute there - without this, it would silently fall
-	// through to the homeDir-relative branch below instead of being treated as escaping home.
-	isRooted := filepath.IsAbs(pathArg) ||
-		strings.HasPrefix(pathArg, "/") || strings.HasPrefix(pathArg, `\`)
-
 	var resolved string
-	if isRooted {
-		resolved = filepath.Clean(pathArg)
+	if isRootedPath(pathArg) {
+		resolved = cleanRootedPath(pathArg)
 	} else {
 		resolved = filepath.Clean(filepath.Join(homeDir, pathArg))
 	}

@@ -167,7 +167,7 @@ func runAILs(cfgDirectory, machine, mode string) error {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
 		localSession, err := xconn.ConnectAnonymous(context.Background(),
-			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
+			deskconn.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock")), deskconn.LocalRealm)
 		if err != nil {
 			return fmt.Errorf("could not reach local daemon: %w", err)
 		}
@@ -229,7 +229,7 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
 		localSession, lErr := xconn.ConnectAnonymous(context.Background(),
-			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
+			deskconn.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock")), deskconn.LocalRealm)
 		if lErr != nil {
 			return fmt.Errorf("could not reach local daemon: %w", lErr)
 		}
