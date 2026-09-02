@@ -1,4 +1,4 @@
-package deskconn
+package common
 
 import (
 	"golang.org/x/sys/windows/registry"

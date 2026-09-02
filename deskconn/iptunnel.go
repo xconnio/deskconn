@@ -1,3 +1,5 @@
+//go:build linux
+
 package deskconn
 
 import (
@@ -67,7 +69,7 @@ func usesResolvedStub() bool {
 // closes it), since session may be shared with other features.
 //
 // All privileged networking goes through helper (a vpnd
-// connection, see iptun.LaunchHelper) rather than being done directly, so
+// connection, see LaunchVPNHelper) rather than being done directly, so
 // neither the CLI nor xlink needs any capability grant of its own.
 //
 // onReady, if non-nil, is called once the remote end confirms the tunnel
