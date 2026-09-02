@@ -22,18 +22,38 @@ func setupDeskconn(t *testing.T) (*xconn.Session, *xconn.Session) {
 	return callee, caller
 }
 
+// singleChunkSender returns a ProgressSender that sends payload as the one and only
+// data-bearing chunk and then blocks indefinitely instead of following up with a
+// final (closing) chunk. The real client never sends its closing chunk until it has
+// received a response to the previous one (see StartInteractiveCommand's
+// keyExchangeReady gate), so a handler error on the first chunk always reaches the
+// caller before any second message exists to race it. Firing a second chunk here with
+// no such gate would race the interim error against the server's cleanup-on-close
+// path, which itself resolves the call successfully when no session exists yet -
+// flakily flipping the assertion below depending on which handler goroutine the
+// server happens to schedule first. Blocking keeps the call fully determined by the
+// first chunk's response; t.Cleanup releases the goroutine once the test is done.
+func singleChunkSender(t *testing.T, payload []byte) xconn.ProgressSender {
+	t.Helper()
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+
+	sent := false
+	return func(ctx context.Context) *xconn.Progress {
+		if !sent {
+			sent = true
+			return xconn.NewProgress(payload)
+		}
+		<-block
+		return xconn.NewFinalProgress()
+	}
+}
+
 func TestShellHandlerMissingKey(t *testing.T) {
 	_, caller := setupDeskconn(t)
 
-	sent := false
 	callResp := caller.Call(deskconn.ProcedureShell).
-		ProgressSender(func(ctx context.Context) *xconn.Progress {
-			if !sent {
-				sent = true
-				return xconn.NewProgress([]byte("payload-without-key-marker"))
-			}
-			return xconn.NewFinalProgress()
-		}).Do()
+		ProgressSender(singleChunkSender(t, []byte("payload-without-key-marker"))).Do()
 
 	require.ErrorContains(t, callResp.Err, "missing encryption key")
 }
@@ -41,15 +61,8 @@ func TestShellHandlerMissingKey(t *testing.T) {
 func TestExecHandlerMissingKey(t *testing.T) {
 	_, caller := setupDeskconn(t)
 
-	sent := false
 	callResp := caller.Call(deskconn.ProcedureExec).
-		ProgressSender(func(ctx context.Context) *xconn.Progress {
-			if !sent {
-				sent = true
-				return xconn.NewProgress([]byte("payload-without-key-marker"))
-			}
-			return xconn.NewFinalProgress()
-		}).Do()
+		ProgressSender(singleChunkSender(t, []byte("payload-without-key-marker"))).Do()
 
 	require.ErrorContains(t, callResp.Err, "missing encryption key")
 }
