@@ -38,7 +38,11 @@ func (anyKeyAuthenticator) Authenticate(request auth.Request) (auth.Response, er
 // stream proxy in front of that. It returns the config directory to dial the proxy in.
 func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconnd.ClientSessions) {
 	t.Helper()
-	dir := t.TempDir()
+	// Short prefix, not t.TempDir(): unix socket paths are length-limited, and t.TempDir()
+	// embeds the full (often long) test name.
+	dir, err := os.MkdirTemp("", "streamproxy")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	// Device: deskconnd's relay listener, fed by xlink's QUIC-stream relay.
 	relaySock := filepath.Join(dir, "xlink-streams.sock")
@@ -55,7 +59,8 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 		Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix", AllowCall: true}},
 	}}}))
 	t.Cleanup(router.Close)
-	listener, err := common.ListenYamux("unix://"+filepath.Join(dir, "device.sock"), router, anyKeyAuthenticator{})
+	listener, err := common.ListenYamux(common.UnixSocketURI(filepath.Join(dir, "device.sock")), router,
+		anyKeyAuthenticator{})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
 	common.SafeGo(func() {
@@ -71,7 +76,7 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, err := common.ConnectYamux(ctx, "unix://"+filepath.Join(dir, "device.sock"), streamProxyTestRealm,
+	conn, err := common.ConnectYamux(ctx, common.UnixSocketURI(filepath.Join(dir, "device.sock")), streamProxyTestRealm,
 		authenticator)
 	require.NoError(t, err)
 

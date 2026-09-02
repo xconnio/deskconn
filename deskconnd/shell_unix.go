@@ -60,3 +60,10 @@ func foregroundPGIDDiffers(ptmx pty.Pty, pid int) (bool, error) {
 
 	return fgpgid != shellPgid, nil
 }
+
+// closePtyOnProcessExit is a no-op here: a Unix pty's master Read already
+// returns EOF/EIO once the process exits and its slave-side fd references
+// are gone (see startPtySession's Slave().Close()), so startOutputReader
+// unblocks on its own without this. See shell_windows.go for why ConPTY
+// needs the explicit close instead.
+func closePtyOnProcessExit(*ptySession, pty.Pty) {}

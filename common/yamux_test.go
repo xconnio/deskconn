@@ -76,7 +76,7 @@ func connectYamux(listener *common.YamuxListener, privateKey string) (*common.De
 	}
 	u := "tcp://" + listener.Addr().String()
 	if listener.Addr().Network() == "unix" {
-		u = "unix://" + listener.Addr().String()
+		u = common.UnixSocketURI(listener.Addr().String())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -131,7 +131,7 @@ func TestYamuxTCP(t *testing.T) {
 func TestYamuxUnixSocket(t *testing.T) {
 	pub, priv, err := auth.GenerateCryptoSignKeyPair()
 	require.NoError(t, err)
-	listener := startYamuxServer(t, "unix://"+filepath.Join(t.TempDir(), "d.sock"), pub)
+	listener := startYamuxServer(t, common.UnixSocketURI(filepath.Join(t.TempDir(), "d.sock")), pub)
 
 	conn, err := connectYamux(listener, priv)
 	require.NoError(t, err)

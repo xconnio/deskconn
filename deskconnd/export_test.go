@@ -2,9 +2,10 @@ package deskconnd
 
 import (
 	"net"
-	"os"
 	"sync"
 	"time"
+
+	pty "github.com/aymanbagabas/go-pty"
 
 	"github.com/xconnio/deskconn/common"
 )
@@ -43,7 +44,7 @@ type InteractiveShellSession = interactiveShellSession
 var NewInteractiveShellSession = newInteractiveShellSession
 
 func (p *interactiveShellSession) BeginShellSession(ctrl common.ShellControlMsg, transport shellTransport) (
-	shellID, migrationToken string, ptmx *os.File, startReader func(), err error) {
+	shellID, migrationToken string, ptmx pty.Pty, startReader func(), err error) {
 	return p.beginShellSession(ctrl, transport)
 }
 

@@ -8,11 +8,12 @@ import (
 	"github.com/grandcat/zeroconf"
 	"github.com/stretchr/testify/require"
 
+	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/xlink"
 )
 
 func TestAdvertiseService(t *testing.T) {
-	machineID, err := deskconn.MachineID()
+	machineID, err := common.MachineID()
 	require.NoError(t, err)
 	require.NotEmpty(t, machineID)
 

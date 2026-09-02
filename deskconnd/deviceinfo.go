@@ -1,7 +1,6 @@
 package deskconnd
 
 import (
-	"os"
 	"time"
 
 	"github.com/shirou/gopsutil/cpu"
@@ -103,7 +102,7 @@ func GetDeviceInfo() (*common.DeviceInfo, error) {
 		return nil, err
 	}
 
-	swapStat, err := mem.SwapMemory()
+	swapStat, err := swapMemory()
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +167,9 @@ func GetDeviceInfo() (*common.DeviceInfo, error) {
 	return deviceInfo, nil
 }
 
-// physicalInterfaces returns a set of interface names that correspond to real hardware (ethernet, WiFi).
+// physicalInterfaces returns a set of interface names that correspond to real hardware (ethernet,
+// WiFi). What actually distinguishes "real hardware" from a virtual/pseudo adapter is OS-specific
+// - see isPhysicalInterface in network_linux.go, network_windows.go and network_darwin.go.
 func physicalInterfaces() (map[string]struct{}, error) {
 	ifaces, err := psnet.Interfaces()
 	if err != nil {
@@ -179,7 +180,7 @@ func physicalInterfaces() (map[string]struct{}, error) {
 		if iface.HardwareAddr == "" {
 			continue
 		}
-		if _, err := os.Lstat("/sys/class/net/" + iface.Name + "/device"); err == nil {
+		if isPhysicalInterface(iface) {
 			names[iface.Name] = struct{}{}
 		}
 	}
