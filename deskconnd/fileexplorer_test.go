@@ -399,6 +399,7 @@ func TestHandleFileEditRPC(t *testing.T) {
 	require.NoError(t, err)
 
 	d := deskconnd.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	dir := tempDirInHome(t)

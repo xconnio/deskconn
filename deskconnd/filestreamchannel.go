@@ -164,12 +164,23 @@ func serveFileStreamSession(channel common.MessageChannel, req common.FSRequest,
 // FSResponse.Err and treated as handled.
 func serveWebRTCReadOnce(channel common.MessageChannel, closed, sendReady <-chan struct{}, req common.FSRequest,
 	sendKey []byte) error {
-	_, basePath, err := remoteRootAndBase(req.Path)
+	resolvedRoot, basePath, err := remoteRootAndBase(req.Path)
 	if err != nil {
 		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
 		return nil
 	}
-	absPath := filepath.Join(basePath, filepath.FromSlash(req.RelPath))
+
+	// A single-file root (as opposed to a directory transfer) has exactly one possible
+	// source: resolvedRoot itself. Joining basePath with RelPath would only be correct if
+	// RelPath is the root's own relative name (e.g. "video.mp4", per BuildManifest's
+	// convention) -- a caller that already knows the file it wants and skips the list step
+	// (playing a file directly, say) may instead send RelPath equal to the full remote path,
+	// which would otherwise double up onto basePath. Matches serveWebRTCWriteOnce's use of
+	// ResolveDestPath for the same single-file case.
+	absPath := resolvedRoot
+	if common.IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint) {
+		absPath = filepath.Join(basePath, filepath.FromSlash(req.RelPath))
+	}
 
 	f, err := os.Open(absPath) //nolint:gosec
 	if err != nil {

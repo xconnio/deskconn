@@ -178,7 +178,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
 		localSession, err := xconn.ConnectAnonymous(context.Background(),
-			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), common.LocalRealm)
+			common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock")), common.LocalRealm)
 		if err != nil {
 			return fmt.Errorf("could not reach local daemon: %w", err)
 		}
@@ -244,7 +244,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
 		localSession, lErr := xconn.ConnectAnonymous(context.Background(),
-			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), common.LocalRealm)
+			common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock")), common.LocalRealm)
 		if lErr != nil {
 			return fmt.Errorf("could not reach local daemon: %w", lErr)
 		}

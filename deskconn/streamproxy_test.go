@@ -58,7 +58,11 @@ func (anyKeyAuthenticator) Authenticate(request auth.Request) (auth.Response, er
 // stream proxy in front of that. It returns the config directory to dial the proxy in.
 func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconnd.ClientSessions) {
 	t.Helper()
-	dir := t.TempDir()
+	// Short prefix, not t.TempDir(): unix socket paths are length-limited, and t.TempDir()
+	// embeds the full (often long) test name.
+	dir, err := os.MkdirTemp("", "streamproxy")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	// Device: deskconnd's relay listener, fed by xlink's QUIC-stream relay.
 	relaySock := filepath.Join(dir, "xlink-streams.sock")
