@@ -15,7 +15,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
-	"github.com/xconnio/deskconn/iptun"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 	xconnauth "github.com/xconnio/xconn-go/auth"
@@ -602,46 +601,6 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 		}
 
 		return xconn.NewInvocationResult(callResp.Args()...)
-	}
-}
-
-// ProxyVPNStartHandler proxies "deskconn vpn start": it arms d to accept
-// inbound VPN tunnel requests using helperSocket, a deskconn-vpnd socket the
-// caller already started.
-//
-// Returns as soon as arming succeeds, without blocking, so the CLI can hand
-// off immediately. No tunnel can start at all until some caller has armed
-// serving this way -- this feature's only gate today, in place of a real
-// consent prompt.
-func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
-	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		helperSocket, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		helper, err := iptun.DialClient(helperSocket)
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-
-		if err := d.ArmVPNServing(helper); err != nil {
-			_ = helper.Close()
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-		return xconn.NewInvocationResult()
-	}
-}
-
-// ProxyVPNStopHandler proxies "deskconn vpn stop": disarms serving, tearing down any active
-// tunnel and closing the helper connection so deskconn-vpnd unwinds and exits. Meant to run as
-// an independent command from "deskconn vpn start", not necessarily the same terminal.
-func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
-	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-		if !d.DisarmVPNServing() {
-			return xconn.NewInvocationError(ErrOperationFailed, "not currently serving")
-		}
-		return xconn.NewInvocationResult()
 	}
 }
 
