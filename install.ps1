@@ -3,21 +3,10 @@
 $ErrorActionPreference = 'Stop'
 
 $Repo        = 'xconnio/deskconn'
-$ServiceName = 'deskconnd'
+$ServiceName = 'deskconn-userd'
 $InstallDir  = "$env:LOCALAPPDATA\deskconn"
 $BinDir      = "$InstallDir\bin"
 $ExecDir     = "$InstallDir\exec"
-
-function Test-Admin {
-    $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-if (-not (Test-Admin)) {
-    Write-Error "This installer must be run from an elevated (Administrator) PowerShell prompt, because it registers a Windows service."
-    exit 1
-}
 
 New-Item -ItemType Directory -Force -Path $BinDir, $ExecDir | Out-Null
 
@@ -58,23 +47,27 @@ try {
     Write-Host "Extracting archive..."
     Expand-Archive -Path $ArchivePath -DestinationPath $TmpDir -Force
 
-    $DeskExe      = Join-Path $TmpDir 'desk.exe'
-    $DeskconndExe = Join-Path $TmpDir 'deskconnd.exe'
-    if (-not (Test-Path $DeskExe) -or -not (Test-Path $DeskconndExe)) {
-        Write-Error "Release archive does not contain desk.exe and deskconnd.exe."
+    # One multicall binary, run by how it's invoked: with no args it's the CLI, with
+    # "deskconn-userd" as its first argument it's the user daemon (see
+    # cmd/deskconn/rootd.go's multicallArgs). Windows has no unprivileged symlinks, so
+    # unlike Linux/macOS this passes the name as an argument instead of renaming a copy.
+    $DeskconnExe = Join-Path $TmpDir 'deskconn.exe'
+    if (-not (Test-Path $DeskconnExe)) {
+        Write-Error "Release archive does not contain the deskconn binary."
         exit 1
     }
 
     # 'desk' is reserved by Windows for Display Settings (desk.cpl) and can't be safely
     # overridden, so the CLI is installed here as 'deskconn.exe' instead - never as
-    # 'desk.exe', which would shadow it on PATH.
-    Copy-Item $DeskExe (Join-Path $BinDir 'deskconn.exe') -Force
-    Copy-Item $DeskconndExe (Join-Path $ExecDir 'deskconnd.exe') -Force
+    # 'desk.exe', which would shadow it on PATH. The daemon runs its own copy from
+    # ExecDir rather than depending on PATH.
+    Copy-Item $DeskconnExe (Join-Path $BinDir 'deskconn.exe') -Force
+    Copy-Item $DeskconnExe (Join-Path $ExecDir 'deskconn.exe') -Force
 } finally {
     Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
 }
 
-Write-Host "Installed desk $Version"
+Write-Host "Installed deskconn $Version"
 Write-Host "Use 'deskconn' on Windows - 'desk' is reserved by Windows for Display Settings (desk.cpl) and can't be safely overridden."
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -89,45 +82,33 @@ if ($pathEntries -notcontains $BinDir) {
     Write-Host "  Restart your terminal for the PATH change to take effect."
 }
 
-function Get-Nssm {
-    $nssmCmd = Get-Command nssm.exe -ErrorAction SilentlyContinue
-    if ($nssmCmd) { return $nssmCmd.Source }
+# The user daemon needs the installing user's own session (HKCU, LockWorkStation, etc.),
+# not a system-wide account, so it runs as a per-user scheduled task that starts at
+# logon - the Windows equivalent of "systemctl --user" on Linux and a launchd
+# LaunchAgent on macOS, rather than a LocalSystem Windows service.
+Write-Host "Setting up scheduled task for $ServiceName..."
 
-    if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
-        Write-Host "Installing Chocolatey..."
-        Set-ExecutionPolicy Bypass -Scope Process -Force
-        [System.Net.ServicePointManager]::SecurityProtocol = `
-            [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        $env:Path = "$env:Path;C:\ProgramData\chocolatey\bin"
-    }
+$UserId = "$env:USERDOMAIN\$env:USERNAME"
 
-    Write-Host "Installing NSSM via Chocolatey..."
-    choco install nssm -y | Out-Null
+# "deskconn-userd" as the first argument selects the user-daemon role (see multicallArgs).
+$Action = New-ScheduledTaskAction -Execute (Join-Path $ExecDir 'deskconn.exe') `
+    -Argument 'deskconn-userd' -WorkingDirectory $ExecDir
+$Trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserId
+$Principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Limited
+$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-    $nssmCmd = Get-Command nssm.exe -ErrorAction SilentlyContinue
-    if (-not $nssmCmd) {
-        Write-Error "nssm.exe not found after installation."
-        exit 1
-    }
-    return $nssmCmd.Source
+if (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue) {
+    Write-Host "Task exists. Stopping..."
+    Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
 }
 
-$Nssm = Get-Nssm
+Register-ScheduledTask -TaskName $ServiceName -Action $Action -Trigger $Trigger `
+    -Principal $Principal -Settings $Settings -Force | Out-Null
 
-Write-Host "Setting up Windows service for $ServiceName..."
-& $Nssm status $ServiceName *> $null
-$serviceExists = ($LASTEXITCODE -eq 0)
+# The trigger only fires on future logons; start it now so the daemon is running
+# immediately after install, in this same logon session.
+Start-ScheduledTask -TaskName $ServiceName
 
-if ($serviceExists) {
-    Write-Host "Service exists. Restarting..."
-    & $Nssm restart $ServiceName | Out-Null
-} else {
-    & $Nssm install $ServiceName (Join-Path $ExecDir 'deskconnd.exe') | Out-Null
-    & $Nssm set $ServiceName AppDirectory $ExecDir | Out-Null
-    & $Nssm set $ServiceName Start SERVICE_AUTO_START | Out-Null
-    & $Nssm set $ServiceName AppExit Default Restart | Out-Null
-    & $Nssm start $ServiceName | Out-Null
-}
-
-Write-Host "Windows service $ServiceName installed and started!"
+Write-Host "Scheduled task $ServiceName installed and started - deskconn-userd will run in your session at logon!"

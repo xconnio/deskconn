@@ -19,6 +19,10 @@ builds:
     goarch:
       - amd64
       - arm64
+    # No -H=windowsgui here: deskconn is now a multicall binary (see cmd/deskconn), so the
+    # same build also runs as the CLI, which needs its console. Hiding deskconn-userd's
+    # console on Windows needs a runtime fix (e.g. detaching from the console only when
+    # invoked as deskconn-userd/-rootd), not a build-wide linker flag.
 
 archives:
   - id: release-bundle
