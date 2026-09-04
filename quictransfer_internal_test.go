@@ -26,13 +26,22 @@ func newQUICTestStream(t *testing.T) net.Conn {
 	return client
 }
 
+// sendReq writes req as a real client would: a leading routingFrame (which
+// HandleQUICStream always discards -- see its doc comment) followed by the
+// real request.
+func sendReq(t *testing.T, conn net.Conn, req fsRequest) {
+	t.Helper()
+	require.NoError(t, writeMsg(conn, routingFrame{Op: req.Op, Path: req.Path, Recursive: req.Recursive}))
+	require.NoError(t, writeMsg(conn, req))
+}
+
 func TestQUICHandleListSingleFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "hello.txt")
 	require.NoError(t, os.WriteFile(filePath, []byte("hello world"), 0644))
 
 	client := newQUICTestStream(t)
-	require.NoError(t, writeMsg(client, fsRequest{Op: fsOpList, Path: filePath}))
+	sendReq(t, client, fsRequest{Op: fsOpList, Path: filePath})
 
 	var resp fsResponse
 	require.NoError(t, readMsg(client, &resp))
@@ -50,7 +59,7 @@ func TestQUICHandleListDirRecursive(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("aaa"), 0644))
 
 	client := newQUICTestStream(t)
-	require.NoError(t, writeMsg(client, fsRequest{Op: fsOpList, Path: srcDir, Recursive: true}))
+	sendReq(t, client, fsRequest{Op: fsOpList, Path: srcDir, Recursive: true})
 
 	var resp fsResponse
 	require.NoError(t, readMsg(client, &resp))
@@ -62,7 +71,7 @@ func TestQUICHandleListDirWithoutRecursiveFails(t *testing.T) {
 	dir := t.TempDir()
 
 	client := newQUICTestStream(t)
-	require.NoError(t, writeMsg(client, fsRequest{Op: fsOpList, Path: dir}))
+	sendReq(t, client, fsRequest{Op: fsOpList, Path: dir})
 
 	var resp fsResponse
 	require.NoError(t, readMsg(client, &resp))
@@ -72,7 +81,7 @@ func TestQUICHandleListDirWithoutRecursiveFails(t *testing.T) {
 
 func TestQUICHandleListNonExistent(t *testing.T) {
 	client := newQUICTestStream(t)
-	require.NoError(t, writeMsg(client, fsRequest{Op: fsOpList, Path: filepath.Join(t.TempDir(), "nope")}))
+	sendReq(t, client, fsRequest{Op: fsOpList, Path: filepath.Join(t.TempDir(), "nope")})
 
 	var resp fsResponse
 	require.NoError(t, readMsg(client, &resp))
@@ -88,7 +97,7 @@ func TestQUICHandleReadRange(t *testing.T) {
 
 	client := newQUICTestStream(t)
 	req := fsRequest{Op: fsOpRead, Path: filePath, RelPath: "data.bin", Offset: 3, Length: 5}
-	require.NoError(t, writeMsg(client, req))
+	sendReq(t, client, req)
 
 	var resp fsResponse
 	require.NoError(t, readMsg(client, &resp))
@@ -105,7 +114,7 @@ func TestQUICHandleReadNonExistentFile(t *testing.T) {
 
 	client := newQUICTestStream(t)
 	req := fsRequest{Op: fsOpRead, Path: dir, RelPath: "missing.txt", Offset: 0, Length: 1}
-	require.NoError(t, writeMsg(client, req))
+	sendReq(t, client, req)
 
 	var resp fsResponse
 	require.NoError(t, readMsg(client, &resp))
@@ -122,9 +131,9 @@ func TestQUICHandleInitAndWrite(t *testing.T) {
 	}
 
 	initClient := newQUICTestStream(t)
-	require.NoError(t, writeMsg(initClient, fsRequest{
+	sendReq(t, initClient, fsRequest{
 		Op: fsOpInit, Path: dst, Entries: entries, TargetIsDirHint: true,
-	}))
+	})
 	var initResp fsResponse
 	require.NoError(t, readMsg(initClient, &initResp))
 	require.True(t, initResp.OK)
@@ -137,7 +146,7 @@ func TestQUICHandleInitAndWrite(t *testing.T) {
 	writeReq := fsRequest{
 		Op: fsOpWrite, Path: dst, RelPath: testFileName, Offset: 2, Length: 5, TargetIsDirHint: true,
 	}
-	require.NoError(t, writeMsg(writeClient, writeReq))
+	sendReq(t, writeClient, writeReq)
 
 	var ack fsResponse
 	require.NoError(t, readMsg(writeClient, &ack))
@@ -163,7 +172,7 @@ func TestQUICHandleWriteBeforeInitFails(t *testing.T) {
 
 	client := newQUICTestStream(t)
 	req := fsRequest{Op: fsOpWrite, Path: dst, RelPath: testFileName, Offset: 0, Length: 5, TargetIsDirHint: true}
-	require.NoError(t, writeMsg(client, req))
+	sendReq(t, client, req)
 
 	var resp fsResponse
 	require.NoError(t, readMsg(client, &resp))
@@ -180,7 +189,7 @@ func TestQUICHandleInitSingleFileTarget(t *testing.T) {
 	}
 
 	client := newQUICTestStream(t)
-	require.NoError(t, writeMsg(client, fsRequest{Op: fsOpInit, Path: dst, Entries: entries}))
+	sendReq(t, client, fsRequest{Op: fsOpInit, Path: dst, Entries: entries})
 
 	var resp fsResponse
 	require.NoError(t, readMsg(client, &resp))

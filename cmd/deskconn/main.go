@@ -447,8 +447,8 @@ func main() {
 					return
 				}
 				defer quicSess.Close()
-				if err := deskconn.UploadFilesQUIC(quicSess, quicConnector(realm, cfgDirectory), *cpSrc, dstPath,
-					*cpRecursive, *cpStreams); err != nil {
+				if err := deskconn.UploadFilesQUIC(quicSess, quicConnector(realm, cfgDirectory), realm, *cpSrc,
+					dstPath, *cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			case ModeP2P:
@@ -472,7 +472,7 @@ func main() {
 				}
 				defer func() { _ = relaySess.Close() }()
 				if err := deskconn.UploadFilesQUIC(relaySess, deskconn.ProxyQUICConnector(relaySocketPath, realm),
-					*cpSrc, dstPath, *cpRecursive, *cpStreams); err != nil {
+					realm, *cpSrc, dstPath, *cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			}
@@ -491,8 +491,8 @@ func main() {
 					return
 				}
 				defer quicSess.Close()
-				if err := deskconn.DownloadFilesQUIC(quicSess, quicConnector(realm, cfgDirectory), srcPath, *cpDst,
-					*cpRecursive, *cpStreams); err != nil {
+				if err := deskconn.DownloadFilesQUIC(quicSess, quicConnector(realm, cfgDirectory), realm, srcPath,
+					*cpDst, *cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			case ModeP2P:
@@ -516,7 +516,7 @@ func main() {
 				}
 				defer func() { _ = relaySess.Close() }()
 				if err := deskconn.DownloadFilesQUIC(relaySess, deskconn.ProxyQUICConnector(relaySocketPath, realm),
-					srcPath, *cpDst, *cpRecursive, *cpStreams); err != nil {
+					realm, srcPath, *cpDst, *cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			}

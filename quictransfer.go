@@ -59,6 +59,24 @@ func (d *Deskconn) AcceptQUICStreams(sess *xconn.QUICSession) {
 	}
 }
 
+// routingFrame is the exact shape deskconn-router's connBroker expects as
+// the first message on any client-opened raw QUIC stream, so it can look up
+// the target device's connection by realm and relay the stream to it. It
+// re-encodes and forwards only these four fields to the device -- anything
+// else on the real request (RelPath, Offset, Length, Entries, ...) would be
+// silently dropped if sent as that first message. So every freshly opened
+// stream sends this frame first (see quicRequest/quicReadWorker/
+// quicWriteWorker), then the real fsRequest as a second message once the
+// router has bridged the stream straight through to the device -- which is
+// why HandleQUICStream always discards one leading message before reading
+// the real request.
+type routingFrame struct {
+	Realm     string `json:"realm"`
+	Op        fsOp   `json:"op"`
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive,omitempty"`
+}
+
 // HandleQUICStream handles a single raw QUIC stream carrying one or more
 // file-transfer requests -- list/init are one-shot control requests, sent
 // once per whole transfer; read/write are handed to quicServeSession, which
@@ -70,6 +88,13 @@ func (d *Deskconn) AcceptQUICStreams(sess *xconn.QUICSession) {
 // protocol and the parallel chunk-worker logic in filetransfer.go.
 func (d *Deskconn) HandleQUICStream(_ xconn.BaseSession, stream net.Conn) {
 	defer stream.Close()
+
+	// Leading routingFrame, present on every stream once it's reached here
+	// via the router -- see routingFrame's doc comment. Discarded.
+	var discard fsRequest
+	if err := readMsg(stream, &discard); err != nil {
+		return
+	}
 
 	var req fsRequest
 	if err := readMsg(stream, &req); err != nil {
@@ -236,13 +261,17 @@ type QUICStreamCloser interface {
 	Close() error
 }
 
-func quicRequest(sess xconn.MultiplexedSession, req fsRequest) (*fsResponse, error) {
+func quicRequest(sess xconn.MultiplexedSession, realm string, req fsRequest) (*fsResponse, error) {
 	stream, err := sess.OpenStream()
 	if err != nil {
 		return nil, err
 	}
 	defer stream.Close()
 
+	route := routingFrame{Realm: realm, Op: req.Op, Path: req.Path, Recursive: req.Recursive}
+	if err := writeMsg(stream, route); err != nil {
+		return nil, err
+	}
 	if err := writeMsg(stream, req); err != nil {
 		return nil, err
 	}
@@ -262,13 +291,17 @@ func quicRequest(sess xconn.MultiplexedSession, req fsRequest) (*fsResponse, err
 // fresh stream per chunk was measured to badly limit throughput on real
 // (non-loopback) links, since the stream never reaches steady-state flow
 // control before it's torn down again.
-func quicReadWorker(sess xconn.MultiplexedSession, rootArg string, jobs <-chan transferChunk, localPath string,
+func quicReadWorker(sess xconn.MultiplexedSession, realm, rootArg string, jobs <-chan transferChunk, localPath string,
 	localIsDir bool, sourceRoot string, progress *transferProgress) error {
 	stream, err := sess.OpenStream()
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
+
+	if err := writeMsg(stream, routingFrame{Realm: realm, Op: fsOpRead, Path: rootArg}); err != nil {
+		return err
+	}
 
 	for chunk := range jobs {
 		if err := quicReadOneChunk(stream, rootArg, chunk, localPath, localIsDir, sourceRoot, progress); err != nil {
@@ -307,13 +340,17 @@ func quicReadOneChunk(stream net.Conn, rootArg string, chunk transferChunk, loca
 // quicWriteWorker is the upload counterpart to quicReadWorker: it owns one
 // QUIC stream for the lifetime of the goroutine running it, reusing it
 // across every job pulled from jobs.
-func quicWriteWorker(sess xconn.MultiplexedSession, rootArg string, jobs <-chan transferChunk, localBase string,
+func quicWriteWorker(sess xconn.MultiplexedSession, realm, rootArg string, jobs <-chan transferChunk, localBase string,
 	sourceIsDir, targetIsDirHint bool, progress *transferProgress) error {
 	stream, err := sess.OpenStream()
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
+
+	if err := writeMsg(stream, routingFrame{Realm: realm, Op: fsOpWrite, Path: rootArg}); err != nil {
+		return err
+	}
 
 	for chunk := range jobs {
 		if err := quicWriteOneChunk(stream, rootArg, chunk, localBase, sourceIsDir, targetIsDirHint,
@@ -378,13 +415,15 @@ type QUICConnector func() (QUICStreamCloser, error)
 // from the device over parallel QUIC streams -- no WAMP call carries any of
 // the file's bytes. sess (already connected) serves the one-shot list
 // control request; connect opens one independent connection per parallel
-// worker. numWorkers <= 0 uses the default (parallelStreamWorkers). Thin
-// wrapper around the transport-agnostic downloadFiles orchestrator, supplying
-// the QUIC-specific list call and per-worker connection.
-func DownloadFilesQUIC(sess xconn.MultiplexedSession, connect QUICConnector, remotePath, localPath string,
+// worker. realm is the target device's realm, needed by deskconn-router to
+// route each raw stream (see routingFrame). numWorkers <= 0 uses the
+// default (parallelStreamWorkers). Thin wrapper around the
+// transport-agnostic downloadFiles orchestrator, supplying the QUIC-specific
+// list call and per-worker connection.
+func DownloadFilesQUIC(sess xconn.MultiplexedSession, connect QUICConnector, realm, remotePath, localPath string,
 	recursive bool, numWorkers int) error {
 	return downloadFiles(remotePath, localPath, recursive, numWorkers,
-		func(req fsRequest) (*fsResponse, error) { return quicRequest(sess, req) },
+		func(req fsRequest) (*fsResponse, error) { return quicRequest(sess, realm, req) },
 		func(sourceRoot string, localIsDir bool, progress *transferProgress) func(jobs <-chan transferChunk) error {
 			return func(jobs <-chan transferChunk) error {
 				workerSess, err := connect()
@@ -392,7 +431,7 @@ func DownloadFilesQUIC(sess xconn.MultiplexedSession, connect QUICConnector, rem
 					return err
 				}
 				defer func() { _ = workerSess.Close() }()
-				return quicReadWorker(workerSess, remotePath, jobs, localPath, localIsDir, sourceRoot, progress)
+				return quicReadWorker(workerSess, realm, remotePath, jobs, localPath, localIsDir, sourceRoot, progress)
 			}
 		},
 	)
@@ -402,14 +441,16 @@ func DownloadFilesQUIC(sess xconn.MultiplexedSession, connect QUICConnector, rem
 // the device over parallel QUIC streams -- no WAMP call carries any of the
 // file's bytes. sess (already connected) serves the one-shot init control
 // request; connect opens one independent connection per parallel worker.
-// numWorkers <= 0 uses the default (parallelStreamWorkers). Thin wrapper
-// around the transport-agnostic uploadFiles orchestrator, supplying the
-// QUIC-specific init call and per-worker connection.
-func UploadFilesQUIC(sess xconn.MultiplexedSession, connect QUICConnector, localPath, remotePath string,
+// realm is the target device's realm, needed by deskconn-router to route
+// each raw stream (see routingFrame). numWorkers <= 0 uses the default
+// (parallelStreamWorkers). Thin wrapper around the transport-agnostic
+// uploadFiles orchestrator, supplying the QUIC-specific init call and
+// per-worker connection.
+func UploadFilesQUIC(sess xconn.MultiplexedSession, connect QUICConnector, realm, localPath, remotePath string,
 	recursive bool, numWorkers int) error {
 	localBase := filepath.Dir(localPath)
 	return uploadFiles(localPath, remotePath, recursive, numWorkers,
-		func(req fsRequest) (*fsResponse, error) { return quicRequest(sess, req) },
+		func(req fsRequest) (*fsResponse, error) { return quicRequest(sess, realm, req) },
 		func(sourceIsDir, targetIsDirHint bool, progress *transferProgress) func(jobs <-chan transferChunk) error {
 			return func(jobs <-chan transferChunk) error {
 				workerSess, err := connect()
@@ -417,7 +458,8 @@ func UploadFilesQUIC(sess xconn.MultiplexedSession, connect QUICConnector, local
 					return err
 				}
 				defer func() { _ = workerSess.Close() }()
-				return quicWriteWorker(workerSess, remotePath, jobs, localBase, sourceIsDir, targetIsDirHint, progress)
+				return quicWriteWorker(workerSess, realm, remotePath, jobs, localBase, sourceIsDir, targetIsDirHint,
+					progress)
 			}
 		},
 	)
