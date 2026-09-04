@@ -43,8 +43,6 @@ const (
 	ProcedureProxyLogs         = "io.xconn.deskconn.deskconnd.proxy.logs"
 	ProcedureProxyPing         = "io.xconn.deskconn.deskconnd.proxy.ping"
 	ProcedureProxyCat          = "io.xconn.deskconn.deskconnd.proxy.file.cat"
-	ProcedureProxyFilePush     = "io.xconn.deskconn.deskconnd.proxy.file.push"
-	ProcedureProxyFilePull     = "io.xconn.deskconn.deskconnd.proxy.file.pull"
 	ProcedureProxyPortForward  = "io.xconn.deskconn.deskconnd.proxy.port.forward"
 	ProcedureProxyPortReverse  = "io.xconn.deskconn.deskconnd.proxy.port.reverse"
 	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
@@ -384,6 +382,56 @@ func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory strin
 	}
 
 	return webrtcSess, nil
+}
+
+// ICEPathDescription describes the ICE candidate pair a WebRTCSession's
+// PeerConnection settled on, so callers can tell a genuine direct hop
+// (host/prflx candidates, both sides on the same network) apart from a path
+// that only looks local but is actually routed out to a STUN-discovered
+// public address and back (srflx) or via a TURN relay -- either of which
+// can look nothing like "the same LAN" from a throughput standpoint even
+// when both machines physically are.
+type ICEPathDescription struct {
+	LocalAddress, LocalType   string
+	RemoteAddress, RemoteType string
+}
+
+func (d ICEPathDescription) String() string {
+	return fmt.Sprintf("local=%s (%s) remote=%s (%s)", d.LocalAddress, d.LocalType, d.RemoteAddress, d.RemoteType)
+}
+
+// SelectedICEPath reports the ICE candidate pair sess's PeerConnection is
+// currently using, or an error if none has been selected yet (e.g. called
+// before the connection finished negotiating).
+func SelectedICEPath(sess *xconnwebrtc.WebRTCSession) (ICEPathDescription, error) {
+	pc := sess.Connection()
+	sctp := pc.SCTP()
+	if sctp == nil {
+		return ICEPathDescription{}, fmt.Errorf("no SCTP transport on this connection")
+	}
+	dtls := sctp.Transport()
+	if dtls == nil {
+		return ICEPathDescription{}, fmt.Errorf("no DTLS transport on this connection")
+	}
+	iceTransport := dtls.ICETransport()
+	if iceTransport == nil {
+		return ICEPathDescription{}, fmt.Errorf("no ICE transport on this connection")
+	}
+
+	pair, err := iceTransport.GetSelectedCandidatePair()
+	if err != nil {
+		return ICEPathDescription{}, err
+	}
+	if pair == nil {
+		return ICEPathDescription{}, fmt.Errorf("no candidate pair selected yet")
+	}
+
+	return ICEPathDescription{
+		LocalAddress:  pair.Local.Address,
+		LocalType:     pair.Local.Typ.String(),
+		RemoteAddress: pair.Remote.Address,
+		RemoteType:    pair.Remote.Typ.String(),
+	}, nil
 }
 
 func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
@@ -947,40 +995,6 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 		}
 
 		return xconn.NewInvocationResult(callResp.Args()...)
-	}
-}
-
-func ProxyFilePullHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		realm, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-		remotePath, err := inv.ArgString(1)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-		recursive, _ := inv.ArgBool(2)
-		publicKey, err := inv.ArgBytes(3)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-
-		callResp := deviceSess.Call(ProcedureFileDownload).
-			ProgressReceiver(func(pr *xconn.ProgressResult) {
-				_ = inv.SendProgress(pr.Args(), nil)
-			}).
-			Args(remotePath, recursive, publicKey).DoContext(ctx)
-
-		if callResp.Err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, callResp.Err.Error())
-		}
-		return xconn.NewInvocationResult()
 	}
 }
 

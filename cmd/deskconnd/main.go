@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -63,6 +64,16 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer localListener.Close()
+
+	relaySocketPath := deskconn.ProxyRelaySocketPath(cfgDirectory)
+	_ = os.Remove(relaySocketPath)
+	relayListener, err := net.Listen("unix", relaySocketPath)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer relayListener.Close()
+	quicSessions := deskconn.NewQUICSessionCache()
+	deskconn.SafeGo(func() { deskconn.ServeProxyRelay(context.Background(), relayListener, quicSessions, cfgDirectory) })
 
 	sess, err := xconn.ConnectInMemory(localRouter, deskconn.LocalRealm)
 	if err != nil {
@@ -147,19 +158,6 @@ func main() {
 		deskconn.ProxyCatHandler(clientSession, cfgDirectory)).Do()
 	if regRespCat.Err != nil {
 		log.Fatal(regRespCat.Err)
-	}
-
-	regRespFilePush := sess.Register(deskconn.ProcedureProxyFilePush,
-		deskconn.ProxyProgressiveInvocationHandler(proxyCalls, clientSession, cfgDirectory,
-			deskconn.ProcedureFileUpload)).Do()
-	if regRespFilePush.Err != nil {
-		log.Fatal(regRespFilePush.Err)
-	}
-
-	regRespFilePull := sess.Register(deskconn.ProcedureProxyFilePull,
-		deskconn.ProxyFilePullHandler(clientSession, cfgDirectory)).Do()
-	if regRespFilePull.Err != nil {
-		log.Fatal(regRespFilePull.Err)
 	}
 
 	regRespPortForward := sess.Register(deskconn.ProcedureProxyPortForward,

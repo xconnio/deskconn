@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 )
 
 const (
-	// fileStreamChunkSize is the size of each binary data channel message sent
-	// for a range read.
+	// fileStreamChunkSize is the size of each binary data channel message
+	// used while streaming a byte range, in either direction.
 	fileStreamChunkSize = 16 * 1024 // 16KB
 
 	// fileStreamMaxBuffered/fileStreamBufferedLow mirror the backpressure
@@ -22,147 +23,261 @@ const (
 	fileStreamMaxBuffered = 512 * 1024 // 512KB
 	fileStreamBufferedLow = 256 * 1024 // 256KB
 
-	// fileStreamRequestTimeout bounds how long we hold a channel open waiting for
-	// its request frame before giving up and closing it.
+	// fileStreamRequestTimeout bounds how long a write handler waits between
+	// binary messages before giving up on a stalled sender.
 	fileStreamRequestTimeout = 10 * time.Second
+
+	// fileStreamSessionIdleTimeout bounds how long a read/write channel
+	// waits for the next chunk request from its worker before giving up and
+	// closing -- normally the worker either sends another request right away
+	// or closes the channel itself once its share of the transfer is done.
+	fileStreamSessionIdleTimeout = 30 * time.Second
 )
 
-type fileStreamRequest struct {
-	Path   string `json:"path"`
-	Offset int64  `json:"offset"`
-	Length int64  `json:"length"`
-}
-
-type fileStreamHeader struct {
-	Size   int64 `json:"size"`
-	Offset int64 `json:"offset"`
-	Length int64 `json:"length"`
-}
-
-// HandleFileStreamChannel must not block, so it defers the actual work to
-// serveFileStreamChannel, which serves one byte-range read per channel.
+// HandleFileStreamChannel is the file-transfer entry point wired into
+// HandleAuxDataChannel: every raw (non-WAMP) data channel opened for a file
+// transfer -- list/read for downloads, init/write for uploads -- lands here.
 // firstMessage is the channel's request frame, already consumed by
 // xconn-webrtc-go to classify the channel as non-WAMP before handing it to
-// us; it will not be redelivered via channel.OnMessage, so it's fed to
-// serveFileStreamChannel directly instead of waiting to receive it again.
+// us; it will not be redelivered via channel.OnMessage, so it's parsed
+// directly instead of waiting to receive it again.
 func (d *Deskconn) HandleFileStreamChannel(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
-	msgCh := make(chan []byte, 1)
-	msgCh <- append([]byte(nil), firstMessage...)
-
-	SafeGo(func() { d.serveFileStreamChannel(channel, msgCh) })
+	SafeGo(func() { serveFileStreamChannel(channel, firstMessage) })
 }
 
-func (d *Deskconn) serveFileStreamChannel(channel *webrtc.DataChannel, msgCh chan []byte) {
-	var initial []byte
-	select {
-	case initial = <-msgCh:
-	case <-time.After(fileStreamRequestTimeout):
-		log.Debugf("filestream: no request received within %s", fileStreamRequestTimeout)
-		_ = channel.Close()
-		return
-	}
-
-	var req fileStreamRequest
-	if err := json.Unmarshal(initial, &req); err != nil {
+// serveFileStreamChannel dispatches the channel's first request. list and
+// init are one-shot control requests, sent once per whole transfer, so they
+// reply and close immediately. read and write are handed to
+// serveFileStreamSession, which keeps the channel open across many chunk
+// requests -- one parallel worker's share of a transfer can be dozens or
+// hundreds of chunks, and reopening a channel per chunk was measured to
+// badly limit throughput on real (non-loopback) links: the connection never
+// reaches steady-state flow control before it's torn down again.
+func serveFileStreamChannel(channel *webrtc.DataChannel, firstMessage []byte) {
+	var req fsRequest
+	if err := json.Unmarshal(firstMessage, &req); err != nil {
 		log.Debugf("filestream: invalid request: %v", err)
 		_ = channel.Close()
 		return
 	}
 
-	resolvedPath, info, invErr := resolveAndStatPath(req.Path)
-	if invErr != nil {
-		log.Debugf("filestream: cannot resolve %q", req.Path)
+	switch req.Op {
+	case fsOpList:
+		serveWebRTCList(channel, req)
+	case fsOpInit:
+		serveWebRTCInit(channel, req)
+	case fsOpRead, fsOpWrite:
+		serveFileStreamSession(channel, req)
+	default:
+		log.Debugf("filestream: unknown op %q", req.Op)
 		_ = channel.Close()
-		return
 	}
-	if info.IsDir() {
-		log.Debugf("filestream: %q is a directory", req.Path)
-		_ = channel.Close()
-		return
-	}
+}
 
-	totalSize := info.Size()
-	offset := req.Offset
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > totalSize {
-		offset = totalSize
-	}
-	length := req.Length
-	if length < 0 || offset+length > totalSize {
-		length = totalSize - offset
-	}
-
-	f, err := os.Open(resolvedPath)
+func sendWebRTCJSON(channel *webrtc.DataChannel, v any) error {
+	b, err := json.Marshal(v)
 	if err != nil {
-		log.Debugf("filestream: failed to open %s: %v", resolvedPath, err)
-		_ = channel.Close()
+		return err
+	}
+	return channel.SendText(string(b))
+}
+
+// remoteRootAndBase resolves a remote transfer's root argument (relative to
+// the device's home directory, like every other remote path in this
+// package) and returns both the resolved root and its parent, the anchor
+// every entry's RelPath is relative to.
+func remoteRootAndBase(rootArg string) (root, base string, err error) {
+	root, err = resolvePath(rootArg)
+	if err != nil {
+		return "", "", err
+	}
+	return root, filepath.Dir(root), nil
+}
+
+func serveWebRTCList(channel *webrtc.DataChannel, req fsRequest) {
+	defer channel.Close()
+
+	resolvedRoot, _, err := remoteRootAndBase(req.Path)
+	if err != nil {
+		_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
 		return
 	}
-	defer f.Close()
 
-	if offset > 0 {
-		if _, err := f.Seek(offset, io.SeekStart); err != nil {
-			log.Debugf("filestream: seek to %d failed: %v", offset, err)
-			_ = channel.Close()
-			return
-		}
+	entries, err := buildManifest(resolvedRoot, req.Recursive)
+	if err != nil {
+		_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
+		return
 	}
 
-	closed := make(chan struct{})
+	_ = sendWebRTCJSON(channel, fsResponse{OK: true, Entries: entries})
+}
+
+func serveWebRTCInit(channel *webrtc.DataChannel, req fsRequest) {
+	defer channel.Close()
+
+	resolvedRoot, _, err := remoteRootAndBase(req.Path)
+	if err != nil {
+		_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
+		return
+	}
+
+	rootIsDir := isRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
+	if err := materializeTargets(req.Entries, resolvedRoot, rootIsDir); err != nil {
+		_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
+		return
+	}
+
+	_ = sendWebRTCJSON(channel, fsResponse{OK: true})
+}
+
+// webrtcBackpressure wires up the OnClose/OnError/OnBufferedAmountLow
+// callbacks shared by anything streaming a lot of binary messages over
+// channel, in either direction.
+func webrtcBackpressure(channel *webrtc.DataChannel) (closed <-chan struct{}, sendReady <-chan struct{}) {
+	closedCh := make(chan struct{})
 	var closeOnce sync.Once
-	markClosed := func() { closeOnce.Do(func() { close(closed) }) }
-	channel.OnClose(func() { markClosed() })
+	markClosed := func() { closeOnce.Do(func() { close(closedCh) }) }
+	channel.OnClose(markClosed)
 	channel.OnError(func(err error) {
 		log.Debugf("filestream: channel error: %v", err)
 		markClosed()
 	})
 
-	sendReady := make(chan struct{}, 1)
+	readyCh := make(chan struct{}, 1)
 	channel.SetBufferedAmountLowThreshold(fileStreamBufferedLow)
 	channel.OnBufferedAmountLow(func() {
 		select {
-		case sendReady <- struct{}{}:
+		case readyCh <- struct{}{}:
 		default:
 		}
 	})
 
-	headerBytes, err := json.Marshal(fileStreamHeader{Size: totalSize, Offset: offset, Length: length})
-	if err != nil {
-		_ = channel.Close()
-		return
-	}
-	if err := channel.SendText(string(headerBytes)); err != nil {
-		return
-	}
+	return closedCh, readyCh
+}
 
-	remaining := length
-	buf := make([]byte, fileStreamChunkSize)
-	for remaining > 0 {
+// sendWebRTCBytes writes data to channel as fileStreamChunkSize messages,
+// blocking on sendReady/closed whenever the channel's send buffer is over
+// fileStreamMaxBuffered.
+func sendWebRTCBytes(channel *webrtc.DataChannel, closed, sendReady <-chan struct{}, data []byte) error {
+	for len(data) > 0 {
 		select {
 		case <-closed:
-			return
+			return io.ErrClosedPipe
 		default:
 		}
 
+		n := fileStreamChunkSize
+		if n > len(data) {
+			n = len(data)
+		}
+
+		for channel.BufferedAmount()+uint64(n) > fileStreamMaxBuffered {
+			select {
+			case <-sendReady:
+			case <-closed:
+				return io.ErrClosedPipe
+			}
+		}
+
+		if err := channel.Send(data[:n]); err != nil {
+			return err
+		}
+		data = data[n:]
+	}
+	return nil
+}
+
+// serveFileStreamSession serves req and then any further read/write
+// requests the client sends on the same channel, one at a time, letting a
+// single parallel worker reuse one channel -- and its SCTP flow-control
+// state -- across every chunk it's assigned instead of paying a fresh
+// open/close per chunk.
+func serveFileStreamSession(channel *webrtc.DataChannel, req fsRequest) {
+	defer channel.Close()
+
+	closed, sendReady := webrtcBackpressure(channel)
+	reqCh := make(chan fsRequest, 1)
+	dataCh := make(chan []byte, 4)
+	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
+		if msg.IsString {
+			var next fsRequest
+			if json.Unmarshal(msg.Data, &next) == nil {
+				select {
+				case reqCh <- next:
+				case <-closed:
+				}
+			}
+			return
+		}
+		select {
+		case dataCh <- msg.Data:
+		case <-closed:
+		}
+	})
+
+	for {
+		var err error
+		switch req.Op {
+		case fsOpRead:
+			err = serveWebRTCReadOnce(channel, closed, sendReady, req)
+		case fsOpWrite:
+			err = serveWebRTCWriteOnce(channel, closed, dataCh, req)
+		default:
+			return
+		}
+		if err != nil {
+			return
+		}
+
+		next, err := recvPriority(reqCh, closed, fileStreamSessionIdleTimeout)
+		if err != nil {
+			return
+		}
+		req = next
+	}
+}
+
+// serveWebRTCReadOnce serves one byte-range read. It only returns a non-nil
+// error for a transport failure that should end the session; an
+// application-level failure (bad path, etc.) is reported to the client via
+// fsResponse.Err and treated as handled.
+func serveWebRTCReadOnce(channel *webrtc.DataChannel, closed, sendReady <-chan struct{}, req fsRequest) error {
+	_, basePath, err := remoteRootAndBase(req.Path)
+	if err != nil {
+		_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
+		return nil
+	}
+	absPath := filepath.Join(basePath, filepath.FromSlash(req.RelPath))
+
+	f, err := os.Open(absPath) //nolint:gosec
+	if err != nil {
+		_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
+		return nil
+	}
+	defer f.Close()
+
+	if req.Offset > 0 {
+		if _, err := f.Seek(req.Offset, io.SeekStart); err != nil {
+			_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
+			return nil
+		}
+	}
+
+	if err := sendWebRTCJSON(channel, fsResponse{OK: true}); err != nil {
+		return err
+	}
+
+	remaining := req.Length
+	buf := make([]byte, fileStreamChunkSize)
+	for remaining > 0 {
 		toRead := int64(len(buf))
 		if toRead > remaining {
 			toRead = remaining
 		}
 		n, readErr := f.Read(buf[:toRead])
 		if n > 0 {
-			for channel.BufferedAmount()+uint64(n) > fileStreamMaxBuffered {
-				select {
-				case <-sendReady:
-				case <-closed:
-					return
-				}
-			}
-			chunk := make([]byte, n)
-			copy(chunk, buf[:n])
-			if err := channel.Send(chunk); err != nil {
-				return
+			if err := sendWebRTCBytes(channel, closed, sendReady, buf[:n]); err != nil {
+				return err
 			}
 			remaining -= int64(n)
 		}
@@ -171,9 +286,54 @@ func (d *Deskconn) serveFileStreamChannel(channel *webrtc.DataChannel, msgCh cha
 		}
 		if readErr != nil {
 			log.Debugf("filestream: read error: %v", readErr)
-			return
+			return readErr
+		}
+	}
+	return nil
+}
+
+// serveWebRTCWriteOnce serves one byte-range write. Same error-return
+// convention as serveWebRTCReadOnce.
+func serveWebRTCWriteOnce(channel *webrtc.DataChannel, closed <-chan struct{}, dataCh <-chan []byte,
+	req fsRequest) error {
+	resolvedRoot, _, err := remoteRootAndBase(req.Path)
+	if err != nil {
+		_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
+		return nil
+	}
+
+	rootIsDir := isRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
+	// A single chunk request never carries the whole manifest, but the
+	// sourceRoot argument only matters when rootIsDir is false, and that
+	// case only ever has one (non-recursive) entry -- whose RelPath is
+	// trivially its own sourceRoot.
+	dest := resolveDestPath(resolvedRoot, rootIsDir, req.RelPath, req.RelPath)
+
+	f, err := os.OpenFile(dest, os.O_WRONLY, 0) //nolint:gosec
+	if err != nil {
+		_ = sendWebRTCJSON(channel, fsResponse{Err: err.Error()})
+		return nil
+	}
+	defer f.Close()
+
+	if err := sendWebRTCJSON(channel, fsResponse{OK: true}); err != nil {
+		return err
+	}
+
+	ow := io.NewOffsetWriter(f, req.Offset)
+	var received int64
+	for received < req.Length {
+		data, err := recvPriority(dataCh, closed, fileStreamRequestTimeout)
+		if err != nil {
+			log.Debugf("filestream: write stopped after %d/%d bytes: %v", received, req.Length, err)
+			return err
+		}
+		n, err := ow.Write(data)
+		received += int64(n)
+		if err != nil {
+			return err
 		}
 	}
 
-	_ = channel.Close()
+	return sendWebRTCJSON(channel, fsResponse{OK: true})
 }

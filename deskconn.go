@@ -63,7 +63,6 @@ const (
 type Deskconn struct {
 	shellSession         *interactiveShellSession
 	keys                 *keyManager
-	uploads              *uploadSessions
 	forwardSessions      *portForwardSessions
 	reverseSessions      *portReverseSessions
 	agentForwardSessions *agentForwardSessions
@@ -85,7 +84,6 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment 
 	d := &Deskconn{
 		shellSession:         newInteractiveShellSession(),
 		keys:                 newKeyManager(),
-		uploads:              newUploadSessions(),
 		forwardSessions:      newPortForwardSessions(),
 		reverseSessions:      newPortReverseSessions(),
 		agentForwardSessions: newAgentForwardSessions(),
@@ -139,8 +137,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureFileDelete:      d.handleFileDelete,
 		ProcedureFileCopy:        d.handleFileCopy,
 		ProcedureFileEdit:        d.handleFileEdit,
-		ProcedureFileDownload:    d.handleFileDownload,
-		ProcedureFileUpload:      d.handleFileUpload,
 		ProcedureFileCat:         d.handleFileCat,
 		ProcedureFileSearch:      d.handleFileSearch,
 		ProcedureGitStatus:       d.handleGitStatus,
@@ -394,7 +390,6 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 		return
 	}
 	d.keys.delete(sessionID)
-	d.uploads.delete(sessionID)
 	d.forwardSessions.deleteCaller(sessionID)
 	d.reverseSessions.stop(sessionID)
 	d.agentForwardSessions.stop(sessionID)

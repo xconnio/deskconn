@@ -32,6 +32,7 @@ import (
 	sysinfo "github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
 	"github.com/xconnio/xconn-go/auth"
+	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
 var version = "v0.1.0-alpha"
@@ -144,6 +145,9 @@ func main() {
 	cpModeFlag := cpCmd.Flag("mode",
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
 	).Enum(ModeQUIC, ModeP2P)
+	cpStreams := cpCmd.Flag("streams",
+		"Number of parallel streams/connections to use for the transfer (default 4)",
+	).Short('s').Int()
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
 	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
@@ -443,26 +447,32 @@ func main() {
 					return
 				}
 				defer quicSess.Close()
-				if err := deskconn.PushFilesQUIC(quicSess, *cpSrc, dstPath, *cpRecursive); err != nil {
+				if err := deskconn.UploadFilesQUIC(quicSess, quicConnector(realm, cfgDirectory), *cpSrc, dstPath,
+					*cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			case ModeP2P:
-				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
+				p2pSess, err := deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				defer func() { _ = p2pSess.Leave() }()
-				if err := deskconn.PushFiles(p2pSess, *cpSrc, dstPath, *cpRecursive); err != nil {
+				defer func() { _ = p2pSess.Close() }()
+				printICEPath(p2pSess)
+				if err := deskconn.UploadFilesP2P(p2pSess, p2pConnector(realm, cfgDirectory), *cpSrc, dstPath,
+					*cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			default:
-				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				relaySocketPath := deskconn.ProxyRelaySocketPath(cfgDirectory)
+				relaySess, err := deskconn.DialProxyRelay(relaySocketPath, realm)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				if err := deskconn.PushFilesViaProxy(localSession, realm, *cpSrc, dstPath, *cpRecursive); err != nil {
+				defer func() { _ = relaySess.Close() }()
+				if err := deskconn.UploadFilesQUIC(relaySess, deskconn.ProxyQUICConnector(relaySocketPath, realm),
+					*cpSrc, dstPath, *cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			}
@@ -481,26 +491,32 @@ func main() {
 					return
 				}
 				defer quicSess.Close()
-				if err := deskconn.PullFilesQUIC(quicSess, srcPath, *cpDst, *cpRecursive); err != nil {
+				if err := deskconn.DownloadFilesQUIC(quicSess, quicConnector(realm, cfgDirectory), srcPath, *cpDst,
+					*cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			case ModeP2P:
-				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
+				p2pSess, err := deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				defer func() { _ = p2pSess.Leave() }()
-				if err := deskconn.PullFiles(p2pSess, srcPath, *cpDst, *cpRecursive); err != nil {
+				defer func() { _ = p2pSess.Close() }()
+				printICEPath(p2pSess)
+				if err := deskconn.DownloadFilesP2P(p2pSess, p2pConnector(realm, cfgDirectory), srcPath, *cpDst,
+					*cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			default:
-				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				relaySocketPath := deskconn.ProxyRelaySocketPath(cfgDirectory)
+				relaySess, err := deskconn.DialProxyRelay(relaySocketPath, realm)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				if err := deskconn.PullFilesViaProxy(localSession, realm, srcPath, *cpDst, *cpRecursive); err != nil {
+				defer func() { _ = relaySess.Close() }()
+				if err := deskconn.DownloadFilesQUIC(relaySess, deskconn.ProxyQUICConnector(relaySocketPath, realm),
+					srcPath, *cpDst, *cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			}
@@ -2623,6 +2639,41 @@ func deviceHasPersistentSession(localSession *xconn.Session, realm string) bool 
 	}
 	_, ok = connected[realm]
 	return ok
+}
+
+// quicConnector returns a deskconn.QUICConnector that dials a fresh,
+// independent QUIC connection to realm on demand -- used to give each
+// parallel file-transfer worker its own connection instead of a stream
+// sharing one (see deskconn.QUICConnector's doc comment).
+func quicConnector(realm, cfgDirectory string) deskconn.QUICConnector {
+	return func() (deskconn.QUICStreamCloser, error) {
+		return deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+	}
+}
+
+// p2pConnector returns a deskconn.P2PConnector that establishes a fresh,
+// independent WebRTC P2P connection to realm on demand -- used to give each
+// parallel file-transfer worker its own PeerConnection instead of a data
+// channel sharing one (see deskconn.P2PConnector's doc comment).
+func p2pConnector(realm, cfgDirectory string) deskconn.P2PConnector {
+	return func() (deskconn.P2PConnection, error) {
+		return deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
+	}
+}
+
+// printICEPath reports which network path a P2P transfer actually took, so
+// slow throughput on a link that's supposedly "the same LAN" can be told
+// apart from a code problem: a "host"-to-"host" pair is a genuine direct
+// hop, while "srflx"/"relay" means traffic went out to a STUN-discovered
+// public address (or a relay) and back, which behaves nothing like a real
+// LAN hop even between two machines in the same room.
+func printICEPath(sess *xconnwebrtc.WebRTCSession) {
+	path, err := deskconn.SelectedICEPath(sess)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "p2p: could not determine connection path: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "p2p: connection path: %s\n", path)
 }
 
 func isRemotePath(s string) bool {
