@@ -1,3 +1,5 @@
+//go:build linux
+
 package iptun
 
 import "encoding/json"

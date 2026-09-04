@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -180,16 +180,8 @@ func main() {
 	var currentDeskconn atomic.Pointer[deskconn.Deskconn]
 	getCurrentDeskconn := func() *deskconn.Deskconn { return currentDeskconn.Load() }
 
-	regRespVPNStart := sess.Register(deskconn.ProcedureProxyVPNStart,
-		deskconn.ProxyVPNStartHandler(getCurrentDeskconn)).Do()
-	if regRespVPNStart.Err != nil {
-		log.Fatal(regRespVPNStart.Err)
-	}
-
-	regRespVPNStop := sess.Register(deskconn.ProcedureProxyVPNStop,
-		deskconn.ProxyVPNStopHandler(getCurrentDeskconn)).Do()
-	if regRespVPNStop.Err != nil {
-		log.Fatal(regRespVPNStop.Err)
+	if err := registerVPNProcedures(sess, getCurrentDeskconn); err != nil {
+		log.Fatal(err)
 	}
 
 	regRespPrinterList := sess.Register(deskconn.ProcedureProxyPrinterList,
@@ -290,11 +282,10 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 		log.Fatal(err)
 	}
 
-	machineID, err := os.ReadFile(deskconn.MachineIDPath)
+	machineIDStr, err := deskconn.MachineID()
 	if err != nil {
 		log.Fatalln("failed to read machine-id: ", err)
 	}
-	machineIDStr := strings.TrimSpace(string(machineID))
 
 	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
 	if err != nil {
@@ -352,7 +343,10 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 		log.Fatal(err)
 	}
 
-	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	// DISPLAY/WAYLAND_DISPLAY only distinguish a desktop from a headless server on Linux.
+	// macOS and Windows have no supported headless-server install path, so treat them as
+	// desktop unconditionally rather than misreading an unset X11/Wayland var as "server".
+	isDesktop := runtime.GOOS != "linux" || os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
 	var screen *deskconn.Screen
 	var mpris *deskconn.MPRIS
@@ -361,15 +355,19 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 	if isDesktop {
 		systemBus, err := dbus.ConnectSystemBus()
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("system bus unavailable, screen features disabled: %v", err)
+			systemBus = nil
+		} else {
+			defer systemBus.Close()
 		}
-		defer systemBus.Close()
 
 		sessionBus, err := dbus.ConnectSessionBus()
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("session bus unavailable, screen lock/mpris features disabled: %v", err)
+			sessionBus = nil
+		} else {
+			defer sessionBus.Close()
 		}
-		defer sessionBus.Close()
 
 		screen = deskconn.NewScreen(sessionBus, systemBus, cfgDirectory)
 		mpris = deskconn.NewMPRIS(sessionBus)
@@ -541,7 +539,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 				continue
 			}
 
-			webRtcManager.OnDataChannel(deskconnApis.HandleAuxDataChannel)
+			webRtcManager.OnDataChannel(dataChannelHandler(deskconnApis))
 
 			// Reset backoff after successful connection.
 			retryDelay = 1 * time.Second
@@ -575,7 +573,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 	select {
 	case <-sigChan:
 		cancel()
-		deskconnApis.CloseVPNTunnel()
+		closeVPNTunnel(deskconnApis)
 		clientSession.Logout()
 
 		cloudConnMu.Lock()
@@ -592,7 +590,7 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 		return false
 	case <-detachChan:
 		cancel()
-		deskconnApis.CloseVPNTunnel()
+		closeVPNTunnel(deskconnApis)
 		_ = os.Remove(filepath.Join(cfgDirectory, "credentials.json"))
 
 		cloudConnMu.Lock()

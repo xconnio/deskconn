@@ -62,17 +62,19 @@ func NewScreen(sessionBus, systemBus *dbus.Conn, cfgDirectory string) *Screen {
 		cfgDirectory: cfgDirectory,
 	}
 
-	for _, p := range lockProviders() {
-		obj := sessionBus.Object(p.service, p.path)
-		call := obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0)
-		if call.Err != nil &&
-			strings.Contains(call.Err.Error(), "org.freedesktop.DBus.Error.ServiceUnknown") {
-			continue
-		}
+	if sessionBus != nil {
+		for _, p := range lockProviders() {
+			obj := sessionBus.Object(p.service, p.path)
+			call := obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0)
+			if call.Err != nil &&
+				strings.Contains(call.Err.Error(), "org.freedesktop.DBus.Error.ServiceUnknown") {
+				continue
+			}
 
-		s.lockProvider = p
-		s.lockInitialized = call.Err == nil
-		break
+			s.lockProvider = p
+			s.lockInitialized = call.Err == nil
+			break
+		}
 	}
 
 	entries, err := os.ReadDir(BacklightBasePath)
@@ -104,33 +106,6 @@ func NewScreen(sessionBus, systemBus *dbus.Conn, cfgDirectory string) *Screen {
 	return s
 }
 
-func (s *Screen) Lock() error {
-	if !s.lockInitialized || s.lockProvider == nil {
-		return fmt.Errorf("screen lock provider not initialized")
-	}
-
-	if locked, err := s.IsLocked(); err == nil && locked {
-		return nil
-	}
-
-	obj := s.sessionBus.Object(s.lockProvider.service, s.lockProvider.path)
-	return obj.Call(s.lockProvider.iface+"."+s.lockProvider.lock, 0).Err
-}
-
-func (s *Screen) IsLocked() (bool, error) {
-	if !s.lockInitialized || s.lockProvider == nil {
-		return false, fmt.Errorf("screen lock provider not initialized")
-	}
-	if s.lockProvider.active == "" {
-		return false, fmt.Errorf("provider does not support isLocked")
-	}
-
-	obj := s.sessionBus.Object(s.lockProvider.service, s.lockProvider.path)
-	var active bool
-	err := obj.Call(s.lockProvider.iface+"."+s.lockProvider.active, 0).Store(&active)
-	return active, err
-}
-
 func (s *Screen) GetBrightness() (int, error) {
 	if !s.brightnessDeviceExists {
 		return 0, fmt.Errorf("brightness device not available")
@@ -148,6 +123,9 @@ func (s *Screen) GetBrightness() (int, error) {
 func (s *Screen) SetBrightness(percent int) error {
 	if !s.brightnessDeviceExists {
 		return fmt.Errorf("brightness device not available")
+	}
+	if s.systemBus == nil {
+		return fmt.Errorf("system bus not available")
 	}
 
 	if percent < 1 {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
@@ -18,7 +17,6 @@ const (
 	ProcedureDeskconnAttachDesktop   = "io.xconn.deskconn.desktop.attach"
 	ProcedureDeskconnDetachDesktop   = "io.xconn.deskconn.desktop.detach"
 	TopicDeskconnDesktopDetachFormat = "io.xconn.deskconn.desktop.%s.detach"
-	MachineIDPath                    = "/etc/machine-id"
 )
 
 func CloudQUICAddress() string {
@@ -58,11 +56,10 @@ func Attach(username, password, desktopName string) error {
 	defer quicSess.Connection().Close()
 	session := quicSess.Session
 
-	machineID, err := os.ReadFile(MachineIDPath)
+	machineIDStr, err := MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}
-	machineIDStr := strings.TrimSpace(string(machineID))
 
 	publicKey, privateKey, err := auth.GenerateCryptoSignKeyPair()
 	if err != nil {

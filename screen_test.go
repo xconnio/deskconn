@@ -3,6 +3,7 @@ package deskconn_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -12,6 +13,10 @@ import (
 )
 
 func TestLock(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Lock has real side effects on non-linux platforms")
+	}
+
 	ls := &deskconn.Screen{}
 
 	err := ls.Lock()
@@ -22,7 +27,14 @@ func TestIsLocked(t *testing.T) {
 	ls := &deskconn.Screen{}
 
 	_, err := ls.IsLocked()
-	require.EqualError(t, err, "screen lock provider not initialized")
+	switch runtime.GOOS {
+	case goosWindows:
+		require.EqualError(t, err, "lock state query is not supported on windows")
+	case "darwin":
+		require.EqualError(t, err, "lock state query is not supported on macos")
+	default:
+		require.EqualError(t, err, "screen lock provider not initialized")
+	}
 }
 
 func mockBacklightDir(t *testing.T) string {
@@ -50,10 +62,11 @@ func mockBacklightDir(t *testing.T) string {
 func TestNewBrightnessDeviceFound(t *testing.T) {
 	mockBacklightDir(t)
 
-	conn, err := dbus.ConnectSystemBus()
-	require.NoError(t, err)
-	sessionConn, err := dbus.ConnectSessionBus()
-	require.NoError(t, err)
+	// D-Bus isn't available on every platform/CI environment; NewScreen handles a nil conn
+	// gracefully (these tests exercise the file-backed brightness path, not D-Bus), so a
+	// connect failure here isn't a test failure.
+	conn, _ := dbus.ConnectSystemBus()
+	sessionConn, _ := dbus.ConnectSessionBus()
 	b := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 
 	brightness, err := b.GetBrightness()
@@ -67,13 +80,14 @@ func TestNewBrightnessNoDevice(t *testing.T) {
 
 	deskconn.BacklightBasePath = t.TempDir()
 
-	conn, err := dbus.ConnectSystemBus()
-	require.NoError(t, err)
-	sessionConn, err := dbus.ConnectSessionBus()
-	require.NoError(t, err)
+	// D-Bus isn't available on every platform/CI environment; NewScreen handles a nil conn
+	// gracefully (these tests exercise the file-backed brightness path, not D-Bus), so a
+	// connect failure here isn't a test failure.
+	conn, _ := dbus.ConnectSystemBus()
+	sessionConn, _ := dbus.ConnectSessionBus()
 	b := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 
-	err = b.SetBrightness(70)
+	err := b.SetBrightness(70)
 	require.EqualError(t, err, "brightness device not available")
 
 	_, err = b.GetBrightness()
@@ -83,10 +97,11 @@ func TestNewBrightnessNoDevice(t *testing.T) {
 func TestGetBrightness(t *testing.T) {
 	mockBacklightDir(t)
 
-	conn, err := dbus.ConnectSystemBus()
-	require.NoError(t, err)
-	sessionConn, err := dbus.ConnectSessionBus()
-	require.NoError(t, err)
+	// D-Bus isn't available on every platform/CI environment; NewScreen handles a nil conn
+	// gracefully (these tests exercise the file-backed brightness path, not D-Bus), so a
+	// connect failure here isn't a test failure.
+	conn, _ := dbus.ConnectSystemBus()
+	sessionConn, _ := dbus.ConnectSessionBus()
 	b := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 	value, err := b.GetBrightness()
 	require.NoError(t, err)
@@ -102,10 +117,11 @@ func TestGetBrightnessFileError(t *testing.T) {
 
 	deskconn.BacklightBasePath = tmp
 
-	conn, err := dbus.ConnectSystemBus()
-	require.NoError(t, err)
-	sessionConn, err := dbus.ConnectSessionBus()
-	require.NoError(t, err)
+	// D-Bus isn't available on every platform/CI environment; NewScreen handles a nil conn
+	// gracefully (these tests exercise the file-backed brightness path, not D-Bus), so a
+	// connect failure here isn't a test failure.
+	conn, _ := dbus.ConnectSystemBus()
+	sessionConn, _ := dbus.ConnectSessionBus()
 	b := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 
 	_, err = b.GetBrightness()

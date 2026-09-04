@@ -42,12 +42,22 @@ account service, and stores the private key in `~/.deskconn/id_ed25519`.
 
 ## Installation
 
+**macOS and Linux**
+
 ```bash
 curl -fsSL https://get.deskconn.com | sh
 ```
 
-This installs `deskconn` and `deskconnd` to `~/.local/bin` and registers `deskconnd` as a systemd user service that
-starts automatically.
+**Windows** (PowerShell)
+
+```powershell
+irm https://get.deskconn.com/install.ps1 | iex
+```
+
+Each installs `deskconn` (the CLI) and `deskconnd` (the desktop daemon), adds `deskconn` to your `PATH`, and starts
+`deskconnd` automatically in the background — as a systemd user service on Linux, a launchd agent on macOS, and a
+scheduled task on Windows. On Windows, use `deskconn` or `desk-cli` — not `desk`, which is reserved for Display
+Settings (`desk.cpl`).
 
 ## Getting started
 

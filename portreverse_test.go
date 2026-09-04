@@ -25,8 +25,11 @@ func TestPortReverseNoProgress(t *testing.T) {
 func TestPortReverseListenFailure(t *testing.T) {
 	_, caller := setupDeskconn(t)
 
-	// Occupy a port so the server cannot bind it.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	// Occupy a port so the server cannot bind it. Bind the same wildcard address the
+	// handler itself binds (":<port>") rather than "127.0.0.1:<port>" - on Windows, unlike
+	// Linux/macOS, a wildcard bind is allowed to succeed even while the loopback-only
+	// address on that port is already taken, so the two would never actually conflict.
+	ln, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 	defer ln.Close()
 	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)

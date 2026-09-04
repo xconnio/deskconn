@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -16,7 +17,11 @@ import (
 )
 
 func TestAgentForwardListenFailure(t *testing.T) {
+	// os.TempDir() reads $TMPDIR on Unix but %TMP%/%TEMP% (not $TMPDIR) on Windows via
+	// GetTempPath; set all three so the induced failure works on every platform.
 	t.Setenv("TMPDIR", "/nonexistent-deskconn-test-dir-xyz")
+	t.Setenv("TMP", "/nonexistent-deskconn-test-dir-xyz")
+	t.Setenv("TEMP", "/nonexistent-deskconn-test-dir-xyz")
 	_, caller := setupDeskconn(t)
 
 	var receivedClose bool
@@ -55,6 +60,9 @@ func TestAgentForwardListenFailure(t *testing.T) {
 }
 
 func TestAgentForwardSocketPermissions(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("Windows does not support POSIX permission bits")
+	}
 	_, caller := setupDeskconn(t)
 
 	readyCh := make(chan string, 1)

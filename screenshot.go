@@ -83,6 +83,10 @@ func (s *Screen) Screenshot() ([]byte, error) {
 // CaptureScreenshot performs the actual portal call. It is intended to be
 // invoked from the foreground helper process.
 func CaptureScreenshot(conn *dbus.Conn) ([]byte, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("session bus not available")
+	}
+
 	matchOptions := []dbus.MatchOption{
 		dbus.WithMatchInterface("org.freedesktop.portal.Request"),
 		dbus.WithMatchMember("Response"),

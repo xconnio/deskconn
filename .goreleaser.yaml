@@ -14,6 +14,8 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -25,9 +27,18 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
+      - windows
     goarch:
       - amd64
       - arm64
+    # deskconnd is a background daemon with no interactive console use, launched at logon
+    # with no console attached (Windows Task Scheduler, same as systemd/launchd on the
+    # other platforms). Without -H=windowsgui it's a normal console-subsystem binary, so
+    # Windows allocates and shows a console window for it anyway. deskconn (the CLI) must
+    # keep its console, so this only applies to this build.
+    ldflags:
+      - "{{ if eq .Os \"windows\" }}-H=windowsgui{{ end }}"
 
   - id: deskconn-vpnd
     main: ./cmd/deskconn-vpnd
@@ -49,6 +60,10 @@ archives:
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
 
 checksum:
   name_template: checksums.txt
