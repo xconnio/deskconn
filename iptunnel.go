@@ -48,6 +48,16 @@ const (
 
 	vpnSendBufferHigh = 512 * 1024
 	vpnSendBufferLow  = 256 * 1024
+
+	// vpnMaxRetransmits bounds how many times SCTP will retry a lost chunk
+	// before giving up on it, instead of giving up immediately (0). Kept
+	// small and the channel stays unordered so tunneled TCP retransmits
+	// aren't needlessly duplicated and one loss can't head-of-line-block
+	// later packets, but it recovers most single, independent losses on the
+	// underlying path -- which otherwise pass straight through to whatever
+	// is running over the tunnel (ping/ICMP most visibly, since it has no
+	// retry of its own).
+	vpnMaxRetransmits = 2
 )
 
 // VPNOpenFrame is the client's first message on a VPN data channel.
@@ -408,7 +418,7 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 		return err
 	}
 
-	ordered, maxRetransmits := false, uint16(0)
+	ordered, maxRetransmits := false, uint16(vpnMaxRetransmits)
 	channel, err := session.OpenChannel(VPNChannelLabel, &webrtc.DataChannelInit{
 		Ordered:        &ordered,
 		MaxRetransmits: &maxRetransmits,
@@ -441,15 +451,18 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 
 	readyCh := make(chan VPNReadyFrame, 1)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		if !msg.IsString {
+		if msg.IsString {
+			var frame VPNReadyFrame
+			if json.Unmarshal(msg.Data, &frame) == nil && frame.Type == VPNFrameReady {
+				select {
+				case readyCh <- frame:
+				default:
+				}
+			}
 			return
 		}
-		var frame VPNReadyFrame
-		if json.Unmarshal(msg.Data, &frame) == nil && frame.Type == VPNFrameReady {
-			select {
-			case readyCh <- frame:
-			default:
-			}
+		if _, werr := tun.Write(msg.Data); werr != nil {
+			log.Debugf("iptunnel: tun write failed: %v", werr)
 		}
 	})
 
@@ -502,14 +515,6 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	} else {
 		log.Debugf("iptunnel: could not block ipv6 default route, ipv6 traffic may bypass the tunnel: %v", verr)
 	}
-
-	// closedCh (registered above) covers this phase too, so no need to re-register.
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		if msg.IsString {
-			return
-		}
-		_, _ = tun.Write(msg.Data)
-	})
 
 	SafeGo(func() { PumpTUNToChannel(tun, channel, closedCh) })
 
