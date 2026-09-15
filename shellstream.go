@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"time"
@@ -49,9 +50,12 @@ type shellControlMsg struct {
 	Cols    uint16         `json:"cols,omitempty"`
 	Rows    uint16         `json:"rows,omitempty"`
 	AuthID  string         `json:"auth_id,omitempty"`  // size only: self-reported, for agent-forward lookup
+	Command string         `json:"command,omitempty"`  // size only: exec's command; empty means an interactive bash shell
+	Args    []string       `json:"args,omitempty"`     // size only: exec's arguments to Command
 	OldID   string         `json:"old_id,omitempty"`   // migrate only: shell ID being claimed
 	Token   string         `json:"token,omitempty"`    // migrate only: the token issued for OldID
 	ShellID string         `json:"shell_id,omitempty"` // server->client ack: the (possibly new) shell ID
+	Error   string         `json:"error,omitempty"`    // server->client ack: set instead of ShellID/Token on failure
 }
 
 const (
@@ -102,13 +106,17 @@ func (t *p2pShellTransport) writeOutput(plaintext []byte) error {
 
 func (t *p2pShellTransport) close() error { return t.channel.Close() }
 
-// beginShellSession handles a shell connection's first control message:
-// claims an existing PTY via a valid migration token (shellOpMigrate), or
-// creates a new one (shellOpSize), issuing a fresh migration token for it.
-// Returns ok=false if the request was invalid; the caller should then close
-// the connection. Shared by both transports.
+// beginShellSession handles a connection's first control message: claims an
+// existing PTY via a valid migration token (shellOpMigrate), or creates a
+// new one (shellOpSize) running ctrl.Command (or an interactive bash shell
+// if empty -- this same protocol serves both `shell` and `exec`), issuing a
+// fresh migration token for it.
+// Returns a non-nil error if the request was invalid or the command failed
+// to start (e.g. exec given a nonexistent command) -- the caller should
+// report it to the client and then close the connection. Shared by both
+// transports.
 func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transport shellTransport) (
-	shellID, migrationToken string, ptmx *os.File, ok bool) {
+	shellID, migrationToken string, ptmx *os.File, err error) {
 	if ctrl.Op == shellOpMigrate {
 		p.Lock()
 		expected, tokenOK := p.migrationTokens[ctrl.OldID]
@@ -119,7 +127,7 @@ func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transp
 		valid := tokenOK && psOK && ptmxOK && time.Since(expected.issuedAt) <= migrationTokenTTL &&
 			subtle.ConstantTimeCompare([]byte(ctrl.Token), []byte(expected.value)) == 1
 		if !valid {
-			return "", "", nil, false
+			return "", "", nil, fmt.Errorf("invalid or expired migration token")
 		}
 
 		p.Lock()
@@ -128,16 +136,20 @@ func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transp
 		ps.mu.Lock()
 		ps.transport = transport
 		ps.mu.Unlock()
-		return ctrl.OldID, "", existingPtmx, true
+		return ctrl.OldID, "", existingPtmx, nil
 	}
 
+	command := ctrl.Command
+	if command == "" {
+		command = "bash"
+	}
 	shellID = newShellStreamID()
 	ws := &pty.Winsize{Cols: ctrl.Cols, Rows: ctrl.Rows}
-	newPt, err := p.startPtySession(transport, shellID, p.agentSockForAuthID(ctrl.AuthID), "", "bash", ws)
+	newPt, err := p.startPtySession(transport, shellID, p.agentSockForAuthID(ctrl.AuthID), "", command, ws, ctrl.Args...)
 	if err != nil {
-		return "", "", nil, false
+		return "", "", nil, err
 	}
-	return shellID, p.issueMigrationToken(shellID), newPt, true
+	return shellID, p.issueMigrationToken(shellID), newPt, nil
 }
 
 // handleQUICShellStream serves one shell over a raw QUIC stream: key
@@ -165,13 +177,16 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 	}
 
 	transport := &quicShellTransport{stream: stream, sendKey: sendKey}
-	shellID, token, ptmx, ok := d.shellSession.beginShellSession(ctrl, transport)
-	if !ok {
-		return
-	}
+	shellID, token, ptmx, err := d.shellSession.beginShellSession(ctrl, transport)
 	ackMsg := shellControlMsg{ShellID: shellID, Token: token}
-	if ack, err := buildShellEnvelope(shellMsgControl, mustJSON(ackMsg), sendKey); err == nil {
+	if err != nil {
+		ackMsg = shellControlMsg{Error: err.Error()}
+	}
+	if ack, buildErr := buildShellEnvelope(shellMsgControl, mustJSON(ackMsg), sendKey); buildErr == nil {
 		_ = writeFrame(stream, ack)
+	}
+	if err != nil {
+		return
 	}
 
 	for {
@@ -235,12 +250,16 @@ func (d *Deskconn) serveShellChannel(channel *webrtc.DataChannel, firstMessage [
 	}
 
 	transport := &p2pShellTransport{channel: channel, sendKey: sendKey}
-	shellID, token, ptmx, ok := d.shellSession.beginShellSession(ctrl, transport)
-	if !ok {
+	shellID, token, ptmx, err := d.shellSession.beginShellSession(ctrl, transport)
+	ackMsg := shellControlMsg{ShellID: shellID, Token: token}
+	if err != nil {
+		ackMsg = shellControlMsg{Error: err.Error()}
+	}
+	_ = sendEncryptedJSONShell(channel, ackMsg, sendKey)
+	if err != nil {
 		_ = channel.Close()
 		return
 	}
-	_ = sendEncryptedJSONShell(channel, shellControlMsg{ShellID: shellID, Token: token}, sendKey)
 
 	for {
 		data, err := recvPriority(msgCh, closed, fileStreamSessionIdleTimeout)

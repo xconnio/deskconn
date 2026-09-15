@@ -310,8 +310,7 @@ func TestAgentForwardProxyReadySignal(t *testing.T) {
 
 	proxyCalls := deskconn.NewProxyCalls()
 	regResp := localCallee.Register(deskconn.ProcedureProxyAgentForward,
-		deskconn.ProxyProgressiveInvocationHandler(proxyCalls, clientSessions, t.TempDir(),
-			deskconn.ProcedureAgentForward)).Do()
+		deskconn.ProxyAgentForwardHandler(proxyCalls, clientSessions, t.TempDir())).Do()
 	require.NoError(t, regResp.Err)
 
 	dir := t.TempDir()

@@ -1,8 +1,10 @@
 package deskconn
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,18 +14,25 @@ import (
 
 // fakeShellTransport is a shellTransport that just records what it's
 // asked to write, for unit-testing beginShellSession/endShellInput without
-// a real QUIC stream or WebRTC channel.
+// a real QUIC stream or WebRTC channel. Guarded by mu since writeOutput runs
+// on the PTY output-reader goroutine while tests read written/closed from
+// the main test goroutine.
 type fakeShellTransport struct {
+	mu      sync.Mutex
 	written [][]byte
 	closed  bool
 }
 
 func (t *fakeShellTransport) writeOutput(plaintext []byte) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.written = append(t.written, append([]byte(nil), plaintext...))
 	return nil
 }
 
 func (t *fakeShellTransport) close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.closed = true
 	return nil
 }
@@ -32,10 +41,10 @@ func TestBeginShellSessionCreatesNewPTY(t *testing.T) {
 	p := newInteractiveShellSession()
 	transport := &fakeShellTransport{}
 
-	shellID, token, ptmx, ok := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, transport)
+	shellID, token, ptmx, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, transport)
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
-	require.True(t, ok)
+	require.NoError(t, err)
 	assert.NotEmpty(t, shellID)
 	assert.NotEmpty(t, token, "a fresh session should be issued a migration token")
 	require.NotNil(t, ptmx)
@@ -48,18 +57,52 @@ func TestBeginShellSessionCreatesNewPTY(t *testing.T) {
 	assert.True(t, hasSession)
 }
 
+// TestBeginShellSessionRunsExecCommand confirms the same protocol that
+// serves shell also serves exec: when ctrl.Command is set, beginShellSession
+// runs that command (with its args) instead of an interactive bash shell,
+// and the command's real output reaches the transport.
+func TestBeginShellSessionRunsExecCommand(t *testing.T) {
+	p := newInteractiveShellSession()
+	transport := &fakeShellTransport{}
+
+	shellID, _, _, err := p.beginShellSession(shellControlMsg{
+		Op: shellOpSize, Cols: 80, Rows: 24, Command: "echo", Args: []string{"hello-exec-test"},
+	}, transport)
+	require.NoError(t, err)
+	t.Cleanup(func() { p.cleanupShellID(shellID) })
+
+	require.Eventually(t, func() bool {
+		transport.mu.Lock()
+		defer transport.mu.Unlock()
+		for _, chunk := range transport.written {
+			if bytes.Contains(chunk, []byte("hello-exec-test")) {
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 10*time.Millisecond, "exec'd command's output never reached the transport")
+
+	// echo exits immediately, so the session should clean itself up on its own.
+	require.Eventually(t, func() bool {
+		p.Lock()
+		defer p.Unlock()
+		_, stillTracked := p.sessions[shellID]
+		return !stillTracked
+	}, 3*time.Second, 10*time.Millisecond, "PTY session should be cleaned up once the exec'd command exits")
+}
+
 func TestBeginShellSessionMigrateValidToken(t *testing.T) {
 	p := newInteractiveShellSession()
 	original := &fakeShellTransport{}
-	shellID, token, _, ok := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
-	require.True(t, ok)
+	shellID, token, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
+	require.NoError(t, err)
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
 	newTransport := &fakeShellTransport{}
-	claimedID, _, ptmx, ok := p.beginShellSession(
+	claimedID, _, ptmx, err := p.beginShellSession(
 		shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: token}, newTransport)
 
-	require.True(t, ok)
+	require.NoError(t, err)
 	assert.Equal(t, shellID, claimedID, "migration keeps the same shell ID, no rekeying needed")
 	require.NotNil(t, ptmx)
 
@@ -77,13 +120,13 @@ func TestBeginShellSessionMigrateValidToken(t *testing.T) {
 func TestBeginShellSessionMigrateWrongToken(t *testing.T) {
 	p := newInteractiveShellSession()
 	original := &fakeShellTransport{}
-	shellID, _, _, ok := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
-	require.True(t, ok)
+	shellID, _, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
+	require.NoError(t, err)
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
-	_, _, _, ok = p.beginShellSession(
+	_, _, _, err = p.beginShellSession(
 		shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: "not-the-real-token"}, &fakeShellTransport{})
-	assert.False(t, ok)
+	assert.Error(t, err)
 
 	p.Lock()
 	ps := p.sessions[shellID]
@@ -97,8 +140,8 @@ func TestBeginShellSessionMigrateWrongToken(t *testing.T) {
 func TestBeginShellSessionMigrateExpiredToken(t *testing.T) {
 	p := newInteractiveShellSession()
 	original := &fakeShellTransport{}
-	shellID, token, _, ok := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
-	require.True(t, ok)
+	shellID, token, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
+	require.NoError(t, err)
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
 	p.Lock()
@@ -107,23 +150,35 @@ func TestBeginShellSessionMigrateExpiredToken(t *testing.T) {
 	p.migrationTokens[shellID] = expired
 	p.Unlock()
 
-	_, _, _, ok = p.beginShellSession(
+	_, _, _, err = p.beginShellSession(
 		shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: token}, &fakeShellTransport{})
-	assert.False(t, ok)
+	assert.Error(t, err)
 }
 
 func TestBeginShellSessionMigrateUnknownShellID(t *testing.T) {
 	p := newInteractiveShellSession()
-	_, _, _, ok := p.beginShellSession(
+	_, _, _, err := p.beginShellSession(
 		shellControlMsg{Op: shellOpMigrate, OldID: "no-such-shell", Token: "whatever"}, &fakeShellTransport{})
-	assert.False(t, ok)
+	assert.Error(t, err)
+}
+
+// TestBeginShellSessionExecNonexistentCommand confirms a failed exec (e.g. a
+// typo'd or missing command) reports a real error rather than silently
+// closing the connection.
+func TestBeginShellSessionExecNonexistentCommand(t *testing.T) {
+	p := newInteractiveShellSession()
+	_, _, _, err := p.beginShellSession(shellControlMsg{
+		Op: shellOpSize, Cols: 80, Rows: 24, Command: "this-command-does-not-exist-xyz",
+	}, &fakeShellTransport{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "this-command-does-not-exist-xyz")
 }
 
 func TestEndShellInputCleansUpWhenStillOwner(t *testing.T) {
 	p := newInteractiveShellSession()
 	transport := &fakeShellTransport{}
-	shellID, _, _, ok := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, transport)
-	require.True(t, ok)
+	shellID, _, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, transport)
+	require.NoError(t, err)
 
 	p.endShellInput(shellID, transport)
 
@@ -136,13 +191,13 @@ func TestEndShellInputCleansUpWhenStillOwner(t *testing.T) {
 func TestEndShellInputNoOpAfterMigration(t *testing.T) {
 	p := newInteractiveShellSession()
 	original := &fakeShellTransport{}
-	shellID, token, _, ok := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
-	require.True(t, ok)
+	shellID, token, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
+	require.NoError(t, err)
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
 	newTransport := &fakeShellTransport{}
-	_, _, _, ok = p.beginShellSession(shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: token}, newTransport)
-	require.True(t, ok)
+	_, _, _, err = p.beginShellSession(shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: token}, newTransport)
+	require.NoError(t, err)
 
 	// The old connection dying after a successful migration must not kill
 	// the PTY the new connection is now serving.

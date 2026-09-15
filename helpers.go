@@ -34,7 +34,6 @@ const (
 	ProcedureAccountLoginVerify = "io.xconn.deskconn.account.login.verify"
 
 	ProcedureProxyAgentForward = "io.xconn.deskconn.deskconnd.proxy.agent.forward"
-	ProcedureProxyExec         = "io.xconn.deskconn.deskconnd.proxy.exec"
 	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
 	ProcedureProxyDeviceInfo   = "io.xconn.deskconn.deskconnd.proxy.device.info"
 	ProcedureProxyLogs         = "io.xconn.deskconn.deskconnd.proxy.logs"
@@ -465,77 +464,6 @@ func CacheDevices(cfgDirectory string, devices []Device) error {
 	}
 
 	return nil
-}
-
-func ProxyProgressiveInvocationHandler(proxyCalls *ProxyCalls, clientSessions *ClientSessions,
-	cfgDirectory, procedure string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult { //nolint:contextcheck
-		caller := inv.Caller()
-		if !inv.Progress() {
-			if proxyCall, exists := proxyCalls.Fetch(caller); exists {
-				if len(inv.Args()) > 0 {
-					proxyCall.send(xconn.NewFinalProgress(inv.Args()...))
-				}
-				proxyCall.closeChannel()
-				proxyCalls.Delete(caller)
-			}
-
-			return xconn.NewInvocationResult()
-		}
-
-		proxyCall, exists := proxyCalls.Fetch(caller)
-		if !exists {
-			proxyCall = newProxyCall()
-			proxyCalls.Store(caller, proxyCall)
-
-			realm, err := inv.ArgString(0)
-			if err != nil {
-				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-			}
-
-			deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
-			if err != nil {
-				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-			}
-
-			sessionCtx, ok := clientSessions.SessionContext(realm)
-			if !ok {
-				sessionCtx = context.Background()
-			}
-
-			ch := proxyCall.progressChan
-			SafeGo(func() {
-				callResp := deviceSess.Call(procedure).
-					ProgressSender(func(ctx context.Context) *xconn.Progress {
-						p, ok := <-ch
-						if !ok {
-							return xconn.NewFinalProgress()
-						}
-						return p
-					}).
-					ProgressReceiver(func(pr *xconn.ProgressResult) {
-						_ = inv.SendProgress(pr.Args(), nil)
-					}).DoContext(sessionCtx)
-				if callResp.Err != nil {
-					_ = inv.SendProgress([]any{[]byte(callResp.Err.Error())}, nil)
-					_ = deviceSess.Leave()
-					clientSessions.DeleteDeviceSession(realm)
-				}
-				_ = inv.SendProgress(nil, nil)
-			})
-		}
-
-		if len(inv.Args()) > 2 {
-			proxyCall.send(xconn.NewProgress(inv.Args()[1:]...))
-		} else {
-			payload, err := inv.ArgBytes(1)
-			if err != nil {
-				return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-			}
-			proxyCall.send(xconn.NewProgress(payload))
-		}
-		return xconn.NewInvocationError(xconn.ErrNoResult)
-	}
 }
 
 func clientKeyExchange(session *xconn.Session) (*encryptionKeys, error) {

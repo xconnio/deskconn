@@ -357,36 +357,8 @@ func main() {
 		if path != "" {
 			args = append(args, path)
 		}
-		switch *lsFileModeFlag {
-		case ModeQUIC:
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer quicSess.Connection().Close()
-			if err := deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureExec, args...); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		case ModeP2P:
-			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer func() { _ = p2pSess.Leave() }()
-			if err := deskconn.StartInteractiveCommand(p2pSess, "", deskconn.ProcedureExec, args...); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		default:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			if err := deskconn.StartInteractiveCommand(localSession, realm, deskconn.ProcedureProxyExec, args...); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
+		if err := deskconn.RunExec(context.Background(), *lsFileModeFlag, realm, cfgDirectory, args); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case mvCmd.FullCommand():
@@ -723,37 +695,8 @@ func main() {
 			return
 		}
 
-		switch *execModeFlag {
-		case ModeQUIC:
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer quicSess.Connection().Close()
-			if err := deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureExec, *command...); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		case ModeP2P:
-			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer func() { _ = p2pSess.Leave() }()
-			if err := deskconn.StartInteractiveCommand(p2pSess, "", deskconn.ProcedureExec, *command...); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		default:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			if err := deskconn.StartInteractiveCommand(localSession, realm,
-				deskconn.ProcedureProxyExec, *command...); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
+		if err := deskconn.RunExec(context.Background(), *execModeFlag, realm, cfgDirectory, *command); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 		}
 
 	case printCmd.FullCommand():

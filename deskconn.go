@@ -22,7 +22,6 @@ const (
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
 	ProcedureShellIsBusy         = "io.xconn.deskconn.deskconnd.shell.isbusy"
 	ProcedureAgentForward        = "io.xconn.deskconn.deskconnd.agent.forward"
-	ProcedureExec                = "io.xconn.deskconn.deskconnd.exec"
 	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
 	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
 	ProcedurePrinterPrint        = "io.xconn.deskconn.deskconnd.printer.print"
@@ -123,7 +122,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	handlers := map[string]xconn.InvocationHandler{
 		ProcedureKeyExchange:     d.handleKeyExchange,
 		ProcedureShellIsBusy:     d.shellSession.handleShellIsBusy(),
-		ProcedureExec:            d.shellSession.handleExec(),
 		ProcedureFileBrowse:      d.handleFileBrowse,
 		ProcedureFileRename:      d.handleFileRename,
 		ProcedureFileDelete:      d.handleFileDelete,

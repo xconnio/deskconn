@@ -3,6 +3,7 @@ package deskconn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -103,6 +104,9 @@ func recvShellAck(conn shellConn, receiveKey []byte) (shellControlMsg, error) {
 	var msg shellControlMsg
 	if err := json.Unmarshal(plaintext, &msg); err != nil {
 		return shellControlMsg{}, err
+	}
+	if msg.Error != "" {
+		return shellControlMsg{}, errors.New(msg.Error)
 	}
 	return msg, nil
 }
@@ -288,15 +292,17 @@ func shellReadLoop(active *activeShellConn) error {
 	}
 }
 
-// RunShell is the client entry point for `deskconn shell`. mode selects the
-// connection policy:
+// runStreamCommand is the shared connect-and-run loop behind RunShell and
+// RunExec: ctrl seeds the initial control message (RunExec sets
+// Command/Args; RunShell leaves them empty for an interactive bash shell),
+// and Op/Cols/Rows are filled in here. mode selects the connection policy:
 //   - "quic": QUIC only, no upgrade attempt.
 //   - "p2p": P2P only, no QUIC fast-start.
 //   - "" (default): fast-start on QUIC so the prompt appears immediately,
 //     then attempt a background P2P upgrade and live-migrate the running
 //     PTY onto it if it succeeds. A failed upgrade is never surfaced as an
 //     error; staying on QUIC is fine.
-func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
+func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctrl shellControlMsg) error {
 	fd := int(os.Stdin.Fd()) // #nosec
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
@@ -304,22 +310,17 @@ func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
 	}
 	defer func() { _ = term.Restore(fd, oldState) }()
 
-	authID, _, err := ReadCredentials(cfgDirectory)
-	if err != nil {
-		return err
-	}
-
 	cols, rows, err := term.GetSize(fd)
 	if err != nil {
 		return fmt.Errorf("failed to get terminal size: %w", err)
 	}
-	startCtrl := shellControlMsg{Op: shellOpSize, Cols: clampUint16(cols), Rows: clampUint16(rows), AuthID: authID}
+	ctrl.Op, ctrl.Cols, ctrl.Rows = shellOpSize, clampUint16(cols), clampUint16(rows)
 
 	var primary *shellHandshakeResult
 	if mode == "p2p" {
-		primary, err = dialShellP2P(ctx, realm, cfgDirectory, startCtrl)
+		primary, err = dialShellP2P(ctx, realm, cfgDirectory, ctrl)
 	} else {
-		primary, err = dialShellQUIC(ctx, realm, cfgDirectory, startCtrl)
+		primary, err = dialShellQUIC(ctx, realm, cfgDirectory, ctrl)
 	}
 	if err != nil {
 		return err
@@ -335,17 +336,17 @@ func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
 	if mode == "" {
 		go func() {
 			migrateCtrl := shellControlMsg{
-				Op: shellOpMigrate, OldID: primary.shellID, Token: primary.token, AuthID: authID,
+				Op: shellOpMigrate, OldID: primary.shellID, Token: primary.token, AuthID: ctrl.AuthID,
 			}
 			upgrade, err := dialShellP2P(ctx, realm, cfgDirectory, migrateCtrl)
 			if err != nil {
-				log.Debugf("shell: background P2P upgrade failed, staying on QUIC: %v", err)
+				log.Debugf("stream: background P2P upgrade failed, staying on QUIC: %v", err)
 				return
 			}
 			active.set(upgrade)
 			_ = primary.conn.close()
 			primary.cleanup()
-			log.Debugf("shell: migrated live session %s from QUIC to P2P", primary.shellID)
+			log.Debugf("stream: migrated live session %s from QUIC to P2P", primary.shellID)
 		}()
 	}
 
@@ -354,4 +355,24 @@ func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
 	// not a failure worth surfacing.
 	_ = shellReadLoop(active)
 	return nil
+}
+
+func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
+	authID, _, err := ReadCredentials(cfgDirectory)
+	if err != nil {
+		return err
+	}
+	return runStreamCommand(ctx, mode, realm, cfgDirectory, shellControlMsg{AuthID: authID})
+}
+
+// RunExec is the client entry point for anything that runs one command on a
+// device's PTY and exits when it finishes (deskconn exec, file ls, ai
+// resume) -- as opposed to RunShell's open-ended interactive session.
+func RunExec(ctx context.Context, mode, realm, cfgDirectory string, commandWithArgs []string) error {
+	var command string
+	var args []string
+	if len(commandWithArgs) > 0 {
+		command, args = commandWithArgs[0], commandWithArgs[1:]
+	}
+	return runStreamCommand(ctx, mode, realm, cfgDirectory, shellControlMsg{Command: command, Args: args})
 }
