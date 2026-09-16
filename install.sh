@@ -5,7 +5,19 @@ REPO="xconnio/deskconn"
 BIN_DIR="$HOME/.local/bin"
 EXEC_DIR="$HOME/.local/lib/exec"
 SERVICE_NAME="deskconnd"
-SERVICE_FILE="$HOME/.config/systemd/user/$SERVICE_NAME.service"
+
+case "$(uname -s)" in
+    Linux)
+        OS="linux"
+        ;;
+    Darwin)
+        OS="darwin"
+        ;;
+    *)
+        echo "Unsupported OS: $(uname -s). For Windows, use install.ps1 instead."
+        exit 1
+        ;;
+esac
 
 mkdir -p "$BIN_DIR"
 mkdir -p "$EXEC_DIR"
@@ -32,7 +44,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 VERSION_NO_V="${VERSION#v}"
-ARCHIVE="deskconn_${VERSION_NO_V}_linux_${GO_ARCH}.tar.gz"
+ARCHIVE="deskconn_${VERSION_NO_V}_${OS}_${GO_ARCH}.tar.gz"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/$ARCHIVE"
 
 TMP_DIR="$(mktemp -d)"
@@ -140,26 +152,29 @@ case ":$PATH:" in
         ;;
 esac
 
-echo "Setting up systemd user service for $SERVICE_NAME..."
-mkdir -p "$(dirname "$SERVICE_FILE")"
+install_service_linux() {
+    local service_file="$HOME/.config/systemd/user/$SERVICE_NAME.service"
 
-# systemd --user services don't reliably inherit DISPLAY/WAYLAND_DISPLAY from
-# the desktop session, so deskconnd can't tell a desktop from a headless
-# server apart without them being exported explicitly. Capture them from the
-# installer's own environment: on a real desktop session they'll be set here;
-# on a headless server they won't, and deskconnd will register server-only
-# APIs (no screenshot/display RPCs).
-ENV_LINES="Environment=TERM=xterm-256color"
-if [ -n "${DISPLAY:-}" ]; then
-    ENV_LINES="$ENV_LINES
+    echo "Setting up systemd user service for $SERVICE_NAME..."
+    mkdir -p "$(dirname "$service_file")"
+
+    # systemd --user services don't reliably inherit DISPLAY/WAYLAND_DISPLAY from
+    # the desktop session, so deskconnd can't tell a desktop from a headless
+    # server apart without them being exported explicitly. Capture them from the
+    # installer's own environment: on a real desktop session they'll be set here;
+    # on a headless server they won't, and deskconnd will register server-only
+    # APIs (no screenshot/display RPCs).
+    ENV_LINES="Environment=TERM=xterm-256color"
+    if [ -n "${DISPLAY:-}" ]; then
+        ENV_LINES="$ENV_LINES
 Environment=DISPLAY=$DISPLAY"
-fi
-if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    ENV_LINES="$ENV_LINES
+    fi
+    if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        ENV_LINES="$ENV_LINES
 Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
-fi
+    fi
 
-cat > "$SERVICE_FILE" <<EOL
+    cat > "$service_file" <<EOL
 [Unit]
 Description=DeskConn Daemon
 After=network.target
@@ -174,14 +189,71 @@ $ENV_LINES
 WantedBy=default.target
 EOL
 
-systemctl --user daemon-reload
+    systemctl --user daemon-reload
 
-if systemctl --user is-enabled --quiet "$SERVICE_NAME"; then
-    echo "Service exists. Restarting..."
-    systemctl --user restart "$SERVICE_NAME"
-else
+    if systemctl --user is-enabled --quiet "$SERVICE_NAME"; then
+        echo "Service exists. Restarting..."
+        systemctl --user restart "$SERVICE_NAME"
+    else
+        echo "Enabling and starting service..."
+        systemctl --user enable "$SERVICE_NAME"
+        systemctl --user start "$SERVICE_NAME"
+    fi
+    echo "Systemd service $SERVICE_NAME installed and started!"
+}
+
+install_service_darwin() {
+    local label="com.deskconn.deskconnd"
+    local plist_file="$HOME/Library/LaunchAgents/$label.plist"
+    local log_dir="$HOME/Library/Logs/deskconn"
+
+    echo "Setting up launchd agent for $SERVICE_NAME..."
+    mkdir -p "$(dirname "$plist_file")" "$log_dir"
+
+    cat > "$plist_file" <<EOL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$EXEC_DIR/deskconnd</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$log_dir/deskconnd.log</string>
+    <key>StandardErrorPath</key>
+    <string>$log_dir/deskconnd.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TERM</key>
+        <string>xterm-256color</string>
+    </dict>
+</dict>
+</plist>
+EOL
+
+    if launchctl print "gui/$(id -u)/$label" > /dev/null 2>&1; then
+        echo "Service exists. Restarting..."
+        launchctl bootout "gui/$(id -u)/$label" > /dev/null 2>&1 || true
+    fi
+
     echo "Enabling and starting service..."
-    systemctl --user enable "$SERVICE_NAME"
-    systemctl --user start "$SERVICE_NAME"
-fi
-echo "Systemd service $SERVICE_NAME installed and started!"
+    launchctl bootstrap "gui/$(id -u)" "$plist_file"
+    launchctl enable "gui/$(id -u)/$label"
+    echo "launchd agent $label installed and started!"
+}
+
+case "$OS" in
+    linux)
+        install_service_linux
+        ;;
+    darwin)
+        install_service_darwin
+        ;;
+esac

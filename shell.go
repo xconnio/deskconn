@@ -6,18 +6,16 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"os/exec"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/creack/pty"
+	pty "github.com/aymanbagabas/go-pty"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
 	"github.com/xconnio/xconn-go"
@@ -45,7 +43,7 @@ type ptySession struct {
 }
 
 type interactiveShellSession struct {
-	ptmx            map[string]*os.File
+	ptmx            map[string]pty.Pty
 	sessions        map[string]*ptySession
 	migrationTokens map[string]migrationToken
 	encKeys         map[string]*encryptionKeys
@@ -57,7 +55,7 @@ type interactiveShellSession struct {
 
 func newInteractiveShellSession() *interactiveShellSession {
 	return &interactiveShellSession{
-		ptmx:            make(map[string]*os.File),
+		ptmx:            make(map[string]pty.Pty),
 		sessions:        make(map[string]*ptySession),
 		migrationTokens: make(map[string]migrationToken),
 		encKeys:         make(map[string]*encryptionKeys),
@@ -175,31 +173,7 @@ func (p *interactiveShellSession) isBusy(shellID string) (bool, error) {
 		return false, fmt.Errorf("no such shell: %s", shellID)
 	}
 
-	// SyscallConn (not Fd) so the pty stays non-blocking for the output reader
-	// goroutine that's continuously reading it — Fd() would flip that
-	// permanently to blocking mode for the rest of this file's lifetime.
-	rawConn, err := ptmx.SyscallConn()
-	if err != nil {
-		return false, fmt.Errorf("failed to access pty: %w", err)
-	}
-
-	var fgpgid int
-	var ioctlErr error
-	if err := rawConn.Control(func(fd uintptr) {
-		fgpgid, ioctlErr = unix.IoctlGetInt(int(fd), unix.TIOCGPGRP)
-	}); err != nil {
-		return false, fmt.Errorf("failed to access pty fd: %w", err)
-	}
-	if ioctlErr != nil {
-		return false, fmt.Errorf("failed to get foreground pgid: %w", ioctlErr)
-	}
-
-	shellPgid, err := syscall.Getpgid(pid)
-	if err != nil {
-		return false, fmt.Errorf("failed to get shell pgid: %w", err)
-	}
-
-	return fgpgid != shellPgid, nil
+	return foregroundPGIDDiffers(ptmx, pid)
 }
 
 func (p *interactiveShellSession) handleShellIsBusy() func(_ context.Context,
@@ -251,21 +225,36 @@ func (p *interactiveShellSession) agentSockForCaller(callerID uint64) string {
 // environment so tools run in the shell (git, ssh, ...) can use the caller's forwarded
 // local SSH agent — see RunAgentForward/handleAgentForward in agentforward.go.
 func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey []byte,
-	shellID string, agentSockPath string, command string, args ...string) (*os.File, error) {
-	cmd := exec.Command(command, args...)
-	if agentSockPath != "" {
-		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+agentSockPath)
-	}
-
+	shellID string, agentSockPath string, command string, args ...string) (pty.Pty, error) {
 	dir, err := p.resolveStartDir(inv)
 	if err != nil {
 		return nil, err
 	}
-	cmd.Dir = dir
 
-	ptmx, err := pty.Start(cmd)
+	ptmx, err := pty.New()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start PTY: %w", err)
+	}
+
+	if resolved, lookErr := exec.LookPath(command); lookErr == nil {
+		command = resolved
+	}
+
+	cmd := ptmx.Command(command, args...)
+	cmd.Dir = dir
+	if agentSockPath != "" {
+		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+agentSockPath)
+	}
+
+	if err := cmd.Start(); err != nil {
+		_ = ptmx.Close()
+		return nil, fmt.Errorf("failed to start PTY: %w", err)
+	}
+	// go-pty keeps its own slave fd open for the pty's lifetime; without closing
+	// it here, the master's Read never sees EOF/EIO after the child exits, since
+	// the kernel still sees an open slave reference in this process.
+	if unixPtmx, ok := ptmx.(pty.UnixPty); ok {
+		_ = unixPtmx.Slave().Close()
 	}
 
 	ps := &ptySession{inv: inv, sendKey: sendKey, authID: inv.CallerAuthID()}
@@ -281,7 +270,7 @@ func (p *interactiveShellSession) startPtySession(inv *xconn.Invocation, sendKey
 	return ptmx, nil
 }
 
-func (p *interactiveShellSession) startOutputReader(ptmx *os.File, ps *ptySession, shellID string) {
+func (p *interactiveShellSession) startOutputReader(ptmx pty.Pty, ps *ptySession, shellID string) {
 	defer func() {
 		p.Lock()
 		shouldClose := p.ptmx[shellID] == ptmx
@@ -291,7 +280,10 @@ func (p *interactiveShellSession) startOutputReader(ptmx *os.File, ps *ptySessio
 		delete(p.pids, shellID)
 		p.Unlock()
 		if shouldClose {
-			if err := ptmx.Close(); err != nil {
+			// The slave side was already closed in startPtySession (see comment there),
+			// so this always re-closes it and gets os.ErrClosed back; only the master
+			// side's close result is worth surfacing.
+			if err := ptmx.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 				log.Printf("Error closing PTY: %v", err)
 			}
 		}
@@ -360,7 +352,7 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 		p.Unlock()
 
 		var exists bool
-		var ptmx *os.File
+		var ptmx pty.Pty
 		if inv.Progress() {
 			payload, err := inv.ArgBytes(0)
 			if err != nil {
@@ -455,23 +447,19 @@ func (p *interactiveShellSession) handleShell() func(_ context.Context,
 						}
 					}
 					if !exists {
-						newPt, err := p.startPtySession(inv, enc.sendKey, shellID, p.agentSockForCaller(inv.Caller()), "bash")
+						newPt, err := p.startPtySession(inv, enc.sendKey, shellID, p.agentSockForCaller(inv.Caller()), defaultShell())
 						if err != nil {
 							return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 						}
 						ptmx = newPt
 					}
-					winsize := &pty.Winsize{
-						Cols: uint16(cols), // #nosec G115
-						Rows: uint16(rows), // #nosec G115
-					}
-					_ = pty.Setsize(ptmx, winsize)
+					_ = ptmx.Resize(cols, rows)
 				}
 				return xconn.NewInvocationError(xconn.ErrNoResult)
 			}
 
 			if !exists {
-				newPt, err := p.startPtySession(inv, enc.sendKey, shellID, p.agentSockForCaller(inv.Caller()), "bash")
+				newPt, err := p.startPtySession(inv, enc.sendKey, shellID, p.agentSockForCaller(inv.Caller()), defaultShell())
 				if err != nil {
 					return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 				}
@@ -503,7 +491,7 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 		enc := p.encKeys[shellID]
 		p.Unlock()
 
-		var ptmx *os.File
+		var ptmx pty.Pty
 		var exists bool
 		if inv.Progress() {
 			payload, err := inv.ArgBytes(0)
@@ -563,11 +551,7 @@ func (p *interactiveShellSession) handleExec() func(_ context.Context,
 						}
 						ptmx = newPt
 					}
-					winsize := &pty.Winsize{
-						Cols: uint16(cols), // #nosec G115
-						Rows: uint16(rows), // #nosec G115
-					}
-					_ = pty.Setsize(ptmx, winsize)
+					_ = ptmx.Resize(cols, rows)
 				}
 				return xconn.NewInvocationError(xconn.ErrNoResult)
 			}
@@ -644,13 +628,11 @@ func StartInteractiveCommand(session *xconn.Session, realm, procedureName string
 		<-keyExchangeReady
 
 		SafeGo(func() {
-			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, syscall.SIGWINCH)
-			for range sigChan {
+			watchResize(fd, func() {
 				if p := buildSizeProgress(false); p != nil {
 					progressChan <- p
 				}
-			}
+			})
 		})
 
 		buf := make([]byte, 1024)

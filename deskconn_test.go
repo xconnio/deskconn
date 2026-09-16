@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -13,6 +14,9 @@ import (
 	"github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
 )
+
+// goosWindows is runtime.GOOS's value on Windows, shared by tests that skip or branch on it.
+const goosWindows = "windows"
 
 func setupRouterAndConnectSessions(t *testing.T) (*xconn.Session, *xconn.Session) {
 	r, err := xconn.NewRouter(&xconn.RouterConfig{})
@@ -31,17 +35,21 @@ func setupRouterAndConnectSessions(t *testing.T) (*xconn.Session, *xconn.Session
 }
 
 func TestBrightnessGetSet(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("brightness is D-Bus-based and not registered on windows")
+	}
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	conn, err := dbus.ConnectSystemBus()
-	require.NoError(t, err)
-	sessionConn, err := dbus.ConnectSessionBus()
-	require.NoError(t, err)
+	// D-Bus isn't available on every platform/CI environment; NewScreen/NewMPRIS handle a
+	// nil conn gracefully, so a connect failure here isn't a test failure.
+	conn, _ := dbus.ConnectSystemBus()
+	sessionConn, _ := dbus.ConnectSessionBus()
 	screen := deskconn.NewScreen(sessionConn, conn, t.TempDir())
 	mpris := deskconn.NewMPRIS(sessionConn)
 	audio := deskconn.NewAudio()
 	defer audio.Close()
 	d := deskconn.NewDeskconn(screen, mpris, audio, true, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(deskconn.ProcedureScreenBrightnessGet).Do()
@@ -84,6 +92,7 @@ func TestDeviceInfoIncludesBattery(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	d := deskconn.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(deskconn.ProcedureDeviceInfo).Do()
@@ -103,6 +112,7 @@ func TestDeviceIsDesktop(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	d := deskconn.NewDeskconn(nil, nil, nil, true, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(deskconn.ProcedureDeviceIsDesktop).Do()
@@ -117,6 +127,7 @@ func TestDeviceIsDesktopFalseOnServer(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	d := deskconn.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	t.Cleanup(d.Close)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(deskconn.ProcedureDeviceIsDesktop).Do()
