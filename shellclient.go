@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
@@ -266,6 +267,25 @@ func shellResizeLoop(active *activeShellConn, fd int) {
 	}
 }
 
+// shellPingInterval is how often shellPingLoop sends shellOpPing while
+// otherwise idle. Must stay comfortably under shellIdleTimeout
+// (shellstream.go) so ordinary network jitter or a missed tick or two never
+// trips the server's deadline.
+const shellPingInterval = 10 * time.Second
+
+// shellPingLoop keeps the active connection producing traffic even when the
+// user isn't typing or resizing, so the server's idle-connection deadline
+// (shellIdleTimeout) doesn't mistake a quiet session for a dead one -- see
+// its doc comment for why that deadline exists at all.
+func shellPingLoop(active *activeShellConn) {
+	ticker := time.NewTicker(shellPingInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		conn, sendKey, _ := active.get()
+		_ = sendShellControl(conn, sendKey, shellControlMsg{Op: shellOpPing})
+	}
+}
+
 // shellReadLoop writes decrypted PTY output to stdout until the active
 // connection ends. A migration swapping active out from under it isn't
 // treated as the session ending -- it switches to the new connection
@@ -332,6 +352,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 
 	go shellStdinLoop(active)
 	go shellResizeLoop(active, fd)
+	go shellPingLoop(active)
 
 	if mode == "" {
 		go func() {

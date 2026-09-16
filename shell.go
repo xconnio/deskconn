@@ -87,10 +87,26 @@ func (p *interactiveShellSession) cleanupShellID(shellID string) {
 		_ = stored.Close()
 		delete(p.ptmx, shellID)
 	}
+	killShellProcessGroup(p.pids[shellID])
 	delete(p.sessions, shellID)
 	delete(p.migrationTokens, shellID)
 	delete(p.pids, shellID)
 	p.Unlock()
+}
+
+// killShellProcessGroup forcibly terminates a shell/exec's whole process
+// group (the spawned command plus anything it started, e.g. background
+// jobs in an interactive shell). Closing ptmx alone is not a reliable way
+// to do this: the kernel is supposed to deliver SIGHUP to the foreground
+// process group when a PTY's master side closes, but that can race with
+// startOutputReader's own concurrent blocked Read on the same file and --
+// empirically -- silently fail to happen at all, leaving the process
+// running forever. pid <= 0 is a no-op (never valid, just defensive).
+func killShellProcessGroup(pid int) {
+	if pid <= 0 {
+		return
+	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
 
 // cwdForShell reads the live working directory of an existing shell straight from
@@ -214,6 +230,10 @@ func (p *interactiveShellSession) startPtySession(transport shellTransport, shel
 	if err != nil {
 		return nil, fmt.Errorf("failed to start PTY: %w", err)
 	}
+	// Nothing else calls Wait, so without this the process stays a zombie
+	// (invisible to killShellProcessGroup, but still a process-table entry)
+	// forever after it exits, however that happens.
+	SafeGo(func() { _ = cmd.Wait() })
 
 	ps := &ptySession{transport: transport}
 	p.Lock()
@@ -231,6 +251,7 @@ func (p *interactiveShellSession) startOutputReader(ptmx *os.File, ps *ptySessio
 	defer func() {
 		p.Lock()
 		shouldClose := p.ptmx[shellID] == ptmx
+		pid := p.pids[shellID]
 		delete(p.ptmx, shellID)
 		delete(p.sessions, shellID)
 		delete(p.pids, shellID)
@@ -239,6 +260,11 @@ func (p *interactiveShellSession) startOutputReader(ptmx *os.File, ps *ptySessio
 			if err := ptmx.Close(); err != nil {
 				log.Printf("Error closing PTY: %v", err)
 			}
+			// Usually a no-op (the read loop below ending almost always means
+			// the process already exited on its own); matters when it ended
+			// because writeOutput failed instead, with the process possibly
+			// still running -- see killShellProcessGroup's doc comment.
+			killShellProcessGroup(pid)
 		}
 	}()
 	buf := make([]byte, 4096)

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/xconnio/xconn-go"
 )
@@ -202,6 +203,7 @@ func quicServerKeyExchange(stream net.Conn) (sendKey, receiveKey []byte, err err
 func (d *Deskconn) HandleQUICStream(_ xconn.BaseSession, stream net.Conn) {
 	defer stream.Close()
 
+	_ = stream.SetReadDeadline(time.Now().Add(fileStreamSessionIdleTimeout))
 	var route routingFrame
 	if err := readMsg(stream, &route); err != nil {
 		return
@@ -251,6 +253,7 @@ func quicServeSession(stream net.Conn, req fsRequest, sendKey, receiveKey []byte
 			return
 		}
 
+		_ = stream.SetReadDeadline(time.Now().Add(fileStreamSessionIdleTimeout))
 		if err := readEncryptedMsg(stream, &req, receiveKey); err != nil {
 			return
 		}

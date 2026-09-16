@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -89,6 +90,35 @@ func TestBeginShellSessionRunsExecCommand(t *testing.T) {
 		_, stillTracked := p.sessions[shellID]
 		return !stillTracked
 	}, 3*time.Second, 10*time.Millisecond, "PTY session should be cleaned up once the exec'd command exits")
+}
+
+// TestCleanupShellIDKillsProcessGroup guards against a real bug: closing
+// ptmx alone doesn't reliably kill a child that produces no PTY output
+// (nothing ever reads it) -- the expected SIGHUP-on-hangup can race with
+// startOutputReader's own concurrent blocked Read on the same file and
+// silently never arrive, leaving the process running forever. cleanupShellID
+// must kill the process group explicitly rather than relying on that.
+func TestCleanupShellIDKillsProcessGroup(t *testing.T) {
+	p := newInteractiveShellSession()
+	transport := &fakeShellTransport{}
+
+	shellID, _, _, err := p.beginShellSession(shellControlMsg{
+		Op: shellOpSize, Cols: 80, Rows: 24, Command: "sleep", Args: []string{"30"},
+	}, transport)
+	require.NoError(t, err)
+
+	p.Lock()
+	pid := p.pids[shellID]
+	p.Unlock()
+	require.Positive(t, pid)
+	require.NoError(t, syscall.Kill(pid, 0), "sanity check: process should be running before cleanup")
+
+	p.cleanupShellID(shellID)
+
+	require.Eventually(t, func() bool {
+		return syscall.Kill(pid, 0) != nil
+	}, 3*time.Second, 20*time.Millisecond,
+		"sleep should actually be killed (and reaped) by cleanupShellID, not just have its ptmx closed")
 }
 
 func TestBeginShellSessionMigrateValidToken(t *testing.T) {
@@ -234,6 +264,37 @@ func TestHandleQUICShellStreamEndToEnd(t *testing.T) {
 
 	// Drain output until the stream closes (bash exiting closes the PTY,
 	// which ends handleQUICShellStream's loop and the pipe).
+	for {
+		_, err := recvQUICShellEnvelope(client, receiveKey)
+		if err != nil {
+			break
+		}
+	}
+}
+
+// TestHandleQUICShellStreamIgnoresPing confirms a shellOpPing control
+// message (sent by the client purely to keep the connection's idle deadline
+// from expiring during genuine silence) doesn't disrupt an otherwise-normal
+// session -- the PTY keeps running and later data still reaches it.
+func TestHandleQUICShellStreamIgnoresPing(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+
+	d := Deskconn{shellSession: newInteractiveShellSession()}
+	go d.HandleQUICStream(nil, server)
+
+	require.NoError(t, writeMsg(client, routingFrame{Op: fsOpShell}))
+	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	require.NoError(t, err)
+
+	require.NoError(t, sendQUICShellControl(client, sendKey, shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}))
+	ack, err := recvQUICShellEnvelope(client, receiveKey)
+	require.NoError(t, err)
+	require.NotEmpty(t, ack.ackShellID)
+
+	require.NoError(t, sendQUICShellControl(client, sendKey, shellControlMsg{Op: shellOpPing}))
+	require.NoError(t, sendQUICShellData(client, sendKey, []byte("exit\n")))
+
 	for {
 		_, err := recvQUICShellEnvelope(client, receiveKey)
 		if err != nil {

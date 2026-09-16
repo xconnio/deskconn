@@ -40,7 +40,21 @@ const (
 	// shellOpMigrate claims an existing PTY from a different transport --
 	// sent as the first message on a freshly opened connection.
 	shellOpMigrate shellControlOp = "migrate"
+	// shellOpPing is sent periodically by the client whenever otherwise
+	// idle, purely so the connection keeps producing traffic -- it needs no
+	// server-side handling beyond having been read (see shellIdleTimeout).
+	shellOpPing shellControlOp = "ping"
 )
+
+// shellIdleTimeout bounds how long a shell/exec connection may go without
+// any traffic before it's considered dead. QUIC streams have no equivalent
+// of WebRTC's own peer-connectivity checks, so without this an abruptly
+// disconnected client (crash, killed process, dropped network) leaves its
+// remote command running forever instead of being cleaned up -- the client
+// sends shellOpPing on a timer (shellPingInterval, shellclient.go)
+// specifically to keep this from firing during genuine silence (e.g. a user
+// just reading output, not typing).
+const shellIdleTimeout = fileStreamSessionIdleTimeout
 
 // shellControlMsg is every control message in the raw-stream shell
 // protocol, sent inside the same encrypted envelope (shellMsgControl kind)
@@ -158,6 +172,7 @@ func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transp
 func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 	defer stream.Close()
 
+	_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
 	sendKey, receiveKey, err := quicServerKeyExchange(stream)
 	if err != nil {
 		return
@@ -190,6 +205,7 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 	}
 
 	for {
+		_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
 		frame, err := readFrame(stream)
 		if err != nil {
 			d.shellSession.endShellInput(shellID, transport)
