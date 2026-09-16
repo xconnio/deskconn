@@ -19,6 +19,14 @@ import (
 	"golang.org/x/term"
 )
 
+// modeQUIC/modeP2P are the "quic"/"p2p" --mode flag values every raw-stream
+// client entry point switches on. cmd/deskconn has its own ModeQUIC/ModeP2P
+// with the same values, kept separate since it can't import these.
+const (
+	modeQUIC = "quic"
+	modeP2P  = "p2p"
+)
+
 // clampUint16 clamps a terminal dimension (from term.GetSize, always
 // small and non-negative in practice) into shellControlMsg's wire type.
 func clampUint16(n int) uint16 {
@@ -337,7 +345,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	ctrl.Op, ctrl.Cols, ctrl.Rows = shellOpSize, clampUint16(cols), clampUint16(rows)
 
 	var primary *shellHandshakeResult
-	if mode == "p2p" {
+	if mode == modeP2P {
 		primary, err = dialShellP2P(ctx, realm, cfgDirectory, ctrl)
 	} else {
 		primary, err = dialShellQUIC(ctx, realm, cfgDirectory, ctrl)

@@ -130,18 +130,6 @@ func main() {
 		log.Fatal(regRespCat.Err)
 	}
 
-	regRespPortForward := sess.Register(deskconn.ProcedureProxyPortForward,
-		deskconn.ProxyPortForwardHandler(clientSession, cfgDirectory)).Do()
-	if regRespPortForward.Err != nil {
-		log.Fatal(regRespPortForward.Err)
-	}
-
-	regRespPortReverse := sess.Register(deskconn.ProcedureProxyPortReverse,
-		deskconn.ProxyPortReverseHandler(clientSession, cfgDirectory)).Do()
-	if regRespPortReverse.Err != nil {
-		log.Fatal(regRespPortReverse.Err)
-	}
-
 	// currentDeskconn tracks whichever *deskconn.Deskconn belongs to the current reconnect
 	// cycle (rebuilt fresh each time), so the VPN handlers below -- registered once, here --
 	// resolve it at call time instead of closing over one fixed instance.

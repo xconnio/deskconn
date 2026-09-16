@@ -39,8 +39,6 @@ const (
 	ProcedureProxyLogs         = "io.xconn.deskconn.deskconnd.proxy.logs"
 	ProcedureProxyPing         = "io.xconn.deskconn.deskconnd.proxy.ping"
 	ProcedureProxyCat          = "io.xconn.deskconn.deskconnd.proxy.file.cat"
-	ProcedureProxyPortForward  = "io.xconn.deskconn.deskconnd.proxy.port.forward"
-	ProcedureProxyPortReverse  = "io.xconn.deskconn.deskconnd.proxy.port.reverse"
 	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
 	ProcedureProxyPrinterPrint = "io.xconn.deskconn.deskconnd.proxy.printer.print"
 	ProcedureProxyVPNStart     = "io.xconn.deskconn.deskconnd.proxy.vpn.start"
@@ -668,58 +666,6 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 		}
 
 		return xconn.NewInvocationResult(callResp.Args()...)
-	}
-}
-
-func ProxyPortForwardHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		realm, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-		remotePort, err := inv.ArgString(1)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-		localPort, err := inv.ArgString(2)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-
-		err = ForwardLocalPort(ctx, deviceSess, remotePort, localPort)
-		return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-	}
-}
-
-func ProxyPortReverseHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		realm, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-		remotePort, err := inv.ArgString(1)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-		localPort, err := inv.ArgString(2)
-		if err != nil {
-			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
-		if err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-
-		if err := ReverseLocalPort(ctx, deviceSess, remotePort, localPort); err != nil {
-			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
-		}
-		return xconn.NewInvocationResult()
 	}
 }
 

@@ -895,35 +895,9 @@ func main() {
 		defer signal.Stop(sigCh)
 
 		errCh := make(chan error, 1)
-		switch *portForwardModeFlag {
-		case ModeQUIC:
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer quicSess.Connection().Close()
-			deskconn.SafeGo(func() { errCh <- deskconn.ForwardLocalPort(ctx, quicSess.Session, remotePort, localPort) })
-		case ModeP2P:
-			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer func() { _ = p2pSess.Leave() }()
-			deskconn.SafeGo(func() { errCh <- deskconn.ForwardLocalPort(ctx, p2pSess, remotePort, localPort) })
-		default:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			deskconn.SafeGo(func() {
-				resp := localSession.Call(deskconn.ProcedureProxyPortForward).
-					Args(realm, remotePort, localPort).DoContext(ctx)
-				errCh <- resp.Err
-			})
-		}
+		deskconn.SafeGo(func() {
+			errCh <- deskconn.RunPortForward(ctx, *portForwardModeFlag, realm, cfgDirectory, remotePort, localPort)
+		})
 
 		select {
 		case <-sigCh:
@@ -976,35 +950,9 @@ func main() {
 		defer signal.Stop(sigCh)
 
 		errCh := make(chan error, 1)
-		switch *portReverseModeFlag {
-		case ModeQUIC:
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer quicSess.Connection().Close()
-			deskconn.SafeGo(func() { errCh <- deskconn.ReverseLocalPort(ctx, quicSess.Session, remotePort, localPort) })
-		case ModeP2P:
-			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			defer func() { _ = p2pSess.Leave() }()
-			deskconn.SafeGo(func() { errCh <- deskconn.ReverseLocalPort(ctx, p2pSess, remotePort, localPort) })
-		default:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			deskconn.SafeGo(func() {
-				resp := localSession.Call(deskconn.ProcedureProxyPortReverse).
-					Args(realm, remotePort, localPort).DoContext(ctx)
-				errCh <- resp.Err
-			})
-		}
+		deskconn.SafeGo(func() {
+			errCh <- deskconn.RunPortReverse(ctx, *portReverseModeFlag, realm, cfgDirectory, remotePort, localPort)
+		})
 
 		select {
 		case <-sigCh:
