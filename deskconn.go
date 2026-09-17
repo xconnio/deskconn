@@ -29,7 +29,6 @@ const (
 	ProcedureFileCopy            = "io.xconn.deskconn.deskconnd.file.copy"
 	ProcedureFileEdit            = "io.xconn.deskconn.deskconnd.file.edit"
 	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
-	ProcedureLogs                = "io.xconn.deskconn.deskconnd.logs"
 	ProcedurePing                = "io.xconn.deskconn.deskconnd.ping"
 	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
 	ProcedureWallpaperGet        = "io.xconn.deskconn.deskconnd.wallpaper.get"
@@ -66,7 +65,6 @@ type Deskconn struct {
 	mpris                *MPRIS
 	audio                *Audio
 	printer              *Printer
-	logs                 *logSessions
 	indexer              *IndexService
 	wallpaper            *Wallpaper
 	processes            *info.ProcessMonitor
@@ -85,7 +83,6 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment 
 		mpris:                mpris,
 		audio:                audio,
 		printer:              NewPrinter(),
-		logs:                 newLogSessions(),
 		processes:            info.NewProcessMonitor(),
 		appRegistry:          info.NewAppRegistry(),
 		desktop:              desktopEnvironment,
@@ -134,7 +131,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureProcessSignal:   d.handleProcessSignal,
 		ProcedureAppList:         d.handleAppList,
 		ProcedureAppIcon:         d.handleAppIcon,
-		ProcedureLogs:            d.handleLogs,
 		ProcedureIndexQuery:      d.handleIndexQuery,
 		ProcedureAISessionList:   d.handleAISessionList,
 		ProcedureAISessionPull:   d.handleAISessionPull,
@@ -372,7 +368,6 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 		return
 	}
 	d.keys.delete(sessionID)
-	d.logs.killAndDeleteByCaller(sessionID)
 }
 
 func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {

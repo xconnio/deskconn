@@ -196,8 +196,9 @@ func quicServerKeyExchange(stream net.Conn) (sendKey, receiveKey []byte, err err
 // HandleQUICStream serves a single QUIC stream. The leading routingFrame's
 // Op says which protocol the rest of the stream speaks: fsOpShell goes to
 // handleQUICShellStream, fsOpPortForward/fsOpPortReverse go to portstream.go's
-// handlers, fsOpAgentForward goes to agentforwardstream.go's handler; list/init
-// are one-shot file-transfer requests that reply and return; read/write go to
+// handlers, fsOpAgentForward goes to agentforwardstream.go's handler,
+// fsOpLogs goes to logstream.go's handler; list/init are one-shot
+// file-transfer requests that reply and return; read/write go to
 // quicServeSession, which keeps the stream open across many chunk requests
 // from the same worker -- reopening a stream per chunk was measured to badly
 // limit throughput on real (non-loopback) links.
@@ -222,6 +223,9 @@ func (d *Deskconn) HandleQUICStream(_ xconn.BaseSession, stream net.Conn) {
 		return
 	case fsOpAgentForward:
 		d.handleQUICAgentForwardStream(stream)
+		return
+	case fsOpLogs:
+		d.handleQUICLogsStream(stream)
 		return
 	}
 

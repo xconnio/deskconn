@@ -61,6 +61,7 @@ const (
 	fsOpPortForward  fsOp = "portforward"  // one forwarded TCP connection (see portstream.go)
 	fsOpPortReverse  fsOp = "portreverse"  // one reverse-forward session (see portstream.go)
 	fsOpAgentForward fsOp = "agentforward" // one agent-forward session (see agentforwardstream.go)
+	fsOpLogs         fsOp = "logs"         // one `deskconn logs` session (see logstream.go)
 )
 
 // fsRequest is the single request message sent on a fresh stream/channel.

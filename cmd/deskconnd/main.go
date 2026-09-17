@@ -69,23 +69,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	proxyCalls := deskconn.NewProxyCalls()
 	clientSession := deskconn.NewClientSessions()
-
-	// If a caller's local WAMP session goes away mid-call (Ctrl-C, killed process, dropped
-	// connection) without ever sending its final non-progressive message, the goroutines
-	// spawned by ProxyLogsHandler would otherwise block forever on proxyCall.progressChan and
-	// its ProxyCalls entry would never be freed. Clean it up on session leave.
-	subRespSessionLeave := sess.Subscribe(deskconn.MetaTopicSessionLeave, func(event *xconn.Event) {
-		sessionID, err := event.ArgUInt64(0)
-		if err != nil {
-			return
-		}
-		proxyCalls.DeleteAndClose(sessionID)
-	}).Do()
-	if subRespSessionLeave.Err != nil {
-		log.Fatal(subRespSessionLeave.Err)
-	}
 
 	regRespFileOp := sess.Register(deskconn.ProcedureProxyFileOp,
 		deskconn.ProxyFileOpHandler(clientSession, cfgDirectory)).Do()
@@ -97,12 +81,6 @@ func main() {
 		deskconn.ProxyDeviceInfoHandler(clientSession, cfgDirectory)).Do()
 	if regRespDeviceInfo.Err != nil {
 		log.Fatal(regRespDeviceInfo.Err)
-	}
-
-	regRespLogs := sess.Register(deskconn.ProcedureProxyLogs,
-		deskconn.ProxyLogsHandler(proxyCalls, clientSession, cfgDirectory)).Do()
-	if regRespLogs.Err != nil {
-		log.Fatal(regRespLogs.Err)
 	}
 
 	regRespPing := sess.Register(deskconn.ProcedureProxyPing,
