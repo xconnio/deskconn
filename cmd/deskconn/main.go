@@ -682,7 +682,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "warning: SSH_AUTH_SOCK not set, continuing without agent forwarding")
 			}
 		}
-		defer setupAgentForward(*shellModeFlag, realm, cfgDirectory, agentSock, uri)()
+		defer setupAgentForward(*shellModeFlag, realm, cfgDirectory, agentSock)()
 
 		if err := deskconn.RunShell(context.Background(), *shellModeFlag, realm, cfgDirectory); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1576,13 +1576,12 @@ const pathInstallerBlock = "\n# Added by deskconn installer\nexport PATH=\"$HOME
 const agentForwardReadyTimeout = 5 * time.Second
 
 // setupAgentForward starts SSH-agent forwarding (see deskconn.RunAgentForward) when agentSock
-// is non-empty, dialing its own WAMP connection independent of the shell's raw stream: quic/p2p
-// modes connect directly to the device's realm-scoped session (ProcedureAgentForward); default
-// mode goes through the local daemon (ProcedureProxyAgentForward). It blocks until the remote
-// listener is confirmed ready (or setup fails/times out) so the shell can safely start right
-// after. Forwarding failures are reported as warnings and never block the shell from starting.
-// The returned func stops forwarding and must be called (deferred) once the shell exits.
-func setupAgentForward(mode, realm, cfgDirectory, agentSock, uri string) func() {
+// is non-empty, opening its own raw stream/channel independent of the shell's. It blocks until
+// the remote listener is confirmed ready (or setup fails/times out) so the shell can safely
+// start right after. Forwarding failures are reported as warnings and never block the shell
+// from starting. The returned func stops forwarding and must be called (deferred) once the
+// shell exits.
+func setupAgentForward(mode, realm, cfgDirectory, agentSock string) func() {
 	if agentSock == "" {
 		return func() {}
 	}
@@ -1590,27 +1589,7 @@ func setupAgentForward(mode, realm, cfgDirectory, agentSock, uri string) func() 
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan error, 1)
 	deskconn.SafeGo(func() {
-		var session *xconn.Session
-		var callRealm string
-		var err error
-		switch mode {
-		case ModeQUIC:
-			var quicSess *xconn.QUICSession
-			quicSess, err = deskconn.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
-			if err == nil {
-				session = quicSess.Session
-			}
-		case ModeP2P:
-			session, err = deskconn.ConnectDeviceRealmP2P(ctx, realm, cfgDirectory)
-		default:
-			session, err = xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
-			callRealm = realm
-		}
-		if err != nil {
-			ready <- err
-			return
-		}
-		_ = deskconn.RunAgentForward(ctx, session, callRealm, agentSock, ready)
+		_ = deskconn.RunAgentForward(ctx, mode, realm, cfgDirectory, agentSock, ready)
 	})
 
 	select {

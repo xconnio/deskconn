@@ -21,7 +21,6 @@ const (
 	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
 	ProcedureShellIsBusy         = "io.xconn.deskconn.deskconnd.shell.isbusy"
-	ProcedureAgentForward        = "io.xconn.deskconn.deskconnd.agent.forward"
 	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
 	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
 	ProcedurePrinterPrint        = "io.xconn.deskconn.deskconnd.printer.print"
@@ -129,7 +128,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureGitOriginal:     d.handleGitOriginal,
 		ProcedurePrinterList:     d.printer.handleListPrinters,
 		ProcedurePrinterPrint:    d.printer.handlePrint(),
-		ProcedureAgentForward:    d.handleAgentForward,
 		ProcedureDeviceInfo:      d.handleDeviceInfo,
 		ProcedureDeviceIsDesktop: d.handleDeviceIsDesktop,
 		ProcedureProcessList:     d.handleProcessList,
@@ -374,7 +372,6 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 		return
 	}
 	d.keys.delete(sessionID)
-	d.agentForwardSessions.stop(sessionID)
 	d.logs.killAndDeleteByCaller(sessionID)
 }
 

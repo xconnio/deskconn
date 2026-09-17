@@ -53,13 +53,14 @@ func effectiveWorkers(n int) int {
 type fsOp string
 
 const (
-	fsOpList        fsOp = "list"        // enumerate a remote source (download manifest)
-	fsOpRead        fsOp = "read"        // fetch one byte range of one file (download)
-	fsOpInit        fsOp = "init"        // create dirs/pre-size files at a remote destination (upload)
-	fsOpWrite       fsOp = "write"       // send one byte range of one file (upload)
-	fsOpShell       fsOp = "shell"       // interactive shell (see shell.go/shellstream.go)
-	fsOpPortForward fsOp = "portforward" // one forwarded TCP connection (see portstream.go)
-	fsOpPortReverse fsOp = "portreverse" // one reverse-forward session (see portstream.go)
+	fsOpList         fsOp = "list"         // enumerate a remote source (download manifest)
+	fsOpRead         fsOp = "read"         // fetch one byte range of one file (download)
+	fsOpInit         fsOp = "init"         // create dirs/pre-size files at a remote destination (upload)
+	fsOpWrite        fsOp = "write"        // send one byte range of one file (upload)
+	fsOpShell        fsOp = "shell"        // interactive shell (see shell.go/shellstream.go)
+	fsOpPortForward  fsOp = "portforward"  // one forwarded TCP connection (see portstream.go)
+	fsOpPortReverse  fsOp = "portreverse"  // one reverse-forward session (see portstream.go)
+	fsOpAgentForward fsOp = "agentforward" // one agent-forward session (see agentforwardstream.go)
 )
 
 // fsRequest is the single request message sent on a fresh stream/channel.

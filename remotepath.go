@@ -9,14 +9,7 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-// msgHeader/msgData are the message-type discriminators used by several
-// unrelated progressive-invocation protocols in this package (file cat,
-// agent forward, port forward/reverse) to distinguish a header/control
-// frame from a data frame.
 const (
-	msgHeader = "H"
-	msgData   = "D"
-
 	// fileChunkSize is the read/write buffer size used by streaming
 	// progressive-invocation transfers (file cat).
 	fileChunkSize = 1024 * 1024 // 1mb

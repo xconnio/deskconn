@@ -70,34 +70,21 @@ func main() {
 	}
 
 	proxyCalls := deskconn.NewProxyCalls()
-	// Agent forwarding gets its own ProxyCalls: a "deskconn shell -A" invocation runs the
-	// shell connection and the agent-forward call concurrently, and ProxyAgentForwardHandler
-	// keys purely by caller (session) ID, so sharing proxyCalls with other proxied calls would
-	// let them clobber each other's state.
-	agentForwardProxyCalls := deskconn.NewProxyCalls()
 	clientSession := deskconn.NewClientSessions()
 
 	// If a caller's local WAMP session goes away mid-call (Ctrl-C, killed process, dropped
 	// connection) without ever sending its final non-progressive message, the goroutines
-	// spawned by ProxyLogsHandler/ProxyAgentForwardHandler would otherwise block forever on
-	// proxyCall.progressChan and their ProxyCalls entries would never be freed. Clean both up
-	// on session leave.
+	// spawned by ProxyLogsHandler would otherwise block forever on proxyCall.progressChan and
+	// its ProxyCalls entry would never be freed. Clean it up on session leave.
 	subRespSessionLeave := sess.Subscribe(deskconn.MetaTopicSessionLeave, func(event *xconn.Event) {
 		sessionID, err := event.ArgUInt64(0)
 		if err != nil {
 			return
 		}
 		proxyCalls.DeleteAndClose(sessionID)
-		agentForwardProxyCalls.DeleteAndClose(sessionID)
 	}).Do()
 	if subRespSessionLeave.Err != nil {
 		log.Fatal(subRespSessionLeave.Err)
-	}
-
-	regRespAgentForward := sess.Register(deskconn.ProcedureProxyAgentForward,
-		deskconn.ProxyAgentForwardHandler(agentForwardProxyCalls, clientSession, cfgDirectory)).Do()
-	if regRespAgentForward.Err != nil {
-		log.Fatal(regRespAgentForward.Err)
 	}
 
 	regRespFileOp := sess.Register(deskconn.ProcedureProxyFileOp,

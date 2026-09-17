@@ -95,10 +95,10 @@ type vpnTunnelSession struct {
 
 // HandleAuxDataChannel is the single callback wired to the WebRTC
 // provider's OnDataChannel; it classifies each channel and dispatches to the
-// matching handler. Shell and port forward/reverse channels are classified
-// by label, since their first message -- a plaintext public key -- is
-// indistinguishable by content from a file-stream channel's. VPN and
-// file-stream channels are still classified by a "type" field in their
+// matching handler. Shell, port forward/reverse, and agent-forward channels
+// are classified by label, since their first message -- a plaintext public
+// key -- is indistinguishable by content from a file-stream channel's. VPN
+// and file-stream channels are still classified by a "type" field in their
 // first message.
 func (d *Deskconn) HandleAuxDataChannel(sessionID string, channel *webrtc.DataChannel, firstMessage []byte) {
 	switch channel.Label() {
@@ -110,6 +110,9 @@ func (d *Deskconn) HandleAuxDataChannel(sessionID string, channel *webrtc.DataCh
 		return
 	case portReverseChannelLabel:
 		d.HandlePortReverseChannel(sessionID, channel, firstMessage)
+		return
+	case agentForwardChannelLabel:
+		d.HandleAgentForwardChannel(sessionID, channel, firstMessage)
 		return
 	}
 

@@ -33,7 +33,6 @@ const (
 	ProcedureAccountLogin       = "io.xconn.deskconn.account.login"
 	ProcedureAccountLoginVerify = "io.xconn.deskconn.account.login.verify"
 
-	ProcedureProxyAgentForward = "io.xconn.deskconn.deskconnd.proxy.agent.forward"
 	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
 	ProcedureProxyDeviceInfo   = "io.xconn.deskconn.deskconnd.proxy.device.info"
 	ProcedureProxyLogs         = "io.xconn.deskconn.deskconnd.proxy.logs"
