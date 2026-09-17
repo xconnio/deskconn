@@ -315,48 +315,17 @@ func runAIResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
 	if err != nil {
 		return err
 	}
+	realm, err := deviceRealm(machine, cfgDirectory)
+	if err != nil {
+		return fmt.Errorf("unknown device %q: %w", machine, err)
+	}
 
 	cmdName, args := aiResumeCommand(sessionID)
 	fullArgs := append([]string{
 		"bash", "-c", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
 	}, args...)
 
-	switch mode {
-	case ModeQUIC:
-		realm, err := deviceRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
-		}
-		quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer quicSess.Connection().Close()
-		return deskconn.StartInteractiveCommand(quicSess.Session, "", deskconn.ProcedureExec, fullArgs...)
-	case ModeP2P:
-		realm, err := deviceRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
-		}
-		p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = p2pSess.Leave() }()
-		return deskconn.StartInteractiveCommand(p2pSess, "", deskconn.ProcedureExec, fullArgs...)
-	default:
-		realm, err := deviceRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
-		}
-		localSession, err := xconn.ConnectAnonymous(context.Background(),
-			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
-		if err != nil {
-			return fmt.Errorf("could not reach local daemon: %w", err)
-		}
-		defer func() { _ = localSession.Leave() }()
-		return deskconn.StartInteractiveCommand(localSession, realm, deskconn.ProcedureProxyExec, fullArgs...)
-	}
+	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, fullArgs)
 }
 
 // launch runs tool as a foreground child, inheriting stdio.

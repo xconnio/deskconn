@@ -70,53 +70,21 @@ func main() {
 	}
 
 	proxyCalls := deskconn.NewProxyCalls()
-	// Agent forwarding gets its own ProxyCalls: a "deskconn shell -A" invocation runs the
-	// shell call and the agent-forward call concurrently over the same local session, and
-	// both ProxyShellHandler and ProxyAgentForwardHandler key purely by caller (session) ID,
-	// so sharing proxyCalls with ProcedureProxyShell/ProcedureProxyExec would let the two
-	// calls clobber each other's state.
-	agentForwardProxyCalls := deskconn.NewProxyCalls()
 	clientSession := deskconn.NewClientSessions()
 
 	// If a caller's local WAMP session goes away mid-call (Ctrl-C, killed process, dropped
 	// connection) without ever sending its final non-progressive message, the goroutines
-	// spawned by ProxyShellHandler/ProxyProgressiveInvocationHandler/ProxyLogsHandler/
-	// ProxyAgentForwardHandler would otherwise block forever on proxyCall.progressChan and
-	// their ProxyCalls entries would never be freed. Clean both up on session leave.
+	// spawned by ProxyLogsHandler would otherwise block forever on proxyCall.progressChan and
+	// its ProxyCalls entry would never be freed. Clean it up on session leave.
 	subRespSessionLeave := sess.Subscribe(deskconn.MetaTopicSessionLeave, func(event *xconn.Event) {
 		sessionID, err := event.ArgUInt64(0)
 		if err != nil {
 			return
 		}
 		proxyCalls.DeleteAndClose(sessionID)
-		agentForwardProxyCalls.DeleteAndClose(sessionID)
 	}).Do()
 	if subRespSessionLeave.Err != nil {
 		log.Fatal(subRespSessionLeave.Err)
-	}
-
-	regRespShell := sess.Register(deskconn.ProcedureProxyShell, deskconn.ProxyShellHandler(proxyCalls,
-		clientSession, cfgDirectory)).Do()
-	if regRespShell.Err != nil {
-		log.Fatal(regRespShell.Err)
-	}
-
-	regRespShellMigrate := sess.Register(deskconn.ProcedureProxyShellMigrate,
-		deskconn.ProxyShellMigrateHandler(proxyCalls)).Do()
-	if regRespShellMigrate.Err != nil {
-		log.Fatal(regRespShellMigrate.Err)
-	}
-
-	regRespExec := sess.Register(deskconn.ProcedureProxyExec, deskconn.ProxyProgressiveInvocationHandler(proxyCalls,
-		clientSession, cfgDirectory, deskconn.ProcedureExec)).Do()
-	if regRespExec.Err != nil {
-		log.Fatal(regRespExec.Err)
-	}
-
-	regRespAgentForward := sess.Register(deskconn.ProcedureProxyAgentForward,
-		deskconn.ProxyAgentForwardHandler(agentForwardProxyCalls, clientSession, cfgDirectory)).Do()
-	if regRespAgentForward.Err != nil {
-		log.Fatal(regRespAgentForward.Err)
 	}
 
 	regRespFileOp := sess.Register(deskconn.ProcedureProxyFileOp,
@@ -147,18 +115,6 @@ func main() {
 		deskconn.ProxyCatHandler(clientSession, cfgDirectory)).Do()
 	if regRespCat.Err != nil {
 		log.Fatal(regRespCat.Err)
-	}
-
-	regRespPortForward := sess.Register(deskconn.ProcedureProxyPortForward,
-		deskconn.ProxyPortForwardHandler(clientSession, cfgDirectory)).Do()
-	if regRespPortForward.Err != nil {
-		log.Fatal(regRespPortForward.Err)
-	}
-
-	regRespPortReverse := sess.Register(deskconn.ProcedureProxyPortReverse,
-		deskconn.ProxyPortReverseHandler(clientSession, cfgDirectory)).Do()
-	if regRespPortReverse.Err != nil {
-		log.Fatal(regRespPortReverse.Err)
 	}
 
 	// currentDeskconn tracks whichever *deskconn.Deskconn belongs to the current reconnect

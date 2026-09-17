@@ -12,28 +12,17 @@ import (
 )
 
 type ProxyCall struct {
-	progressChan  chan *xconn.Progress
-	closeFunc     func()
-	closed        bool
-	streamID      uint64
-	migrateBlobCh chan []byte // set once by ProxyShellMigrateHandler, read once during migration
+	progressChan chan *xconn.Progress
+	closeFunc    func()
+	closed       bool
+	streamID     uint64
 
 	sync.Mutex
 }
 
 func newProxyCall() *ProxyCall {
 	return &ProxyCall{
-		progressChan:  make(chan *xconn.Progress, 32),
-		migrateBlobCh: make(chan []byte, 1),
-	}
-}
-
-// setMigrateBlob delivers the client-relayed encrypted migration token. Safe to call at
-// most meaningfully once; later calls are dropped since the channel is already full.
-func (pc *ProxyCall) setMigrateBlob(blob []byte) {
-	select {
-	case pc.migrateBlobCh <- blob:
-	default:
+		progressChan: make(chan *xconn.Progress, 32),
 	}
 }
 
@@ -46,18 +35,6 @@ func (pc *ProxyCall) send(p *xconn.Progress) {
 	ch := pc.progressChan
 	pc.Unlock()
 	ch <- p
-}
-
-func (pc *ProxyCall) switchChannel(newCh chan *xconn.Progress) {
-	pc.Lock()
-	pc.progressChan = newCh
-	pc.Unlock()
-}
-
-func (pc *ProxyCall) setCloseFunc(f func()) {
-	pc.Lock()
-	pc.closeFunc = f
-	pc.Unlock()
 }
 
 func (pc *ProxyCall) closeChannel() {
@@ -232,8 +209,8 @@ func (c *ClientSessions) SessionContext(realm string) (context.Context, bool) {
 // existing entry (a QUIC-to-P2P upgrade, or a reconnect after a network blip), every caller
 // that subscribed to that old entry via EnsureDeviceSessionWithUpgrade is notified with the
 // new session — not just whichever caller happened to trigger the replacement — so every
-// long-lived proxied call sharing this device connection (e.g. a shell and its agent-forward
-// call under "-A") can independently re-issue itself on the new session.
+// long-lived proxied call sharing this device connection can independently re-issue itself
+// on the new session.
 func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session,
 	webrtcSession *xconnwebrtc.WebRTCSession, ctx context.Context, cancel context.CancelFunc) {
 	c.Lock()
@@ -315,12 +292,12 @@ func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm,
 // EnsureDeviceSessionWithUpgrade is like EnsureDeviceSession but also subscribes to the
 // realm's session entry being replaced — by the background QUIC-to-P2P upgrade this starts,
 // or by a later reconnect after a network blip — and returns that subscription. Every
-// concurrent caller gets its own subscription and is independently notified, which matters
-// because "deskconn shell -A" runs two such callers (the shell call and the agent-forward
-// call) at once; both need to learn about a swap, not just whichever happened to trigger it.
-// Callers that use this must eventually stop reading it (the call ending is enough — the
-// channel is buffered so a delivery to an abandoned subscriber never blocks), unlike
-// EnsureDeviceSession, which is for callers with no such lifecycle to hang a subscription off.
+// concurrent caller gets its own subscription and is independently notified, for a proxied
+// call that needs to re-issue itself on the new session after a transport swap rather than
+// just learning its own call ended. Callers that use this must eventually stop reading it
+// (the call ending is enough — the channel is buffered so a delivery to an abandoned
+// subscriber never blocks), unlike EnsureDeviceSession, which is for callers with no such
+// lifecycle to hang a subscription off.
 func (c *ClientSessions) EnsureDeviceSessionWithUpgrade(ctx context.Context, realm,
 	cfgDirectory string) (*xconn.Session, <-chan *xconn.Session, error) {
 	return c.ensureDeviceSession(ctx, realm, cfgDirectory, true)

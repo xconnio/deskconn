@@ -20,10 +20,7 @@ const (
 	ProcedureScreenBrightnessSet = "io.xconn.deskconn.deskconnd.screen.brightness.set"
 	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
 	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
-	ProcedureShell               = "io.xconn.deskconn.deskconnd.shell"
 	ProcedureShellIsBusy         = "io.xconn.deskconn.deskconnd.shell.isbusy"
-	ProcedureAgentForward        = "io.xconn.deskconn.deskconnd.agent.forward"
-	ProcedureExec                = "io.xconn.deskconn.deskconnd.exec"
 	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
 	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
 	ProcedurePrinterPrint        = "io.xconn.deskconn.deskconnd.printer.print"
@@ -63,8 +60,6 @@ const (
 type Deskconn struct {
 	shellSession         *interactiveShellSession
 	keys                 *keyManager
-	forwardSessions      *portForwardSessions
-	reverseSessions      *portReverseSessions
 	agentForwardSessions *agentForwardSessions
 	files                *FileBrowser
 	screen               *Screen
@@ -84,8 +79,6 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment 
 	d := &Deskconn{
 		shellSession:         newInteractiveShellSession(),
 		keys:                 newKeyManager(),
-		forwardSessions:      newPortForwardSessions(),
-		reverseSessions:      newPortReverseSessions(),
 		agentForwardSessions: newAgentForwardSessions(),
 		files:                NewFileBrowser(),
 		screen:               screen,
@@ -123,9 +116,7 @@ func (d *Deskconn) StartIndexer(ctx context.Context) {
 func (d *Deskconn) Register(session *xconn.Session) error {
 	handlers := map[string]xconn.InvocationHandler{
 		ProcedureKeyExchange:     d.handleKeyExchange,
-		ProcedureShell:           d.shellSession.handleShell(),
 		ProcedureShellIsBusy:     d.shellSession.handleShellIsBusy(),
-		ProcedureExec:            d.shellSession.handleExec(),
 		ProcedureFileBrowse:      d.handleFileBrowse,
 		ProcedureFileRename:      d.handleFileRename,
 		ProcedureFileDelete:      d.handleFileDelete,
@@ -137,9 +128,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		ProcedureGitOriginal:     d.handleGitOriginal,
 		ProcedurePrinterList:     d.printer.handleListPrinters,
 		ProcedurePrinterPrint:    d.printer.handlePrint(),
-		ProcedurePortForward:     d.handlePortForward,
-		ProcedurePortReverse:     d.handlePortReverse,
-		ProcedureAgentForward:    d.handleAgentForward,
 		ProcedureDeviceInfo:      d.handleDeviceInfo,
 		ProcedureDeviceIsDesktop: d.handleDeviceIsDesktop,
 		ProcedureProcessList:     d.handleProcessList,
@@ -384,9 +372,6 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 		return
 	}
 	d.keys.delete(sessionID)
-	d.forwardSessions.deleteCaller(sessionID)
-	d.reverseSessions.stop(sessionID)
-	d.agentForwardSessions.stop(sessionID)
 	d.logs.killAndDeleteByCaller(sessionID)
 }
 

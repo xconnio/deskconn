@@ -47,14 +47,20 @@ func effectiveWorkers(n int) int {
 // fsOp identifies what a raw stream/channel request is asking the remote
 // side to do. The same set of ops is used verbatim over both the WebRTC
 // data-channel transport (filestreamchannel.go) and the QUIC stream
-// transport (quictransfer.go).
+// transport (quictransfer.go). fsOpShell doesn't carry an fsRequest at all --
+// it's only used in routingFrame.Op to route a raw QUIC stream to the shell
+// handler instead of the file-transfer one (see HandleQUICStream).
 type fsOp string
 
 const (
-	fsOpList  fsOp = "list"  // enumerate a remote source (download manifest)
-	fsOpRead  fsOp = "read"  // fetch one byte range of one file (download)
-	fsOpInit  fsOp = "init"  // create dirs/pre-size files at a remote destination (upload)
-	fsOpWrite fsOp = "write" // send one byte range of one file (upload)
+	fsOpList         fsOp = "list"         // enumerate a remote source (download manifest)
+	fsOpRead         fsOp = "read"         // fetch one byte range of one file (download)
+	fsOpInit         fsOp = "init"         // create dirs/pre-size files at a remote destination (upload)
+	fsOpWrite        fsOp = "write"        // send one byte range of one file (upload)
+	fsOpShell        fsOp = "shell"        // interactive shell (see shell.go/shellstream.go)
+	fsOpPortForward  fsOp = "portforward"  // one forwarded TCP connection (see portstream.go)
+	fsOpPortReverse  fsOp = "portreverse"  // one reverse-forward session (see portstream.go)
+	fsOpAgentForward fsOp = "agentforward" // one agent-forward session (see agentforwardstream.go)
 )
 
 // fsRequest is the single request message sent on a fresh stream/channel.
