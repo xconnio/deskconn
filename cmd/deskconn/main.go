@@ -276,6 +276,9 @@ func main() {
 	logsTail := logsCmd.Flag("tail", "Number of lines to show from the end (-1 = default)").Short('n').
 		Default("-1").Int64()
 	logsSince := logsCmd.Flag("since", "Show entries since duration ago (e.g. 1h, 30m)").String()
+	logsModeFlag := logsCmd.Flag("mode",
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
+	).Enum(ModeQUIC, ModeP2P)
 
 	screenshotCmd := app.Command("screenshot", "Screenshot settings")
 	screenshotEnableCmd := screenshotCmd.Command("enable", "Allow remote screenshot access")
@@ -1366,17 +1369,31 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
 		source := ""
 		if logsSource != nil {
 			source = *logsSource
 		}
-		if err := deskconn.StreamLogs(localSession, realm, source, *logsFollow, *logsTail, *logsSince); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+
+		errCh := make(chan error, 1)
+		deskconn.SafeGo(func() {
+			errCh <- deskconn.RunLogs(ctx, *logsModeFlag, realm, cfgDirectory, source, *logsFollow, *logsTail, *logsSince)
+		})
+
+		select {
+		case <-sigCh:
+			fmt.Println("\nStopping log stream...")
+			cancel()
+		case err := <-errCh:
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 		}
 
 	case screenshotEnableCmd.FullCommand():
