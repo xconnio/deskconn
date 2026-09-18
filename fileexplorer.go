@@ -220,6 +220,14 @@ func generateThumbnails(entries []FileEntry) {
 				defer func() { <-sem }()
 				e.Thumbnail = generateVideoThumbnail(e.Path)
 			})
+		} else if isPDFFile(e.Name) {
+			wg.Add(1)
+			SafeGo(func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				e.Thumbnail = generatePDFThumbnail(e.Path)
+			})
 		}
 	}
 	wg.Wait()
@@ -327,6 +335,10 @@ func isVideoFile(name string) bool {
 	return false
 }
 
+func isPDFFile(name string) bool {
+	return strings.ToLower(filepath.Ext(name)) == ".pdf"
+}
+
 func generateThumbnail(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
@@ -361,6 +373,30 @@ func generateVideoThumbnail(path string) string {
 		"-vf", fmt.Sprintf("scale=%d:-1", thumbnailMaxDim),
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",
+		"-",
+	)
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(out)
+}
+
+// generatePDFThumbnail renders the first page of a PDF to a JPEG via
+// pdftocairo (poppler-utils). Returns "" if the tool or file is unavailable.
+func generatePDFThumbnail(path string) string {
+	pdftocairo, err := exec.LookPath("pdftocairo")
+	if err != nil {
+		return ""
+	}
+
+	cmd := exec.Command(pdftocairo,
+		"-jpeg",
+		"-singlefile",
+		"-scale-to", fmt.Sprint(thumbnailMaxDim),
+		"-f", "1",
+		"-l", "1",
+		path,
 		"-",
 	)
 	out, err := cmd.Output()
@@ -649,7 +685,7 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 			batch = append(batch, buildFileEntry(path, info))
 			if !d.IsDir() {
 				name := d.Name()
-				if (isImageFile(name) && info.Size() <= maxThumbnailSourceSize) || isVideoFile(name) {
+				if (isImageFile(name) && info.Size() <= maxThumbnailSourceSize) || isVideoFile(name) || isPDFFile(name) {
 					mediaPaths = append(mediaPaths, path)
 				}
 			}
@@ -691,9 +727,12 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 			defer func() { <-sem }()
 			name := filepath.Base(p)
 			var thumb string
-			if isImageFile(name) {
+			switch {
+			case isImageFile(name):
 				thumb = generateThumbnail(p)
-			} else {
+			case isPDFFile(name):
+				thumb = generatePDFThumbnail(p)
+			default:
 				thumb = generateVideoThumbnail(p)
 			}
 			if thumb != "" {
