@@ -198,6 +198,7 @@ func (s *IndexService) runIndexer(ctx context.Context) {
 		_ = s.db.markIndexingComplete()
 		s.ready.Store(true)
 		log.Println("fileindex: indexing complete")
+		s.backfillPDFThumbnails(ctx)
 	}
 }
 
@@ -227,6 +228,29 @@ func (s *IndexService) runSync(ctx context.Context) {
 	if ctx.Err() == nil {
 		s.db.removeStaleEntries()
 		log.Println("fileindex: sync complete")
+		s.backfillPDFThumbnails(ctx)
+	}
+}
+
+// backfillPDFThumbnails runs once (guarded by a persisted meta flag) to
+// generate thumbnails for PDFs that were indexed before PDF thumbnailing
+// existed. Later runs are a no-op.
+func (s *IndexService) backfillPDFThumbnails(ctx context.Context) {
+	if s.db.isPDFThumbnailsBackfilled() {
+		return
+	}
+
+	paths := s.db.pdfPathsMissingThumbnails()
+	for _, path := range paths {
+		if ctx.Err() != nil {
+			return
+		}
+		s.storeThumbnailSlow(path, CategoryPDFs, 0)
+	}
+
+	if ctx.Err() == nil {
+		_ = s.db.markPDFThumbnailsBackfilled()
+		log.Printf("fileindex: backfilled thumbnails for %d PDFs", len(paths))
 	}
 }
 
@@ -297,12 +321,17 @@ func (s *IndexService) handleWatchEvent(event fsnotify.Event) {
 		return
 	}
 
-	if category == CategoryImages && info.Size() <= maxThumbnailSourceSize {
+	switch {
+	case category == CategoryImages && info.Size() <= maxThumbnailSourceSize:
 		if thumb := generateThumbnail(event.Name); thumb != "" {
 			_ = s.db.addThumbnail(event.Name, thumb)
 		}
-	} else if category == CategoryVideos {
+	case category == CategoryVideos:
 		if thumb := generateVideoThumbnail(event.Name); thumb != "" {
+			_ = s.db.addThumbnail(event.Name, thumb)
+		}
+	case category == CategoryPDFs:
+		if thumb := generatePDFThumbnail(event.Name); thumb != "" {
 			_ = s.db.addThumbnail(event.Name, thumb)
 		}
 	}
@@ -386,6 +415,11 @@ func (s *IndexService) storeThumbnailSlow(path, category string, size int64) {
 		time.Sleep(thumbIndexSleep)
 	case category == CategoryVideos:
 		if thumb := generateVideoThumbnail(path); thumb != "" {
+			_ = s.db.addThumbnail(path, thumb)
+		}
+		time.Sleep(thumbIndexSleep)
+	case category == CategoryPDFs:
+		if thumb := generatePDFThumbnail(path); thumb != "" {
 			_ = s.db.addThumbnail(path, thumb)
 		}
 		time.Sleep(thumbIndexSleep)

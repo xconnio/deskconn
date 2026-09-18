@@ -17,6 +17,8 @@ import (
 const (
 	bucketThumbnails = "thumbnails"
 	bucketMeta       = "meta"
+
+	metaKeyPDFThumbsBackfilled = "pdf_thumbs_backfilled"
 )
 
 type indexDB struct {
@@ -101,6 +103,39 @@ func (d *indexDB) isEntryUpToDate(path string, modTime time.Time, category strin
 		return nil
 	})
 	return ok
+}
+
+// isPDFThumbnailsBackfilled reports whether the one-time PDF thumbnail
+// backfill (for PDFs indexed before PDF thumbnailing existed) has already run.
+func (d *indexDB) isPDFThumbnailsBackfilled() bool {
+	var done bool
+	_ = d.db.View(func(tx *bolt.Tx) error {
+		done = string(tx.Bucket([]byte(bucketMeta)).Get([]byte(metaKeyPDFThumbsBackfilled))) == "true"
+		return nil
+	})
+	return done
+}
+
+func (d *indexDB) markPDFThumbnailsBackfilled() error {
+	return d.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte(bucketMeta)).Put([]byte(metaKeyPDFThumbsBackfilled), []byte("true"))
+	})
+}
+
+// pdfPathsMissingThumbnails returns the paths of all indexed PDFs that don't
+// yet have a stored thumbnail.
+func (d *indexDB) pdfPathsMissingThumbnails() []string {
+	var paths []string
+	_ = d.db.View(func(tx *bolt.Tx) error {
+		thumbs := tx.Bucket([]byte(bucketThumbnails))
+		return tx.Bucket([]byte(CategoryPDFs)).ForEach(func(k, _ []byte) error {
+			if len(thumbs.Get(k)) == 0 {
+				paths = append(paths, string(k))
+			}
+			return nil
+		})
+	})
+	return paths
 }
 
 func (d *indexDB) removeStaleEntries() {
