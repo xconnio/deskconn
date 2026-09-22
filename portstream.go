@@ -11,14 +11,6 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// portForwardChannelLabel/portReverseChannelLabel are checked by
-// HandleAuxDataChannel (iptunnel.go) before file transfer's first-message
-// sniffing, same as shellChannelLabel.
-const (
-	portForwardChannelLabel = "portforward"
-	portReverseChannelLabel = "portreverse"
-)
-
 // Envelope kind bytes, mirroring shellMsgControl/shellMsgData but in their
 // own namespace since these features never share a connection with
 // shell/file-transfer.
@@ -114,7 +106,7 @@ func relayPortForwardQUIC(stream net.Conn, tcpConn net.Conn, sendKey, receiveKey
 					closeAll()
 					return
 				}
-				if wErr := writeFrame(stream, envelope); wErr != nil {
+				if wErr := WriteFrame(stream, envelope); wErr != nil {
 					closeAll()
 					return
 				}
@@ -138,7 +130,7 @@ func relayPortForwardQUIC(stream net.Conn, tcpConn net.Conn, sendKey, receiveKey
 				if err != nil {
 					continue
 				}
-				if err := writeFrame(stream, envelope); err != nil {
+				if err := WriteFrame(stream, envelope); err != nil {
 					closeAll()
 					return
 				}
@@ -148,11 +140,11 @@ func relayPortForwardQUIC(stream net.Conn, tcpConn net.Conn, sendKey, receiveKey
 
 	for {
 		_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-		frame, err := readFrame(stream)
+		frame, err := ReadFrame(stream)
 		if err != nil {
 			return
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}
@@ -167,8 +159,8 @@ func relayPortForwardQUIC(stream net.Conn, tcpConn net.Conn, sendKey, receiveKey
 
 // relayPortForwardP2P is relayPortForwardQUIC's WebRTC counterpart: msgCh/
 // closed come from the caller's key exchange + OnMessage setup, exactly as
-// serveShellChannel's do.
-func relayPortForwardP2P(channel *webrtc.DataChannel, tcpConn net.Conn, sendKey, receiveKey []byte,
+// the shell channel handler's do.
+func relayPortForwardP2P(channel MessageChannel, tcpConn net.Conn, sendKey, receiveKey []byte,
 	msgCh chan []byte, closed <-chan struct{}) {
 	done := make(chan struct{})
 	var once sync.Once
@@ -226,11 +218,11 @@ func relayPortForwardP2P(channel *webrtc.DataChannel, tcpConn net.Conn, sendKey,
 	})
 
 	for {
-		frame, err := recvPriority(msgCh, closed, shellIdleTimeout)
+		frame, err := RecvPriority(msgCh, closed, shellIdleTimeout)
 		if err != nil {
 			return
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}
@@ -254,11 +246,11 @@ func (d *Deskconn) handleQUICPortForwardStream(stream net.Conn) {
 	}
 
 	_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-	frame, err := readFrame(stream)
+	frame, err := ReadFrame(stream)
 	if err != nil {
 		return
 	}
-	kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+	kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil || kind != portMsgControl {
 		return
 	}
@@ -272,8 +264,9 @@ func (d *Deskconn) handleQUICPortForwardStream(stream net.Conn) {
 	if dialErr != nil {
 		ack.Error = dialErr.Error()
 	}
-	if env, buildErr := buildPortEnvelope(portMsgControl, mustJSON(ack), sendKey); buildErr == nil {
-		_ = writeFrame(stream, env)
+	if env, buildErr := buildPortEnvelope(portMsgControl,
+		mustJSON(ack), sendKey); buildErr == nil {
+		_ = WriteFrame(stream, env)
 	}
 	if dialErr != nil {
 		return
@@ -284,18 +277,18 @@ func (d *Deskconn) handleQUICPortForwardStream(stream net.Conn) {
 
 // HandlePortForwardChannel serves one forwarded TCP connection over a raw
 // WebRTC data channel, mirroring handleQUICPortForwardStream.
-func (d *Deskconn) HandlePortForwardChannel(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
+func (d *Deskconn) HandlePortForwardChannel(_ string, channel MessageChannel, firstMessage []byte) {
 	SafeGo(func() { d.servePortForwardChannel(channel, firstMessage) })
 }
 
-func (d *Deskconn) servePortForwardChannel(channel *webrtc.DataChannel, firstMessage []byte) {
-	sendKey, receiveKey, err := p2pServerKeyExchange(channel, firstMessage)
+func (d *Deskconn) servePortForwardChannel(channel MessageChannel, firstMessage []byte) {
+	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
 
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	msgCh := make(chan []byte, 8)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		select {
@@ -304,12 +297,12 @@ func (d *Deskconn) servePortForwardChannel(channel *webrtc.DataChannel, firstMes
 		}
 	})
 
-	first, err := recvPriority(msgCh, closed, p2pRequestTimeout)
+	first, err := RecvPriority(msgCh, closed, P2PRequestTimeout)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
-	_, plaintext, err := decryptEnvelope(first, receiveKey)
+	_, plaintext, err := DecryptEnvelope(first, receiveKey)
 	if err != nil {
 		_ = channel.Close()
 		return
@@ -334,9 +327,9 @@ func (d *Deskconn) servePortForwardChannel(channel *webrtc.DataChannel, firstMes
 	relayPortForwardP2P(channel, tcpConn, sendKey, receiveKey, msgCh, closed)
 }
 
-// sendEncryptedJSONPort mirrors sendEncryptedJSON (filestreamencryption.go)
-// with port forward/reverse's own kind byte.
-func sendEncryptedJSONPort(channel *webrtc.DataChannel, v any, key []byte) error {
+// sendEncryptedJSONPort mirrors SendEncryptedJSON with port
+// forward/reverse's own kind byte.
+func sendEncryptedJSONPort(channel MessageChannel, v any, key []byte) error {
 	envelope, err := buildPortEnvelope(portMsgControl, mustJSON(v), key)
 	if err != nil {
 		return err
@@ -348,7 +341,8 @@ func sendEncryptedJSONPort(channel *webrtc.DataChannel, v any, key []byte) error
 // stream/channel through one owner. Since QUIC streams and WebRTC reliable-
 // ordered channels deliver bytes in write order, funneling all sends
 // through a single writer gives per-connection ordering for free -- no
-// seq/reorder-buffer needed.
+// seq/reorder-buffer needed. Shared by port-reverse and agent-forward,
+// both client and server sides.
 type portReverseWriter struct {
 	ch   chan []byte
 	done <-chan struct{}
@@ -376,11 +370,11 @@ func (d *Deskconn) handleQUICPortReverseStream(stream net.Conn) {
 	}
 
 	_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-	frame, err := readFrame(stream)
+	frame, err := ReadFrame(stream)
 	if err != nil {
 		return
 	}
-	kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+	kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil || kind != portMsgControl {
 		return
 	}
@@ -394,8 +388,9 @@ func (d *Deskconn) handleQUICPortReverseStream(stream net.Conn) {
 	if listenErr != nil {
 		ack.Error = listenErr.Error()
 	}
-	if env, buildErr := buildPortEnvelope(portMsgControl, mustJSON(ack), sendKey); buildErr == nil {
-		_ = writeFrame(stream, env)
+	if env, buildErr := buildPortEnvelope(portMsgControl,
+		mustJSON(ack), sendKey); buildErr == nil {
+		_ = WriteFrame(stream, env)
 	}
 	if listenErr != nil {
 		return
@@ -418,7 +413,7 @@ func (d *Deskconn) handleQUICPortReverseStream(stream net.Conn) {
 		for {
 			select {
 			case env := <-writer.ch:
-				if err := writeFrame(stream, env); err != nil {
+				if err := WriteFrame(stream, env); err != nil {
 					closeAll()
 					return
 				}
@@ -436,7 +431,8 @@ func (d *Deskconn) handleQUICPortReverseStream(stream net.Conn) {
 			case <-done:
 				return
 			case <-ticker.C:
-				env, err := buildPortEnvelope(portMsgControl, mustJSON(portReverseMsg{}), sendKey)
+				env, err := buildPortEnvelope(portMsgControl,
+					mustJSON(portReverseMsg{}), sendKey)
 				if err != nil {
 					continue
 				}
@@ -476,7 +472,8 @@ func (d *Deskconn) handleQUICPortReverseStream(stream net.Conn) {
 				for {
 					n, readErr := conn.Read(buf)
 					if n > 0 {
-						dataEnv, encErr := buildPortEnvelope(portMsgData, encodeConnData(connID, buf[:n]), sendKey)
+						dataEnv, encErr := buildPortEnvelope(portMsgData,
+							encodeConnData(connID, buf[:n]), sendKey)
 						if encErr != nil || !writer.send(dataEnv) {
 							break
 						}
@@ -503,11 +500,11 @@ func (d *Deskconn) handleQUICPortReverseStream(stream net.Conn) {
 
 	for {
 		_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-		frame, err := readFrame(stream)
+		frame, err := ReadFrame(stream)
 		if err != nil {
 			return
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}
@@ -541,18 +538,18 @@ func (d *Deskconn) handleQUICPortReverseStream(stream net.Conn) {
 
 // HandlePortReverseChannel serves one port-reverse session over a raw
 // WebRTC data channel, mirroring handleQUICPortReverseStream.
-func (d *Deskconn) HandlePortReverseChannel(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
+func (d *Deskconn) HandlePortReverseChannel(_ string, channel MessageChannel, firstMessage []byte) {
 	SafeGo(func() { d.servePortReverseChannel(channel, firstMessage) })
 }
 
-func (d *Deskconn) servePortReverseChannel(channel *webrtc.DataChannel, firstMessage []byte) {
-	sendKey, receiveKey, err := p2pServerKeyExchange(channel, firstMessage)
+func (d *Deskconn) servePortReverseChannel(channel MessageChannel, firstMessage []byte) {
+	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
 
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	msgCh := make(chan []byte, 32)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		select {
@@ -561,12 +558,12 @@ func (d *Deskconn) servePortReverseChannel(channel *webrtc.DataChannel, firstMes
 		}
 	})
 
-	first, err := recvPriority(msgCh, closed, p2pRequestTimeout)
+	first, err := RecvPriority(msgCh, closed, P2PRequestTimeout)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
-	_, plaintext, err := decryptEnvelope(first, receiveKey)
+	_, plaintext, err := DecryptEnvelope(first, receiveKey)
 	if err != nil {
 		_ = channel.Close()
 		return
@@ -612,7 +609,8 @@ func (d *Deskconn) servePortReverseChannel(channel *webrtc.DataChannel, firstMes
 			case <-closed:
 				return
 			case <-ticker.C:
-				env, err := buildPortEnvelope(portMsgControl, mustJSON(portReverseMsg{}), sendKey)
+				env, err := buildPortEnvelope(portMsgControl,
+					mustJSON(portReverseMsg{}), sendKey)
 				if err != nil {
 					continue
 				}
@@ -652,7 +650,8 @@ func (d *Deskconn) servePortReverseChannel(channel *webrtc.DataChannel, firstMes
 				for {
 					n, readErr := conn.Read(buf)
 					if n > 0 {
-						dataEnv, encErr := buildPortEnvelope(portMsgData, encodeConnData(connID, buf[:n]), sendKey)
+						dataEnv, encErr := buildPortEnvelope(portMsgData,
+							encodeConnData(connID, buf[:n]), sendKey)
 						if encErr != nil || !writer.send(dataEnv) {
 							break
 						}
@@ -678,11 +677,11 @@ func (d *Deskconn) servePortReverseChannel(channel *webrtc.DataChannel, firstMes
 	})
 
 	for {
-		frame, err := recvPriority(msgCh, closed, shellIdleTimeout)
+		frame, err := RecvPriority(msgCh, closed, shellIdleTimeout)
 		if err != nil {
 			return
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}

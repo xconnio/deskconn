@@ -16,15 +16,15 @@ func sendPortEnvelope(conn net.Conn, kind byte, plaintext, key []byte) error {
 	if err != nil {
 		return err
 	}
-	return writeFrame(conn, env)
+	return WriteFrame(conn, env)
 }
 
 func recvPortEnvelope(conn net.Conn, key []byte) (byte, []byte, error) {
-	frame, err := readFrame(conn)
+	frame, err := ReadFrame(conn)
 	if err != nil {
 		return 0, nil, err
 	}
-	return decryptEnvelope(frame, key)
+	return DecryptEnvelope(frame, key)
 }
 
 // freeTCPPort picks a free port by briefly binding then releasing it.
@@ -60,10 +60,11 @@ func TestPortForwardConnectSuccessAndDataRoundTrip(t *testing.T) {
 	d := Deskconn{}
 	go d.handleQUICPortForwardStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
-	require.NoError(t, sendPortEnvelope(client, portMsgControl, mustJSON(portForwardControlMsg{Port: portStr}), sendKey))
+	require.NoError(t, sendPortEnvelope(client, portMsgControl,
+		mustJSON(portForwardControlMsg{Port: portStr}), sendKey))
 	kind, plaintext, err := recvPortEnvelope(client, receiveKey)
 	require.NoError(t, err)
 	require.Equal(t, portMsgControl, kind)
@@ -84,11 +85,12 @@ func TestPortForwardConnectFailureReportsError(t *testing.T) {
 	d := Deskconn{}
 	go d.handleQUICPortForwardStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
 	// Port 0 with no listener: dialing "localhost:0" fails immediately.
-	require.NoError(t, sendPortEnvelope(client, portMsgControl, mustJSON(portForwardControlMsg{Port: "0"}), sendKey))
+	require.NoError(t, sendPortEnvelope(client, portMsgControl,
+		mustJSON(portForwardControlMsg{Port: "0"}), sendKey))
 	kind, plaintext, err := recvPortEnvelope(client, receiveKey)
 	require.NoError(t, err)
 	require.Equal(t, portMsgControl, kind)
@@ -121,13 +123,15 @@ func TestPortForwardIgnoresPing(t *testing.T) {
 	d := Deskconn{}
 	go d.handleQUICPortForwardStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
-	require.NoError(t, sendPortEnvelope(client, portMsgControl, mustJSON(portForwardControlMsg{Port: portStr}), sendKey))
+	require.NoError(t, sendPortEnvelope(client, portMsgControl,
+		mustJSON(portForwardControlMsg{Port: portStr}), sendKey))
 	_, _, err = recvPortEnvelope(client, receiveKey)
 	require.NoError(t, err)
 
-	require.NoError(t, sendPortEnvelope(client, portMsgControl, mustJSON(portForwardControlMsg{}), sendKey))
+	require.NoError(t, sendPortEnvelope(client, portMsgControl,
+		mustJSON(portForwardControlMsg{}), sendKey))
 	require.NoError(t, sendPortEnvelope(client, portMsgData, []byte("still works"), sendKey))
 
 	kind, plaintext, err := recvPortEnvelope(client, receiveKey)
@@ -159,9 +163,10 @@ func TestPortForwardClosesBackendOnClientDisconnect(t *testing.T) {
 	d := Deskconn{}
 	go d.handleQUICPortForwardStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
-	require.NoError(t, sendPortEnvelope(client, portMsgControl, mustJSON(portForwardControlMsg{Port: portStr}), sendKey))
+	require.NoError(t, sendPortEnvelope(client, portMsgControl,
+		mustJSON(portForwardControlMsg{Port: portStr}), sendKey))
 	_, _, err = recvPortEnvelope(client, receiveKey)
 	require.NoError(t, err)
 
@@ -196,7 +201,7 @@ func TestPortReverseListenFailureReportsError(t *testing.T) {
 	d := Deskconn{}
 	go d.handleQUICPortReverseStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
 	require.NoError(t, sendPortEnvelope(client, portMsgControl,
@@ -215,7 +220,7 @@ func TestPortReverseSingleConnectionDataRoundTrip(t *testing.T) {
 	d := Deskconn{}
 	go d.handleQUICPortReverseStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
 	portStr := freeTCPPort(t)
@@ -263,7 +268,7 @@ func TestPortReverseConcurrentConnections(t *testing.T) {
 	d := Deskconn{}
 	go d.handleQUICPortReverseStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
 	portStr := freeTCPPort(t)

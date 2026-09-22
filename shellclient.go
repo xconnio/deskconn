@@ -50,8 +50,8 @@ type shellConn interface {
 
 type quicClientShellConn struct{ stream net.Conn }
 
-func (c *quicClientShellConn) sendEnvelope(e []byte) error   { return writeFrame(c.stream, e) }
-func (c *quicClientShellConn) recvEnvelope() ([]byte, error) { return readFrame(c.stream) }
+func (c *quicClientShellConn) sendEnvelope(e []byte) error   { return WriteFrame(c.stream, e) }
+func (c *quicClientShellConn) recvEnvelope() ([]byte, error) { return ReadFrame(c.stream) }
 func (c *quicClientShellConn) close() error                  { return c.stream.Close() }
 
 type p2pClientShellConn struct {
@@ -103,7 +103,7 @@ func recvShellAck(conn shellConn, receiveKey []byte) (shellControlMsg, error) {
 	if err != nil {
 		return shellControlMsg{}, err
 	}
-	kind, plaintext, err := decryptEnvelope(envelope, receiveKey)
+	kind, plaintext, err := DecryptEnvelope(envelope, receiveKey)
 	if err != nil {
 		return shellControlMsg{}, err
 	}
@@ -145,11 +145,11 @@ func dialShellQUIC(ctx context.Context, realm, cfgDirectory string,
 		cleanup()
 		return nil, err
 	}
-	if err := writeMsg(stream, routingFrame{Realm: realm, Op: fsOpShell}); err != nil {
+	if err := WriteMsg(stream, RoutingFrame{Realm: realm, Op: FSOpShell}); err != nil {
 		cleanup()
 		return nil, err
 	}
-	sendKey, receiveKey, err := quicClientKeyExchange(stream)
+	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
 	if err != nil {
 		cleanup()
 		return nil, err
@@ -179,12 +179,12 @@ func dialShellP2P(ctx context.Context, realm, cfgDirectory string,
 	}
 	cleanup := func() { _ = p2pSess.Close() }
 
-	channel, err := openP2PChannel(p2pSess, shellChannelLabel)
+	channel, err := openP2PChannel(p2pSess, ShellChannelLabel)
 	if err != nil {
 		cleanup()
 		return nil, err
 	}
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
 		cleanup()
@@ -276,9 +276,7 @@ func shellResizeLoop(active *activeShellConn, fd int) {
 }
 
 // shellPingInterval is how often shellPingLoop sends shellOpPing while
-// otherwise idle. Must stay comfortably under shellIdleTimeout
-// (shellstream.go) so ordinary network jitter or a missed tick or two never
-// trips the server's deadline.
+// otherwise idle. Must stay comfortably under shellIdleTimeout.
 const shellPingInterval = 10 * time.Second
 
 // shellPingLoop keeps the active connection producing traffic even when the
@@ -310,7 +308,7 @@ func shellReadLoop(active *activeShellConn) error {
 			}
 			return err
 		}
-		kind, plaintext, err := decryptEnvelope(envelope, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(envelope, receiveKey)
 		if err != nil {
 			continue
 		}

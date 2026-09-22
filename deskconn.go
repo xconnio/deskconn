@@ -14,47 +14,7 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-const (
-	ProcedureKeyExchange         = "io.xconn.deskconn.deskconnd.key.exchange"
-	ProcedureScreenBrightnessGet = "io.xconn.deskconn.deskconnd.screen.brightness.get"
-	ProcedureScreenBrightnessSet = "io.xconn.deskconn.deskconnd.screen.brightness.set"
-	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
-	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
-	ProcedureShellIsBusy         = "io.xconn.deskconn.deskconnd.shell.isbusy"
-	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
-	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
-	ProcedurePrinterPrint        = "io.xconn.deskconn.deskconnd.printer.print"
-	ProcedureFileRename          = "io.xconn.deskconn.deskconnd.file.rename"
-	ProcedureFileDelete          = "io.xconn.deskconn.deskconnd.file.delete"
-	ProcedureFileCopy            = "io.xconn.deskconn.deskconnd.file.copy"
-	ProcedureFileEdit            = "io.xconn.deskconn.deskconnd.file.edit"
-	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
-	ProcedurePing                = "io.xconn.deskconn.deskconnd.ping"
-	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
-	ProcedureWallpaperGet        = "io.xconn.deskconn.deskconnd.wallpaper.get"
-	ProcedureWallpaperChecksum   = "io.xconn.deskconn.deskconnd.wallpaper.checksum"
-
-	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
-	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
-	ProcedureMPRISPlay      = "io.xconn.deskconn.deskconnd.mpris.play"
-	ProcedureMPRISPause     = "io.xconn.deskconn.deskconnd.mpris.pause"
-	ProcedureMPRISNext      = "io.xconn.deskconn.deskconnd.mpris.next"
-	ProcedureMPRISPrevious  = "io.xconn.deskconn.deskconnd.mpris.previous"
-
-	ProcedureAudioMute       = "io.xconn.deskconn.deskconnd.audio.mute"
-	ProcedureAudioUnmute     = "io.xconn.deskconn.deskconnd.audio.unmute"
-	ProcedureAudioToggleMute = "io.xconn.deskconn.deskconnd.audio.togglemute"
-	ProcedureAudioIsMuted    = "io.xconn.deskconn.deskconnd.audio.ismuted"
-
-	ProcedureScreenshot           = "io.xconn.deskconn.deskconnd.screenshot"
-	ProcedureScreenshotPermission = "io.xconn.deskconn.deskconnd.screenshot.permission"
-
-	ErrInvalidArgument = "wamp.error.invalid_argument"
-	ErrOperationFailed = "wamp.error.operation_failed"
-	ErrNotAuthorized   = "wamp.error.not_authorized"
-
-	MetaTopicSessionLeave = "wamp.session.on_leave"
-)
+const MetaTopicSessionLeave = "wamp.session.on_leave"
 
 type Deskconn struct {
 	shellSession         *interactiveShellSession

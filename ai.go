@@ -13,12 +13,6 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-const (
-	ProcedureAISessionList = "io.xconn.deskconn.deskconnd.ai.session.list"
-
-	ProcedureAISessionPull = "io.xconn.deskconn.deskconnd.ai.session.pull"
-)
-
 // AISessionSummary describes one session file found on a device.
 type AISessionSummary struct {
 	Tool      string    `json:"tool"`

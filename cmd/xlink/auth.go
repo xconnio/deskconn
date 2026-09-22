@@ -1,13 +1,17 @@
-package deskconn
+package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/xconnio/deskconn"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 )
@@ -203,4 +207,44 @@ func (a *Authenticator) SubscribeEvents(session *xconn.Session, machineID string
 	removeSubResp := session.Subscribe(fmt.Sprintf(TopicKeyRemovedFormat, machineID), a.handleRemoveKey).Do()
 
 	return removeSubResp.Err
+}
+
+func ReadPrincipalsFromFile() ([]*CryptosignPrincipal, error) {
+	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	principalsFile := filepath.Join(cfgDirectory, "principals.json")
+
+	data, err := os.ReadFile(principalsFile)
+	if err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(string(data)) == "" {
+		return []*CryptosignPrincipal{}, nil
+	}
+
+	var principals []*CryptosignPrincipal
+	if err := json.Unmarshal(data, &principals); err != nil {
+		return nil, err
+	}
+
+	return principals, nil
+}
+
+func WritePrincipalsToFile(principals []*CryptosignPrincipal) error {
+	cfgDirectory, err := deskconn.CfgDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	jsonData, err := json.MarshalIndent(principals, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	jsonData = append(jsonData, '\n')
+
+	return os.WriteFile(filepath.Join(cfgDirectory, "principals.json"), jsonData, 0600)
 }

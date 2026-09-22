@@ -9,15 +9,6 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-const (
-	ProcedureDeviceInfo      = "io.xconn.deskconn.deskconnd.device.info"
-	ProcedureDeviceIsDesktop = "io.xconn.deskconn.deskconnd.device.is_desktop"
-	ProcedureProcessList     = "io.xconn.deskconn.deskconnd.process.list"
-	ProcedureProcessSignal   = "io.xconn.deskconn.deskconnd.process.signal"
-	ProcedureAppList         = "io.xconn.deskconn.deskconnd.app.list"
-	ProcedureAppIcon         = "io.xconn.deskconn.deskconnd.app.icon"
-)
-
 func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 	deviceInfo, err := info.GetDeviceInfo()
 	if err != nil {

@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	// parallelChunkSize is the byte range each parallel worker requests (or
+	// ParallelChunkSize is the byte range each parallel worker requests (or
 	// pushes) from a single file before moving on to the next chunk in the
 	// queue -- the unit of work for the worker pool, not the wire message size.
-	parallelChunkSize = 4 * 1024 * 1024 // 4MB
+	ParallelChunkSize = 4 * 1024 * 1024 // 4MB
 
 	// parallelStreamWorkers is the default number of chunk requests that run
 	// concurrently over separate raw streams/channels, mirroring the
@@ -44,59 +44,59 @@ func effectiveWorkers(n int) int {
 	return n
 }
 
-// fsOp identifies what a raw stream/channel request is asking the remote
+// FSOp identifies what a raw stream/channel request is asking the remote
 // side to do. The same set of ops is used verbatim over both the WebRTC
 // data-channel transport (filestreamchannel.go) and the QUIC stream
-// transport (quictransfer.go). fsOpShell doesn't carry an fsRequest at all --
+// transport (quictransfer.go). FSOpShell doesn't carry an FSRequest at all --
 // it's only used in routingFrame.Op to route a raw QUIC stream to the shell
 // handler instead of the file-transfer one (see HandleQUICStream).
-type fsOp string
+type FSOp string
 
 const (
-	fsOpList         fsOp = "list"         // enumerate a remote source (download manifest)
-	fsOpRead         fsOp = "read"         // fetch one byte range of one file (download)
-	fsOpInit         fsOp = "init"         // create dirs/pre-size files at a remote destination (upload)
-	fsOpWrite        fsOp = "write"        // send one byte range of one file (upload)
-	fsOpShell        fsOp = "shell"        // interactive shell (see shell.go/shellstream.go)
-	fsOpPortForward  fsOp = "portforward"  // one forwarded TCP connection (see portstream.go)
-	fsOpPortReverse  fsOp = "portreverse"  // one reverse-forward session (see portstream.go)
-	fsOpAgentForward fsOp = "agentforward" // one agent-forward session (see agentforwardstream.go)
-	fsOpLogs         fsOp = "logs"         // one `deskconn logs` session (see logstream.go)
+	FSOpList         FSOp = "list"         // enumerate a remote source (download manifest)
+	FSOpRead         FSOp = "read"         // fetch one byte range of one file (download)
+	FSOpInit         FSOp = "init"         // create dirs/pre-size files at a remote destination (upload)
+	FSOpWrite        FSOp = "write"        // send one byte range of one file (upload)
+	FSOpShell        FSOp = "shell"        // interactive shell (see shell.go/shellstream.go)
+	FSOpPortForward  FSOp = "portforward"  // one forwarded TCP connection (see portstream.go)
+	FSOpPortReverse  FSOp = "portreverse"  // one reverse-forward session (see portstream.go)
+	FSOpAgentForward FSOp = "agentforward" // one agent-forward session (see agentforwardstream.go)
+	FSOpLogs         FSOp = "logs"         // one `deskconn logs` session (see logstream.go)
 )
 
-// fsRequest is the single request message sent on a fresh stream/channel.
+// FSRequest is the single request message sent on a fresh stream/channel.
 // Which fields matter depends on Op: List needs Path/Recursive; Read needs
 // Path/RelPath/Offset/Length; Init needs Path/Entries/SourceIsDir/
 // TargetIsDirHint; Write needs Path/RelPath/Offset/Length/SourceIsDir/
 // TargetIsDirHint (the latter two so the server can re-derive the same
 // destination layout Init established, without keeping per-transfer state
 // between the stateless per-chunk requests).
-type fsRequest struct {
-	Op              fsOp                    `json:"op"`
+type FSRequest struct {
+	Op              FSOp                    `json:"op"`
 	Path            string                  `json:"path,omitempty"`
 	Recursive       bool                    `json:"recursive,omitempty"`
 	RelPath         string                  `json:"rel_path,omitempty"`
 	Offset          int64                   `json:"offset,omitempty"`
 	Length          int64                   `json:"length,omitempty"`
-	Entries         []transferManifestEntry `json:"entries,omitempty"`
+	Entries         []TransferManifestEntry `json:"entries,omitempty"`
 	SourceIsDir     bool                    `json:"source_is_dir,omitempty"`
 	TargetIsDirHint bool                    `json:"target_is_dir_hint,omitempty"`
 }
 
-// fsResponse is the single reply to an fsRequest. For Read it precedes the
+// FSResponse is the single reply to an FSRequest. For Read it precedes the
 // raw byte payload; for List it carries the manifest; Init/Write carry only
 // OK/Err.
-type fsResponse struct {
+type FSResponse struct {
 	OK      bool                    `json:"ok"`
 	Err     string                  `json:"error,omitempty"`
-	Entries []transferManifestEntry `json:"entries,omitempty"`
+	Entries []TransferManifestEntry `json:"entries,omitempty"`
 }
 
-// transferManifestEntry describes one file or directory within a transfer,
+// TransferManifestEntry describes one file or directory within a transfer,
 // with RelPath rooted at the transfer's own top-level name (i.e. relative
 // to the parent of the path the transfer was started on) -- the same
 // convention fileHeaderMsg used for the WAMP-based transfer.
-type transferManifestEntry struct {
+type TransferManifestEntry struct {
 	RelPath string `json:"rel_path"`
 	Size    int64  `json:"size"`
 	Mode    uint32 `json:"mode"`
@@ -111,11 +111,11 @@ type transferChunk struct {
 	Length  int64
 }
 
-// buildManifest walks rootPath (a file, or if recursive a directory) and
+// BuildManifest walks rootPath (a file, or if recursive a directory) and
 // returns its entries relative to rootPath's own parent. rootPath is used
 // as given -- callers resolve it against a remote home directory or the
 // local cwd beforehand, whichever applies.
-func buildManifest(rootPath string, recursive bool) ([]transferManifestEntry, error) {
+func BuildManifest(rootPath string, recursive bool) ([]TransferManifestEntry, error) {
 	info, err := os.Lstat(rootPath)
 	if err != nil {
 		return nil, err
@@ -126,7 +126,7 @@ func buildManifest(rootPath string, recursive bool) ([]transferManifestEntry, er
 
 	basePath := filepath.Dir(rootPath)
 
-	var entries []transferManifestEntry
+	var entries []TransferManifestEntry
 	var walk func(path string) error
 	walk = func(path string) error {
 		info, err := os.Lstat(path)
@@ -134,7 +134,7 @@ func buildManifest(rootPath string, recursive bool) ([]transferManifestEntry, er
 			return err
 		}
 		relPath, _ := filepath.Rel(basePath, path)
-		entries = append(entries, transferManifestEntry{
+		entries = append(entries, TransferManifestEntry{
 			RelPath: filepath.ToSlash(relPath),
 			Size:    info.Size(),
 			Mode:    uint32(info.Mode().Perm()), //nolint:gosec
@@ -161,16 +161,16 @@ func buildManifest(rootPath string, recursive bool) ([]transferManifestEntry, er
 }
 
 // planChunks flattens manifest file entries into byte-range jobs of at most
-// parallelChunkSize each. Directories and zero-length files need no data
-// transfer -- materializeTargets alone accounts for them.
-func planChunks(entries []transferManifestEntry) []transferChunk {
+// ParallelChunkSize each. Directories and zero-length files need no data
+// transfer -- MaterializeTargets alone accounts for them.
+func planChunks(entries []TransferManifestEntry) []transferChunk {
 	var chunks []transferChunk
 	for _, e := range entries {
 		if e.IsDir || e.Size == 0 {
 			continue
 		}
-		for off := int64(0); off < e.Size; off += parallelChunkSize {
-			length := int64(parallelChunkSize)
+		for off := int64(0); off < e.Size; off += ParallelChunkSize {
+			length := int64(ParallelChunkSize)
 			if off+length > e.Size {
 				length = e.Size - off
 			}
@@ -181,7 +181,7 @@ func planChunks(entries []transferManifestEntry) []transferChunk {
 }
 
 // totalSize sums the size of every non-directory entry.
-func totalSize(entries []transferManifestEntry) int64 {
+func totalSize(entries []TransferManifestEntry) int64 {
 	var total int64
 	for _, e := range entries {
 		if !e.IsDir {
@@ -191,13 +191,13 @@ func totalSize(entries []transferManifestEntry) int64 {
 	return total
 }
 
-// isRootDir decides whether a transfer's destination root should be treated
+// IsRootDir decides whether a transfer's destination root should be treated
 // as a directory that entries nest under (true), or as the literal target
 // path for the transfer's single top-level entry (false). sourceIsDir and
 // targetIsDirHint let the caller force the directory interpretation before
 // the destination exists (e.g. a recursive upload/download to a path that
 // doesn't exist yet); otherwise it falls back to whatever is already there.
-func isRootDir(root string, sourceIsDir, targetIsDirHint bool) bool {
+func IsRootDir(root string, sourceIsDir, targetIsDirHint bool) bool {
 	if sourceIsDir || targetIsDirHint {
 		return true
 	}
@@ -205,12 +205,12 @@ func isRootDir(root string, sourceIsDir, targetIsDirHint bool) bool {
 	return err == nil && info.IsDir()
 }
 
-// resolveDestPath maps a manifest entry's RelPath onto a concrete path
+// ResolveDestPath maps a manifest entry's RelPath onto a concrete path
 // under root. If rootIsDir, entries nest under root by their full RelPath;
 // otherwise the transfer's single top-level entry (RelPath == sourceRoot)
 // is renamed to root itself, and any of its descendants nest under root by
 // the remainder of their RelPath.
-func resolveDestPath(root string, rootIsDir bool, sourceRoot, relPath string) string {
+func ResolveDestPath(root string, rootIsDir bool, sourceRoot, relPath string) string {
 	if rootIsDir {
 		return filepath.Join(root, filepath.FromSlash(relPath))
 	}
@@ -218,19 +218,19 @@ func resolveDestPath(root string, rootIsDir bool, sourceRoot, relPath string) st
 	return filepath.Clean(root + filepath.FromSlash(suffix))
 }
 
-// materializeTargets creates every directory and pre-sizes (creates and
+// MaterializeTargets creates every directory and pre-sizes (creates and
 // truncates to its final length) every file described by entries, rooted at
 // root. Doing this once, up front, lets the parallel chunk workers open
 // their destination file and WriteAt/copy into it without racing over
 // creation or truncation.
-func materializeTargets(entries []transferManifestEntry, root string, rootIsDir bool) error {
+func MaterializeTargets(entries []TransferManifestEntry, root string, rootIsDir bool) error {
 	sourceRoot := ""
 	if len(entries) > 0 {
 		sourceRoot = entries[0].RelPath
 	}
 
 	for _, e := range entries {
-		dest := resolveDestPath(root, rootIsDir, sourceRoot, e.RelPath)
+		dest := ResolveDestPath(root, rootIsDir, sourceRoot, e.RelPath)
 		if e.IsDir {
 			perm := os.FileMode(e.Mode)
 			if perm == 0 {
@@ -328,12 +328,12 @@ feed:
 	}
 }
 
-// recvPriority reads one value from ch, preferring it over closed/timeout
+// RecvPriority reads one value from ch, preferring it over closed/timeout
 // even if both are ready at the same instant -- select among multiple ready
 // channels is otherwise pseudo-random, which could drop a value that was
 // already sitting in ch's buffer when the peer closed its side right after
 // sending it.
-func recvPriority[T any](ch <-chan T, closed <-chan struct{}, timeout time.Duration) (T, error) {
+func RecvPriority[T any](ch <-chan T, closed <-chan struct{}, timeout time.Duration) (T, error) {
 	select {
 	case v := <-ch:
 		return v, nil
@@ -412,10 +412,10 @@ func (p *transferProgress) finish(err error) {
 // as a directory, and must return the per-worker job-queue handler to pass
 // to runChunkWorkers.
 func downloadFiles(remotePath, localPath string, recursive bool, numWorkers int,
-	listFn func(fsRequest) (*fsResponse, error),
+	listFn func(FSRequest) (*FSResponse, error),
 	newWorker func(sourceRoot string, localIsDir bool, progress *transferProgress) func(jobs <-chan transferChunk) error,
 ) error {
-	resp, err := listFn(fsRequest{Op: fsOpList, Path: remotePath, Recursive: recursive})
+	resp, err := listFn(FSRequest{Op: FSOpList, Path: remotePath, Recursive: recursive})
 	if err != nil {
 		return err
 	}
@@ -424,8 +424,8 @@ func downloadFiles(remotePath, localPath string, recursive bool, numWorkers int,
 		return fmt.Errorf("%s: no such file or directory", remotePath)
 	}
 
-	localIsDir := isRootDir(localPath, entries[0].IsDir, false)
-	if err := materializeTargets(entries, localPath, localIsDir); err != nil {
+	localIsDir := IsRootDir(localPath, entries[0].IsDir, false)
+	if err := MaterializeTargets(entries, localPath, localIsDir); err != nil {
 		return err
 	}
 
@@ -449,10 +449,10 @@ func downloadFiles(remotePath, localPath string, recursive bool, numWorkers int,
 // job-queue handler to pass to runChunkWorkers. numWorkers <= 0 uses the
 // default (parallelStreamWorkers).
 func uploadFiles(localPath, remotePath string, recursive bool, numWorkers int,
-	initFn func(fsRequest) (*fsResponse, error),
+	initFn func(FSRequest) (*FSResponse, error),
 	newWorker func(sourceIsDir, targetIsDirHint bool, progress *transferProgress) func(jobs <-chan transferChunk) error,
 ) error {
-	entries, err := buildManifest(localPath, recursive)
+	entries, err := BuildManifest(localPath, recursive)
 	if err != nil {
 		return err
 	}
@@ -461,8 +461,8 @@ func uploadFiles(localPath, remotePath string, recursive bool, numWorkers int,
 	targetIsDirHint := strings.HasSuffix(remotePath, "/") ||
 		filepath.Base(remotePath) == "." || filepath.Base(remotePath) == ".."
 
-	if _, err := initFn(fsRequest{
-		Op: fsOpInit, Path: remotePath, Entries: entries,
+	if _, err := initFn(FSRequest{
+		Op: FSOpInit, Path: remotePath, Entries: entries,
 		SourceIsDir: sourceIsDir, TargetIsDirHint: targetIsDirHint,
 	}); err != nil {
 		return err

@@ -58,11 +58,11 @@ func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, authID, agent
 		return err
 	}
 	defer stream.Close()
-	if err := writeMsg(stream, routingFrame{Realm: realm, Op: fsOpAgentForward}); err != nil {
+	if err := WriteMsg(stream, RoutingFrame{Realm: realm, Op: FSOpAgentForward}); err != nil {
 		ready <- err
 		return err
 	}
-	sendKey, receiveKey, err := quicClientKeyExchange(stream)
+	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
 	if err != nil {
 		ready <- err
 		return err
@@ -91,7 +91,7 @@ func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, authID, agent
 		for {
 			select {
 			case env := <-writer.ch:
-				if err := writeFrame(stream, env); err != nil {
+				if err := WriteFrame(stream, env); err != nil {
 					closeAll()
 					return
 				}
@@ -103,24 +103,24 @@ func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, authID, agent
 
 	readNext := func() (byte, []byte, error) {
 		_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-		frame, err := readFrame(stream)
+		frame, err := ReadFrame(stream)
 		if err != nil {
 			return 0, nil, err
 		}
-		return decryptEnvelope(frame, receiveKey)
+		return DecryptEnvelope(frame, receiveKey)
 	}
 	return runAgentForwardClientLoop(ctx, readNext, writer, sendKey, agentSock)
 }
 
-func runAgentForwardP2P(ctx context.Context, p2pSess p2pChannelOpener,
+func runAgentForwardP2P(ctx context.Context, p2pSess P2PChannelOpener,
 	authID, agentSock string, ready chan<- error) error {
-	channel, err := openP2PChannel(p2pSess, agentForwardChannelLabel)
+	channel, err := openP2PChannel(p2pSess, AgentForwardChannelLabel)
 	if err != nil {
 		ready <- err
 		return err
 	}
 	defer channel.Close()
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
 		ready <- err
@@ -156,11 +156,11 @@ func runAgentForwardP2P(ctx context.Context, p2pSess p2pChannelOpener,
 	})
 
 	readNext := func() (byte, []byte, error) {
-		frame, err := recvPriority(conn.msgCh, closed, shellIdleTimeout)
+		frame, err := RecvPriority(conn.msgCh, closed, shellIdleTimeout)
 		if err != nil {
 			return 0, nil, err
 		}
-		return decryptEnvelope(frame, receiveKey)
+		return DecryptEnvelope(frame, receiveKey)
 	}
 	return runAgentForwardClientLoop(ctx, readNext, writer, sendKey, agentSock)
 }
@@ -180,7 +180,7 @@ func startAgentForward(conn shellConn, sendKey, receiveKey []byte, authID string
 	if err != nil {
 		return err
 	}
-	_, plaintext, err := decryptEnvelope(frame, receiveKey)
+	_, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil {
 		return err
 	}

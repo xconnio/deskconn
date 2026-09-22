@@ -1516,12 +1516,14 @@ func updateApp() error {
 		return err
 	}
 
-	fmt.Printf("Restarting deskconnd service...\n")
-	cmd := exec.Command("systemctl", "--user", "restart", "deskconnd")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to restart deskconnd: %w", err)
+	for _, service := range []string{"xlink", "deskconnd"} {
+		fmt.Printf("Restarting %s service...\n", service)
+		cmd := exec.Command("systemctl", "--user", "restart", service)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to restart %s: %w", service, err)
+		}
 	}
 
 	fmt.Printf("Updated deskconn from version %s to %s.\n", version, updateResp.LatestVersion)
@@ -1822,6 +1824,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 	}
 
 	foundDeskconn := false
+	foundXlink := false
 	foundDeskconnd := false
 	foundDeskconnVpnd := false
 
@@ -1859,6 +1862,12 @@ func downloadAndInstallUpdate(downloadURL string) error {
 				}
 			}
 			foundDeskconn = true
+		case "xlink":
+			fmt.Println("Installing xlink...")
+			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "xlink"), 0700); err != nil {
+				return err
+			}
+			foundXlink = true
 		case "deskconnd":
 			fmt.Println("Installing deskconnd...")
 			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "deskconnd"), 0700); err != nil {
@@ -1876,7 +1885,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		}
 	}
 
-	if !foundDeskconn || !foundDeskconnd || !foundDeskconnVpnd {
+	if !foundDeskconn || !foundXlink || !foundDeskconnd || !foundDeskconnVpnd {
 		return fmt.Errorf("update archive missing required binaries")
 	}
 

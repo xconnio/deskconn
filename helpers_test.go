@@ -1,7 +1,6 @@
 package deskconn_test
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,11 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/deskconn"
-)
-
-const (
-	user  = "user"
-	admin = "admin"
 )
 
 func TestCredentialsFilePath(t *testing.T) {
@@ -189,74 +183,4 @@ func TestRemoveCredentialsFilesPartiallyPresent(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"), []byte("x"), 0600))
 
 	require.NoError(t, deskconn.RemoveCredentialsFiles(tmpDir))
-}
-
-// savePrincipalsFile reads the current principals.json (if any) and returns a
-// cleanup function that restores it after the test.
-func savePrincipalsFile(t *testing.T) func() {
-	t.Helper()
-	cfgDir, err := deskconn.CfgDirectory()
-	require.NoError(t, err)
-	path := filepath.Join(cfgDir, "principals.json")
-
-	original, readErr := os.ReadFile(path)
-	return func() {
-		if readErr == nil {
-			_ = os.WriteFile(path, original, 0600)
-		} else {
-			_ = os.Remove(path)
-		}
-	}
-}
-
-func TestWriteAndReadPrincipalsRoundTrip(t *testing.T) {
-	t.Cleanup(savePrincipalsFile(t))
-
-	principals := []*deskconn.CryptosignPrincipal{
-		{AuthID: "alice", AuthorizedKeys: []string{"key-a1", "key-a2"}, AuthRole: admin},
-		{AuthID: "bob", AuthorizedKeys: []string{"key-b1"}, AuthRole: user},
-	}
-
-	require.NoError(t, deskconn.WritePrincipalsToFile(principals))
-
-	got, err := deskconn.ReadPrincipalsFromFile()
-	require.NoError(t, err)
-	require.Len(t, got, 2)
-
-	byID := make(map[string]*deskconn.CryptosignPrincipal, len(got))
-	for _, p := range got {
-		byID[p.AuthID] = p
-	}
-	require.Equal(t, []string{"key-a1", "key-a2"}, byID["alice"].AuthorizedKeys)
-	require.Equal(t, admin, byID["alice"].AuthRole)
-	require.Equal(t, []string{"key-b1"}, byID["bob"].AuthorizedKeys)
-}
-
-func TestWritePrincipalsProducesValidJSON(t *testing.T) {
-	t.Cleanup(savePrincipalsFile(t))
-
-	principals := []*deskconn.CryptosignPrincipal{
-		{AuthID: "charlie", AuthorizedKeys: []string{"key-c"}, AuthRole: user},
-	}
-	require.NoError(t, deskconn.WritePrincipalsToFile(principals))
-
-	cfgDir, err := deskconn.CfgDirectory()
-	require.NoError(t, err)
-	data, err := os.ReadFile(filepath.Join(cfgDir, "principals.json"))
-	require.NoError(t, err)
-
-	var raw []map[string]any
-	require.NoError(t, json.Unmarshal(data, &raw))
-	require.Len(t, raw, 1)
-	require.Equal(t, "charlie", raw[0]["authid"])
-}
-
-func TestWritePrincipalsEmptyList(t *testing.T) {
-	t.Cleanup(savePrincipalsFile(t))
-
-	require.NoError(t, deskconn.WritePrincipalsToFile([]*deskconn.CryptosignPrincipal{}))
-
-	got, err := deskconn.ReadPrincipalsFromFile()
-	require.NoError(t, err)
-	require.Empty(t, got)
 }

@@ -83,12 +83,12 @@ func forwardOneConnectionQUIC(quicSess *xconn.QUICSession, realm string, localCo
 		_ = localConn.Close()
 		return
 	}
-	if err := writeMsg(stream, routingFrame{Realm: realm, Op: fsOpPortForward}); err != nil {
+	if err := WriteMsg(stream, RoutingFrame{Realm: realm, Op: FSOpPortForward}); err != nil {
 		_ = stream.Close()
 		_ = localConn.Close()
 		return
 	}
-	sendKey, receiveKey, err := quicClientKeyExchange(stream)
+	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
 	if err != nil {
 		_ = stream.Close()
 		_ = localConn.Close()
@@ -103,7 +103,7 @@ func forwardOneConnectionQUIC(quicSess *xconn.QUICSession, realm string, localCo
 	relayPortForwardQUIC(stream, localConn, sendKey, receiveKey)
 }
 
-func acceptPortForwardLoopP2P(ctx context.Context, ln net.Listener, p2pSess p2pChannelOpener, remotePort string) error {
+func acceptPortForwardLoopP2P(ctx context.Context, ln net.Listener, p2pSess P2PChannelOpener, remotePort string) error {
 	closer, ok := p2pSess.(interface{ Close() error })
 	SafeGo(func() {
 		<-ctx.Done()
@@ -124,13 +124,13 @@ func acceptPortForwardLoopP2P(ctx context.Context, ln net.Listener, p2pSess p2pC
 	}
 }
 
-func forwardOneConnectionP2P(p2pSess p2pChannelOpener, localConn net.Conn, remotePort string) {
-	channel, err := openP2PChannel(p2pSess, portForwardChannelLabel)
+func forwardOneConnectionP2P(p2pSess P2PChannelOpener, localConn net.Conn, remotePort string) {
+	channel, err := openP2PChannel(p2pSess, PortForwardChannelLabel)
 	if err != nil {
 		_ = localConn.Close()
 		return
 	}
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
 		_ = channel.Close()
@@ -162,7 +162,7 @@ func completePortForwardHandshake(conn shellConn, sendKey, receiveKey []byte, re
 	if err != nil {
 		return false
 	}
-	_, plaintext, err := decryptEnvelope(frame, receiveKey)
+	_, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil {
 		return false
 	}
@@ -216,10 +216,10 @@ func runPortReverseQUIC(ctx context.Context, realm, cfgDirectory, remotePort, lo
 		return err
 	}
 	defer stream.Close()
-	if err := writeMsg(stream, routingFrame{Realm: realm, Op: fsOpPortReverse}); err != nil {
+	if err := WriteMsg(stream, RoutingFrame{Realm: realm, Op: FSOpPortReverse}); err != nil {
 		return err
 	}
-	sendKey, receiveKey, err := quicClientKeyExchange(stream)
+	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ func runPortReverseQUIC(ctx context.Context, realm, cfgDirectory, remotePort, lo
 		for {
 			select {
 			case env := <-writer.ch:
-				if err := writeFrame(stream, env); err != nil {
+				if err := WriteFrame(stream, env); err != nil {
 					closeAll()
 					return
 				}
@@ -257,22 +257,22 @@ func runPortReverseQUIC(ctx context.Context, realm, cfgDirectory, remotePort, lo
 
 	readNext := func() (byte, []byte, error) {
 		_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-		frame, err := readFrame(stream)
+		frame, err := ReadFrame(stream)
 		if err != nil {
 			return 0, nil, err
 		}
-		return decryptEnvelope(frame, receiveKey)
+		return DecryptEnvelope(frame, receiveKey)
 	}
 	return runPortReverseClientLoop(ctx, readNext, writer, sendKey, localPort)
 }
 
-func runPortReverseP2P(ctx context.Context, p2pSess p2pChannelOpener, remotePort, localPort string) error {
-	channel, err := openP2PChannel(p2pSess, portReverseChannelLabel)
+func runPortReverseP2P(ctx context.Context, p2pSess P2PChannelOpener, remotePort, localPort string) error {
+	channel, err := openP2PChannel(p2pSess, PortReverseChannelLabel)
 	if err != nil {
 		return err
 	}
 	defer channel.Close()
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
 		return err
@@ -305,11 +305,11 @@ func runPortReverseP2P(ctx context.Context, p2pSess p2pChannelOpener, remotePort
 	})
 
 	readNext := func() (byte, []byte, error) {
-		frame, err := recvPriority(conn.msgCh, closed, shellIdleTimeout)
+		frame, err := RecvPriority(conn.msgCh, closed, shellIdleTimeout)
 		if err != nil {
 			return 0, nil, err
 		}
-		return decryptEnvelope(frame, receiveKey)
+		return DecryptEnvelope(frame, receiveKey)
 	}
 	return runPortReverseClientLoop(ctx, readNext, writer, sendKey, localPort)
 }
@@ -330,7 +330,7 @@ func startPortReverseListen(conn shellConn, sendKey, receiveKey []byte, remotePo
 	if err != nil {
 		return err
 	}
-	_, plaintext, err := decryptEnvelope(frame, receiveKey)
+	_, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil {
 		return err
 	}

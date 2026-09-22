@@ -23,13 +23,6 @@ func newShellStreamID() string {
 	return hex.EncodeToString(b)
 }
 
-// shellChannelLabel is the WebRTC data channel label a shell connection
-// opens, checked by HandleAuxDataChannel (iptunnel.go) before the
-// first-message classification file transfer uses -- a shell channel's
-// first message is a plaintext public key, indistinguishable by content
-// alone from a file-stream channel's.
-const shellChannelLabel = "shell"
-
 // shellControlOp is shellControlMsg's discriminator.
 type shellControlOp string
 
@@ -46,15 +39,16 @@ const (
 	shellOpPing shellControlOp = "ping"
 )
 
-// shellIdleTimeout bounds how long a shell/exec connection may go without
-// any traffic before it's considered dead. QUIC streams have no equivalent
-// of WebRTC's own peer-connectivity checks, so without this an abruptly
-// disconnected client (crash, killed process, dropped network) leaves its
-// remote command running forever instead of being cleaned up -- the client
-// sends shellOpPing on a timer (shellPingInterval, shellclient.go)
-// specifically to keep this from firing during genuine silence (e.g. a user
-// just reading output, not typing).
-const shellIdleTimeout = fileStreamSessionIdleTimeout
+// shellIdleTimeout bounds how long a shell/exec (or port-forward/reverse,
+// agent-forward, logs) connection may go without any traffic before it's
+// considered dead. QUIC streams have no equivalent of WebRTC's own
+// peer-connectivity checks, so without this an abruptly disconnected
+// client (crash, killed process, dropped network) leaves its remote
+// command running forever instead of being cleaned up -- the client sends
+// shellOpPing on a timer (shellPingInterval, shellclient.go) specifically
+// to keep this from firing during genuine silence (e.g. a user just
+// reading output, not typing).
+const shellIdleTimeout = FileStreamSessionIdleTimeout
 
 // shellControlMsg is every control message in the raw-stream shell
 // protocol, sent inside the same encrypted envelope (shellMsgControl kind)
@@ -90,6 +84,16 @@ func buildShellEnvelope(kind byte, plaintext, key []byte) ([]byte, error) {
 	return envelope, nil
 }
 
+// mustJSON marshals v, panicking on failure -- used only for values (our own
+// control-message structs) whose encoding can never actually fail.
+func mustJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 type quicShellTransport struct {
 	stream  net.Conn
 	sendKey []byte
@@ -100,13 +104,13 @@ func (t *quicShellTransport) writeOutput(plaintext []byte) error {
 	if err != nil {
 		return err
 	}
-	return writeFrame(t.stream, envelope)
+	return WriteFrame(t.stream, envelope)
 }
 
 func (t *quicShellTransport) close() error { return t.stream.Close() }
 
 type p2pShellTransport struct {
-	channel *webrtc.DataChannel
+	channel MessageChannel
 	sendKey []byte
 }
 
@@ -121,16 +125,21 @@ func (t *p2pShellTransport) writeOutput(plaintext []byte) error {
 func (t *p2pShellTransport) close() error { return t.channel.Close() }
 
 // beginShellSession handles a connection's first control message: claims an
-// existing PTY via a valid migration token (shellOpMigrate), or creates a
-// new one (shellOpSize) running ctrl.Command (or an interactive bash shell
-// if empty -- this same protocol serves both `shell` and `exec`), issuing a
-// fresh migration token for it.
+// existing PTY via a valid migration token (shellOpMigrate), or
+// creates a new one (shellOpSize) running ctrl.Command (or an
+// interactive bash shell if empty -- this same protocol serves both `shell`
+// and `exec`), issuing a fresh migration token for it.
 // Returns a non-nil error if the request was invalid or the command failed
 // to start (e.g. exec given a nonexistent command) -- the caller should
-// report it to the client and then close the connection. Shared by both
+// report it to the client and then close the connection. On success, the
+// caller must call startReader only after it has sent the ack: for a fresh
+// session this is what starts the PTY's output reader, and calling it any
+// earlier would let output race ahead of (and be mistaken by the client
+// for) the ack itself. Migrating a session returns a no-op startReader,
+// since its output reader is already running from before. Shared by both
 // transports.
 func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transport shellTransport) (
-	shellID, migrationToken string, ptmx *os.File, err error) {
+	shellID, migrationToken string, ptmx *os.File, startReader func(), err error) {
 	if ctrl.Op == shellOpMigrate {
 		p.Lock()
 		expected, tokenOK := p.migrationTokens[ctrl.OldID]
@@ -141,7 +150,7 @@ func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transp
 		valid := tokenOK && psOK && ptmxOK && time.Since(expected.issuedAt) <= migrationTokenTTL &&
 			subtle.ConstantTimeCompare([]byte(ctrl.Token), []byte(expected.value)) == 1
 		if !valid {
-			return "", "", nil, fmt.Errorf("invalid or expired migration token")
+			return "", "", nil, nil, fmt.Errorf("invalid or expired migration token")
 		}
 
 		p.Lock()
@@ -150,20 +159,22 @@ func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transp
 		ps.mu.Lock()
 		ps.transport = transport
 		ps.mu.Unlock()
-		return ctrl.OldID, "", existingPtmx, nil
+		return ctrl.OldID, "", existingPtmx, func() {}, nil
 	}
 
+	interactive := ctrl.Command == ""
 	command := ctrl.Command
 	if command == "" {
 		command = "bash"
 	}
 	shellID = newShellStreamID()
 	ws := &pty.Winsize{Cols: ctrl.Cols, Rows: ctrl.Rows}
-	newPt, err := p.startPtySession(transport, shellID, p.agentSockForAuthID(ctrl.AuthID), "", command, ws, ctrl.Args...)
+	newPt, startReader, err := p.startPtySession(
+		transport, shellID, p.agentSockForAuthID(ctrl.AuthID), "", command, ws, interactive, ctrl.Args...)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
-	return shellID, p.issueMigrationToken(shellID), newPt, nil
+	return shellID, p.issueMigrationToken(shellID), newPt, startReader, nil
 }
 
 // handleQUICShellStream serves one shell over a raw QUIC stream: key
@@ -178,11 +189,11 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 		return
 	}
 
-	frame, err := readFrame(stream)
+	frame, err := ReadFrame(stream)
 	if err != nil {
 		return
 	}
-	kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+	kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil || kind != shellMsgControl {
 		return
 	}
@@ -192,26 +203,28 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 	}
 
 	transport := &quicShellTransport{stream: stream, sendKey: sendKey}
-	shellID, token, ptmx, err := d.shellSession.beginShellSession(ctrl, transport)
+	shellID, token, ptmx, startReader, err := d.shellSession.beginShellSession(ctrl, transport)
 	ackMsg := shellControlMsg{ShellID: shellID, Token: token}
 	if err != nil {
 		ackMsg = shellControlMsg{Error: err.Error()}
 	}
-	if ack, buildErr := buildShellEnvelope(shellMsgControl, mustJSON(ackMsg), sendKey); buildErr == nil {
-		_ = writeFrame(stream, ack)
+	if ack, buildErr := buildShellEnvelope(shellMsgControl,
+		mustJSON(ackMsg), sendKey); buildErr == nil {
+		_ = WriteFrame(stream, ack)
 	}
 	if err != nil {
 		return
 	}
+	startReader()
 
 	for {
 		_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-		frame, err := readFrame(stream)
+		frame, err := ReadFrame(stream)
 		if err != nil {
 			d.shellSession.endShellInput(shellID, transport)
 			return
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}
@@ -229,18 +242,18 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 
 // HandleShellChannel serves one shell over a raw WebRTC data channel,
 // mirroring handleQUICShellStream.
-func (d *Deskconn) HandleShellChannel(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
+func (d *Deskconn) HandleShellChannel(_ string, channel MessageChannel, firstMessage []byte) {
 	SafeGo(func() { d.serveShellChannel(channel, firstMessage) })
 }
 
-func (d *Deskconn) serveShellChannel(channel *webrtc.DataChannel, firstMessage []byte) {
-	sendKey, receiveKey, err := p2pServerKeyExchange(channel, firstMessage)
+func (d *Deskconn) serveShellChannel(channel MessageChannel, firstMessage []byte) {
+	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
 
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	msgCh := make(chan []byte, 8)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		select {
@@ -249,12 +262,12 @@ func (d *Deskconn) serveShellChannel(channel *webrtc.DataChannel, firstMessage [
 		}
 	})
 
-	first, err := recvPriority(msgCh, closed, p2pRequestTimeout)
+	first, err := RecvPriority(msgCh, closed, P2PRequestTimeout)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
-	_, plaintext, err := decryptEnvelope(first, receiveKey)
+	_, plaintext, err := DecryptEnvelope(first, receiveKey)
 	if err != nil {
 		_ = channel.Close()
 		return
@@ -266,7 +279,7 @@ func (d *Deskconn) serveShellChannel(channel *webrtc.DataChannel, firstMessage [
 	}
 
 	transport := &p2pShellTransport{channel: channel, sendKey: sendKey}
-	shellID, token, ptmx, err := d.shellSession.beginShellSession(ctrl, transport)
+	shellID, token, ptmx, startReader, err := d.shellSession.beginShellSession(ctrl, transport)
 	ackMsg := shellControlMsg{ShellID: shellID, Token: token}
 	if err != nil {
 		ackMsg = shellControlMsg{Error: err.Error()}
@@ -276,14 +289,15 @@ func (d *Deskconn) serveShellChannel(channel *webrtc.DataChannel, firstMessage [
 		_ = channel.Close()
 		return
 	}
+	startReader()
 
 	for {
-		data, err := recvPriority(msgCh, closed, fileStreamSessionIdleTimeout)
+		data, err := RecvPriority(msgCh, closed, FileStreamSessionIdleTimeout)
 		if err != nil {
 			d.shellSession.endShellInput(shellID, transport)
 			return
 		}
-		kind, plaintext, err := decryptEnvelope(data, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(data, receiveKey)
 		if err != nil {
 			continue
 		}
@@ -299,22 +313,14 @@ func (d *Deskconn) serveShellChannel(channel *webrtc.DataChannel, firstMessage [
 	}
 }
 
-// sendEncryptedJSONShell mirrors sendEncryptedJSON (filestreamencryption.go)
-// with shell's own kind byte.
-func sendEncryptedJSONShell(channel *webrtc.DataChannel, v any, key []byte) error {
+// sendEncryptedJSONShell mirrors SendEncryptedJSON with shell's own
+// kind byte.
+func sendEncryptedJSONShell(channel MessageChannel, v any, key []byte) error {
 	envelope, err := buildShellEnvelope(shellMsgControl, mustJSON(v), key)
 	if err != nil {
 		return err
 	}
 	return channel.Send(envelope)
-}
-
-func mustJSON(v any) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	return b
 }
 
 // endShellInput cleans up the PTY if this transport still owns it (a real

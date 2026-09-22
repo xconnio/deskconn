@@ -37,7 +37,7 @@ func startLogsStream(t *testing.T) (client net.Conn, sendKey, receiveKey []byte)
 	d := Deskconn{}
 	go d.handleQUICLogsStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(c)
+	sendKey, receiveKey, err := QuicClientKeyExchange(c)
 	require.NoError(t, err)
 	return c, sendKey, receiveKey
 }
@@ -211,7 +211,7 @@ func TestLogsFollowStopsOnDisconnect(t *testing.T) {
 		close(done)
 	}()
 
-	sendKey, _, err := quicClientKeyExchange(client)
+	sendKey, _, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
 	f, err := os.CreateTemp("", "logs-disconnect-*.log")

@@ -18,9 +18,9 @@ const (
 )
 
 // p2pTestConnection adapts a bare offerer *webrtc.PeerConnection to
-// p2pChannelOpener, letting tests drive DownloadFilesP2P/UploadFilesP2P
+// P2PChannelOpener, letting tests drive DownloadFilesP2P/UploadFilesP2P
 // without a real WAMP handshake -- xconnwebrtc.WebRTCSession satisfies
-// p2pChannelOpener the same way in production.
+// P2PChannelOpener the same way in production.
 type p2pTestConnection struct {
 	pc *webrtc.PeerConnection
 }
@@ -35,10 +35,10 @@ func (c *p2pTestConnection) OpenChannel(label string, options *webrtc.DataChanne
 // (*Deskconn).HandleAuxDataChannel -- the exact same production entry point
 // cmd/deskconnd/main.go registers via webRtcManager.OnDataChannel, not a
 // lower-level handler reached only in tests. It returns the offerer side as
-// a p2pChannelOpener; every DownloadFilesP2P/UploadFilesP2P call in these
+// a P2PChannelOpener; every DownloadFilesP2P/UploadFilesP2P call in these
 // tests reuses this single PeerConnection for its control call and every
 // parallel worker's channel, matching production.
-func newP2PTestConnection(t *testing.T) p2pChannelOpener {
+func newP2PTestConnection(t *testing.T) P2PChannelOpener {
 	t.Helper()
 
 	offererPC, err := webrtc.NewPeerConnection(webrtc.Configuration{})
@@ -64,7 +64,7 @@ func newP2PTestConnection(t *testing.T) p2pChannelOpener {
 		var once sync.Once
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			once.Do(func() {
-				d.HandleAuxDataChannel("test-session", dc, msg.Data)
+				d.HandleFileStreamChannel("test-session", dc, msg.Data)
 			})
 		})
 	})
@@ -109,7 +109,7 @@ func TestDownloadFilesP2PSingleFile(t *testing.T) {
 func TestDownloadFilesP2PLargeFileSpansMultipleChunks(t *testing.T) {
 	sess := newP2PTestConnection(t)
 
-	content := make([]byte, parallelChunkSize*2+12345)
+	content := make([]byte, ParallelChunkSize*2+12345)
 	for i := range content {
 		content[i] = byte(i)
 	}
@@ -196,7 +196,7 @@ func TestUploadFilesP2PNonExistentLocalPath(t *testing.T) {
 func TestDownloadFilesP2PCustomWorkerCount(t *testing.T) {
 	sess := newP2PTestConnection(t)
 
-	content := make([]byte, parallelChunkSize*3+777)
+	content := make([]byte, ParallelChunkSize*3+777)
 	for i := range content {
 		content[i] = byte(i * 7)
 	}

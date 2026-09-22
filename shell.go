@@ -206,6 +206,11 @@ func (p *interactiveShellSession) agentSockForAuthID(authID string) string {
 	return path
 }
 
+// startPtySession starts command in a new PTY but does not yet start
+// reading its output -- the caller must invoke the returned startReader
+// once it's safe for output to start flowing (see beginShellSession's doc
+// comment for why this is deferred).
+//
 // agentSockPath, when non-empty, is exported as SSH_AUTH_SOCK in the spawned process's
 // environment so tools run in the shell (git, ssh, ...) can use the caller's forwarded
 // local SSH agent — see RunAgentForward/handleAgentForward in agentforward.go.
@@ -213,8 +218,18 @@ func (p *interactiveShellSession) agentSockForAuthID(authID string) string {
 // ws sets the PTY's initial size via pty.StartWithSize rather than a separate
 // pty.Setsize call after: Setsize racing the output-reader goroutine's first
 // Read is a genuine data race (both touch the os.File's internal fd state).
+//
+// echo is left enabled (the PTY's default) for an interactive shell, where
+// the user needs to see what they type. For a one-shot exec, it's disabled:
+// exec's client forwards stdin unconditionally even though most exec'd
+// commands never read it, and the PTY driver's default echoing (in
+// particular ECHOCTL rendering a stray control byte as its two-character
+// caret form, e.g. an EOT arriving as the client's stdin closes) would
+// otherwise leak extra bytes into the exec'd command's own output, racing
+// with and sometimes landing right before its real first output.
 func (p *interactiveShellSession) startPtySession(transport shellTransport, shellID, agentSockPath,
-	prevShellID, command string, ws *pty.Winsize, args ...string) (*os.File, error) {
+	prevShellID, command string, ws *pty.Winsize, echo bool, args ...string) (
+	ptmx *os.File, startReader func(), err error) {
 	cmd := exec.Command(command, args...)
 	if agentSockPath != "" {
 		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+agentSockPath)
@@ -222,13 +237,16 @@ func (p *interactiveShellSession) startPtySession(transport shellTransport, shel
 
 	dir, err := p.resolveStartDir(prevShellID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cmd.Dir = dir
 
-	ptmx, err := pty.StartWithSize(cmd, ws)
+	ptmx, err = pty.StartWithSize(cmd, ws)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start PTY: %w", err)
+		return nil, nil, fmt.Errorf("failed to start PTY: %w", err)
+	}
+	if !echo {
+		disablePTYEcho(ptmx)
 	}
 	// Nothing else calls Wait, so without this the process stays a zombie
 	// (invisible to killShellProcessGroup, but still a process-table entry)
@@ -242,9 +260,19 @@ func (p *interactiveShellSession) startPtySession(transport shellTransport, shel
 	p.pids[shellID] = cmd.Process.Pid
 	p.Unlock()
 
-	SafeGo(func() { p.startOutputReader(ptmx, ps, shellID) })
+	return ptmx, func() { SafeGo(func() { p.startOutputReader(ptmx, ps, shellID) }) }, nil
+}
 
-	return ptmx, nil
+// disablePTYEcho turns off ptmx's line discipline echoing (see
+// startPtySession's doc comment for why). Best-effort: if the ioctl fails
+// there's nothing more useful to do than leave the default in place.
+func disablePTYEcho(ptmx *os.File) {
+	termios, err := unix.IoctlGetTermios(int(ptmx.Fd()), unix.TCGETS)
+	if err != nil {
+		return
+	}
+	termios.Lflag &^= unix.ECHO | unix.ECHOCTL | unix.ECHOE | unix.ECHOK | unix.ECHONL
+	_ = unix.IoctlSetTermios(int(ptmx.Fd()), unix.TCSETS, termios)
 }
 
 func (p *interactiveShellSession) startOutputReader(ptmx *os.File, ps *ptySession, shellID string) {

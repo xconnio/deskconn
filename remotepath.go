@@ -9,15 +9,9 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-const (
-	// fileChunkSize is the read/write buffer size used by streaming
-	// progressive-invocation transfers (file cat).
-	fileChunkSize = 1024 * 1024 // 1mb
-
-	// name is the "name" JSON map key shared by a couple of handlers
-	// (printer list) that build ad hoc map[string]any results.
-	name = "name"
-)
+// fileChunkSize is the read/write buffer size used by streaming
+// progressive-invocation transfers (file cat).
+const fileChunkSize = 1024 * 1024 // 1mb
 
 // resolvePath resolves a remote path argument (as given by a caller,
 // relative to the device's home directory unless already absolute) to a

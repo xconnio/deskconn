@@ -10,6 +10,14 @@ release-snapshot:
 release-check:
 	goreleaser check
 
+build: build-xlink build-deskconnd build-deskconn build-deskconn-vpnd
+
+build-xlink:
+	CGO_ENABLED=0 go build github.com/xconnio/deskconn/cmd/xlink
+
+run-xlink:
+	go run github.com/xconnio/deskconn/cmd/xlink
+
 build-deskconnd:
 	CGO_ENABLED=0 go build github.com/xconnio/deskconn/cmd/deskconnd
 

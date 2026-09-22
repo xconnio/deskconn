@@ -12,10 +12,6 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// agentForwardChannelLabel is checked by HandleAuxDataChannel (iptunnel.go)
-// before file transfer's first-message sniffing, same as shellChannelLabel.
-const agentForwardChannelLabel = "agentforward"
-
 // Envelope kind bytes, own namespace like every other raw-stream feature's.
 const (
 	agentFwdMsgControl byte = iota // encrypted JSON agentForwardMsg
@@ -119,11 +115,11 @@ func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
 	}
 
 	_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-	frame, err := readFrame(stream)
+	frame, err := ReadFrame(stream)
 	if err != nil {
 		return
 	}
-	kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+	kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil || kind != agentFwdMsgControl {
 		return
 	}
@@ -142,8 +138,9 @@ func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
 		d.agentForwardSessions.register(ctrl.AuthID, sockPath)
 		defer d.agentForwardSessions.unregister(ctrl.AuthID, sockPath)
 	}
-	if env, buildErr := buildPortEnvelope(agentFwdMsgControl, mustJSON(ack), sendKey); buildErr == nil {
-		_ = writeFrame(stream, env)
+	if env, buildErr := buildPortEnvelope(agentFwdMsgControl,
+		mustJSON(ack), sendKey); buildErr == nil {
+		_ = WriteFrame(stream, env)
 	}
 	if createErr != nil {
 		return
@@ -165,7 +162,7 @@ func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
 		for {
 			select {
 			case env := <-writer.ch:
-				if err := writeFrame(stream, env); err != nil {
+				if err := WriteFrame(stream, env); err != nil {
 					closeAll()
 					return
 				}
@@ -183,7 +180,8 @@ func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
 			case <-done:
 				return
 			case <-ticker.C:
-				env, err := buildPortEnvelope(agentFwdMsgControl, mustJSON(agentForwardMsg{}), sendKey)
+				env, err := buildPortEnvelope(agentFwdMsgControl,
+					mustJSON(agentForwardMsg{}), sendKey)
 				if err != nil {
 					continue
 				}
@@ -223,7 +221,8 @@ func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
 				for {
 					n, readErr := conn.Read(buf)
 					if n > 0 {
-						dataEnv, encErr := buildPortEnvelope(agentFwdMsgData, encodeConnData(connID, buf[:n]), sendKey)
+						dataEnv, encErr := buildPortEnvelope(agentFwdMsgData,
+							encodeConnData(connID, buf[:n]), sendKey)
 						if encErr != nil || !writer.send(dataEnv) {
 							break
 						}
@@ -250,11 +249,11 @@ func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
 
 	for {
 		_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-		frame, err := readFrame(stream)
+		frame, err := ReadFrame(stream)
 		if err != nil {
 			return
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}
@@ -288,18 +287,18 @@ func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
 
 // HandleAgentForwardChannel serves one agent-forward session over a raw
 // WebRTC data channel, mirroring handleQUICAgentForwardStream.
-func (d *Deskconn) HandleAgentForwardChannel(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
+func (d *Deskconn) HandleAgentForwardChannel(_ string, channel MessageChannel, firstMessage []byte) {
 	SafeGo(func() { d.serveAgentForwardChannel(channel, firstMessage) })
 }
 
-func (d *Deskconn) serveAgentForwardChannel(channel *webrtc.DataChannel, firstMessage []byte) {
-	sendKey, receiveKey, err := p2pServerKeyExchange(channel, firstMessage)
+func (d *Deskconn) serveAgentForwardChannel(channel MessageChannel, firstMessage []byte) {
+	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
 
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	msgCh := make(chan []byte, 32)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		select {
@@ -308,12 +307,12 @@ func (d *Deskconn) serveAgentForwardChannel(channel *webrtc.DataChannel, firstMe
 		}
 	})
 
-	first, err := recvPriority(msgCh, closed, p2pRequestTimeout)
+	first, err := RecvPriority(msgCh, closed, P2PRequestTimeout)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
-	_, plaintext, err := decryptEnvelope(first, receiveKey)
+	_, plaintext, err := DecryptEnvelope(first, receiveKey)
 	if err != nil {
 		_ = channel.Close()
 		return
@@ -334,7 +333,8 @@ func (d *Deskconn) serveAgentForwardChannel(channel *webrtc.DataChannel, firstMe
 		d.agentForwardSessions.register(ctrl.AuthID, sockPath)
 		defer d.agentForwardSessions.unregister(ctrl.AuthID, sockPath)
 	}
-	if env, buildErr := buildPortEnvelope(agentFwdMsgControl, mustJSON(ack), sendKey); buildErr == nil {
+	if env, buildErr := buildPortEnvelope(agentFwdMsgControl,
+		mustJSON(ack), sendKey); buildErr == nil {
 		_ = channel.Send(env)
 	}
 	if createErr != nil {
@@ -365,7 +365,8 @@ func (d *Deskconn) serveAgentForwardChannel(channel *webrtc.DataChannel, firstMe
 			case <-closed:
 				return
 			case <-ticker.C:
-				env, err := buildPortEnvelope(agentFwdMsgControl, mustJSON(agentForwardMsg{}), sendKey)
+				env, err := buildPortEnvelope(agentFwdMsgControl,
+					mustJSON(agentForwardMsg{}), sendKey)
 				if err != nil {
 					continue
 				}
@@ -405,7 +406,8 @@ func (d *Deskconn) serveAgentForwardChannel(channel *webrtc.DataChannel, firstMe
 				for {
 					n, readErr := conn.Read(buf)
 					if n > 0 {
-						dataEnv, encErr := buildPortEnvelope(agentFwdMsgData, encodeConnData(connID, buf[:n]), sendKey)
+						dataEnv, encErr := buildPortEnvelope(agentFwdMsgData,
+							encodeConnData(connID, buf[:n]), sendKey)
 						if encErr != nil || !writer.send(dataEnv) {
 							break
 						}
@@ -431,11 +433,11 @@ func (d *Deskconn) serveAgentForwardChannel(channel *webrtc.DataChannel, firstMe
 	})
 
 	for {
-		frame, err := recvPriority(msgCh, closed, shellIdleTimeout)
+		frame, err := RecvPriority(msgCh, closed, shellIdleTimeout)
 		if err != nil {
 			return
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}

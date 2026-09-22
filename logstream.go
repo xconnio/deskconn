@@ -17,10 +17,6 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// logChannelLabel is checked by HandleAuxDataChannel (iptunnel.go) before
-// file transfer's first-message sniffing, same as shellChannelLabel.
-const logChannelLabel = "logs"
-
 // Envelope kind bytes, own namespace like every other raw-stream feature's.
 const (
 	logMsgControl byte = iota // encrypted JSON logControlMsg, client's one-time request
@@ -30,8 +26,7 @@ const (
 
 // logControlMsg is the client's one-time request, sent right after key
 // exchange. There's no ack: the device just starts streaming (or streams a
-// single "error: ...\n" chunk, then closes) immediately, matching the
-// pre-migration behavior of reporting failures as regular log output.
+// single "error: ...\n" chunk, then closes) immediately.
 type logControlMsg struct {
 	Source string `json:"source,omitempty"`
 	Follow bool   `json:"follow,omitempty"`
@@ -40,13 +35,13 @@ type logControlMsg struct {
 }
 
 // logSender writes one already-built envelope to the peer, synchronously --
-// unlike port-reverse/agent-forward's buffered portReverseWriter, logs only
-// ever has one data-producing goroutine (the file/journal reader, running
-// synchronously in the handler) plus the ping ticker, so a plain mutex
-// around the write is enough to serialize them, and (unlike a buffered
-// queue) guarantees every send has actually reached the wire before the
-// caller moves on -- important here since the handler closes the stream
-// right after its data-producing call returns.
+// unlike port-reverse/agent-forward's buffered portReverseWriter,
+// logs only ever has one data-producing goroutine (the file/journal reader,
+// running synchronously in the handler) plus the ping ticker, so a plain
+// mutex around the write is enough to serialize them, and (unlike a
+// buffered queue) guarantees every send has actually reached the wire
+// before the caller moves on -- important here since the handler closes
+// the stream right after its data-producing call returns.
 type logSender func(envelope []byte) error
 
 func newLogSender(write func([]byte) error) logSender {
@@ -78,11 +73,11 @@ func (d *Deskconn) handleQUICLogsStream(stream net.Conn) {
 	}
 
 	_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-	frame, err := readFrame(stream)
+	frame, err := ReadFrame(stream)
 	if err != nil {
 		return
 	}
-	kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+	kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil || kind != logMsgControl {
 		return
 	}
@@ -101,7 +96,7 @@ func (d *Deskconn) handleQUICLogsStream(stream net.Conn) {
 	}
 	defer closeAll()
 
-	send := newLogSender(func(envelope []byte) error { return writeFrame(stream, envelope) })
+	send := newLogSender(func(envelope []byte) error { return WriteFrame(stream, envelope) })
 
 	SafeGo(func() {
 		ticker := time.NewTicker(shellPingInterval)
@@ -126,12 +121,12 @@ func (d *Deskconn) handleQUICLogsStream(stream net.Conn) {
 	SafeGo(func() {
 		for {
 			_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-			frame, err := readFrame(stream)
+			frame, err := ReadFrame(stream)
 			if err != nil {
 				closeAll()
 				return
 			}
-			_, _, _ = decryptEnvelope(frame, receiveKey)
+			_, _, _ = DecryptEnvelope(frame, receiveKey)
 		}
 	})
 
@@ -140,18 +135,18 @@ func (d *Deskconn) handleQUICLogsStream(stream net.Conn) {
 
 // HandleLogsChannel serves one `deskconn logs` session over a raw WebRTC
 // data channel, mirroring handleQUICLogsStream.
-func (d *Deskconn) HandleLogsChannel(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
+func (d *Deskconn) HandleLogsChannel(_ string, channel MessageChannel, firstMessage []byte) {
 	SafeGo(func() { d.serveLogsChannel(channel, firstMessage) })
 }
 
-func (d *Deskconn) serveLogsChannel(channel *webrtc.DataChannel, firstMessage []byte) {
-	sendKey, receiveKey, err := p2pServerKeyExchange(channel, firstMessage)
+func (d *Deskconn) serveLogsChannel(channel MessageChannel, firstMessage []byte) {
+	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
 
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	msgCh := make(chan []byte, 8)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		select {
@@ -160,12 +155,12 @@ func (d *Deskconn) serveLogsChannel(channel *webrtc.DataChannel, firstMessage []
 		}
 	})
 
-	first, err := recvPriority(msgCh, closed, p2pRequestTimeout)
+	first, err := RecvPriority(msgCh, closed, P2PRequestTimeout)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
-	_, plaintext, err := decryptEnvelope(first, receiveKey)
+	_, plaintext, err := DecryptEnvelope(first, receiveKey)
 	if err != nil {
 		_ = channel.Close()
 		return
@@ -200,7 +195,7 @@ func (d *Deskconn) serveLogsChannel(channel *webrtc.DataChannel, firstMessage []
 
 	SafeGo(func() {
 		for {
-			if _, err := recvPriority(msgCh, closed, shellIdleTimeout); err != nil {
+			if _, err := RecvPriority(msgCh, closed, shellIdleTimeout); err != nil {
 				_ = channel.Close()
 				return
 			}
@@ -266,52 +261,39 @@ func streamJournalLogsRaw(send logSender, sendKey []byte, done <-chan struct{},
 		return
 	}
 
-	killDone := make(chan struct{})
-	defer close(killDone)
+	killed := make(chan struct{})
 	SafeGo(func() {
 		select {
 		case <-done:
-			_ = cmd.Process.Kill()
-		case <-killDone:
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+		case <-killed:
 		}
 	})
+	defer close(killed)
 
-	sent := false
+	var wrote bool
 	for scanner.Scan() {
 		if isDone(done) {
 			return
 		}
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
+		tsUsec, fields, perr := parseJournalctlEntry(scanner.Bytes())
+		if perr != nil {
 			continue
 		}
-
-		tsUsec, fields, parseErr := parseJournalctlEntry(line)
-		if parseErr != nil {
-			continue
-		}
-
-		sent = true
+		wrote = true
 		if !sendLogData(send, sendKey, []byte(formatEntry(tsUsec, fields))) {
 			return
 		}
 	}
 
-	waitErr := cmd.Wait()
 	if isDone(done) {
 		return
 	}
 
-	if err := scanner.Err(); err != nil {
-		if stderr.Len() > 0 {
-			sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", strings.TrimSpace(stderr.String()))))
-			return
-		}
-		sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", err.Error())))
-		return
-	}
-
-	if !sent {
+	waitErr := cmd.Wait()
+	if !wrote {
 		if stderr.Len() > 0 {
 			sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", strings.TrimSpace(stderr.String()))))
 			return
@@ -323,7 +305,6 @@ func streamJournalLogsRaw(send logSender, sendKey []byte, done <-chan struct{},
 		sendLogData(send, sendKey, []byte("-- No entries --\n"))
 		return
 	}
-
 	if waitErr != nil && stderr.Len() > 0 && !isDone(done) {
 		sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", strings.TrimSpace(stderr.String()))))
 	}

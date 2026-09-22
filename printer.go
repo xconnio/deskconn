@@ -16,6 +16,10 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
+// PrintMode is a purely local machine setting (read/written straight to
+// config.yml, no device/network round trip) so both the CLI (`deskconn
+// print enable/disable/status`) and the device-side print handler can read
+// and change it directly.
 type PrintMode string
 
 const (
@@ -67,7 +71,7 @@ func (p *Printer) handleListPrinters(ctx context.Context, _ *xconn.Invocation) *
 
 	result := make([]map[string]any, len(infos))
 	for i, info := range infos {
-		result[i] = map[string]any{name: info.Name, "ppd": info.PPDModel}
+		result[i] = map[string]any{"name": info.Name, "ppd": info.PPDModel}
 	}
 
 	return xconn.NewInvocationResult(result)
@@ -80,7 +84,8 @@ func (p *Printer) handlePrint() xconn.InvocationHandler {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
 		if mode == PrintModeDisabled {
-			return xconn.NewInvocationError(ErrOperationFailed, "printing disabled; run `deskconn print enable` to enable")
+			return xconn.NewInvocationError(ErrOperationFailed,
+				"printing disabled; run `deskconn print enable` to enable")
 		}
 
 		printer, err := inv.ArgString(0)
