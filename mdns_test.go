@@ -39,7 +39,7 @@ func TestAdvertiseService(t *testing.T) {
 
 	go func() {
 		for e := range entries {
-			if e.Instance == `deskconnd\ \(`+hostname+`\)` {
+			if e.Instance == `xlink\ \(`+hostname+`\)` {
 				found <- e
 				return
 			}

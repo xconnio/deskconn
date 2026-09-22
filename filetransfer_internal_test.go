@@ -27,7 +27,7 @@ func TestBuildManifestSingleFile(t *testing.T) {
 	filePath := filepath.Join(dir, "hello.txt")
 	require.NoError(t, os.WriteFile(filePath, []byte("hello"), 0644))
 
-	entries, err := buildManifest(filePath, false)
+	entries, err := BuildManifest(filePath, false)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Equal(t, "hello.txt", entries[0].RelPath)
@@ -37,12 +37,12 @@ func TestBuildManifestSingleFile(t *testing.T) {
 
 func TestBuildManifestDirWithoutRecursiveFails(t *testing.T) {
 	dir := t.TempDir()
-	_, err := buildManifest(dir, false)
+	_, err := BuildManifest(dir, false)
 	require.ErrorContains(t, err, "is a directory")
 }
 
 func TestBuildManifestNonExistentPath(t *testing.T) {
-	_, err := buildManifest(filepath.Join(t.TempDir(), "nope"), false)
+	_, err := BuildManifest(filepath.Join(t.TempDir(), "nope"), false)
 	require.Error(t, err)
 	assert.True(t, os.IsNotExist(err))
 }
@@ -55,10 +55,10 @@ func TestBuildManifestRecursiveDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "root.txt"), []byte("root"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "sub", "nested.txt"), []byte("nested content"), 0644))
 
-	entries, err := buildManifest(srcDir, true)
+	entries, err := BuildManifest(srcDir, true)
 	require.NoError(t, err)
 
-	byRel := map[string]transferManifestEntry{}
+	byRel := map[string]TransferManifestEntry{}
 	for _, e := range entries {
 		byRel[e.RelPath] = e
 	}
@@ -74,12 +74,12 @@ func TestBuildManifestRecursiveDir(t *testing.T) {
 }
 
 func TestPlanChunksSplitsLargeFiles(t *testing.T) {
-	entries := []transferManifestEntry{
+	entries := []TransferManifestEntry{
 		{RelPath: "dir", IsDir: true},
 		{RelPath: "empty.txt", Size: 0},
 		{RelPath: "small.txt", Size: 100},
-		{RelPath: "exact.txt", Size: parallelChunkSize * 2},
-		{RelPath: "big.txt", Size: parallelChunkSize*3 + 17},
+		{RelPath: "exact.txt", Size: ParallelChunkSize * 2},
+		{RelPath: "big.txt", Size: ParallelChunkSize*3 + 17},
 	}
 
 	chunks := planChunks(entries)
@@ -103,16 +103,16 @@ func TestPlanChunksSplitsLargeFiles(t *testing.T) {
 	assert.EqualValues(t, 100, small[0].Length)
 
 	require.Len(t, exact, 2)
-	assert.EqualValues(t, parallelChunkSize, exact[0].Length)
-	assert.EqualValues(t, parallelChunkSize, exact[1].Length)
-	assert.EqualValues(t, parallelChunkSize, exact[1].Offset)
+	assert.EqualValues(t, ParallelChunkSize, exact[0].Length)
+	assert.EqualValues(t, ParallelChunkSize, exact[1].Length)
+	assert.EqualValues(t, ParallelChunkSize, exact[1].Offset)
 
 	require.Len(t, big, 4)
 	total := int64(0)
 	for _, c := range big {
 		total += c.Length
 	}
-	assert.EqualValues(t, parallelChunkSize*3+17, total)
+	assert.EqualValues(t, ParallelChunkSize*3+17, total)
 	assert.EqualValues(t, 17, big[3].Length)
 }
 
@@ -125,25 +125,25 @@ func TestIsRootDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(existingFile, []byte("x"), 0644))
 	missing := filepath.Join(dir, "missing")
 
-	assert.True(t, isRootDir(existingDir, false, false))
-	assert.False(t, isRootDir(existingFile, false, false))
-	assert.False(t, isRootDir(missing, false, false))
-	assert.True(t, isRootDir(missing, true, false), "sourceIsDir should force directory treatment")
-	assert.True(t, isRootDir(missing, false, true), "targetIsDirHint should force directory treatment")
-	assert.True(t, isRootDir(existingFile, true, false), "sourceIsDir overrides an existing non-dir target")
+	assert.True(t, IsRootDir(existingDir, false, false))
+	assert.False(t, IsRootDir(existingFile, false, false))
+	assert.False(t, IsRootDir(missing, false, false))
+	assert.True(t, IsRootDir(missing, true, false), "sourceIsDir should force directory treatment")
+	assert.True(t, IsRootDir(missing, false, true), "targetIsDirHint should force directory treatment")
+	assert.True(t, IsRootDir(existingFile, true, false), "sourceIsDir overrides an existing non-dir target")
 }
 
 func TestResolveDestPath(t *testing.T) {
 	// rootIsDir: entries nest under root by their full RelPath.
-	got := resolveDestPath("/dst", true, "src", "src/sub/file.txt")
+	got := ResolveDestPath("/dst", true, "src", "src/sub/file.txt")
 	assert.Equal(t, filepath.Clean("/dst/src/sub/file.txt"), got)
 
 	// !rootIsDir: the transfer's top-level entry is renamed to root, and
 	// descendants nest under root by the remainder of their RelPath.
-	got = resolveDestPath("/dst/renamed", false, "src", "src")
+	got = ResolveDestPath("/dst/renamed", false, "src", "src")
 	assert.Equal(t, filepath.Clean("/dst/renamed"), got)
 
-	got = resolveDestPath("/dst/renamed", false, "src", "src/sub/file.txt")
+	got = ResolveDestPath("/dst/renamed", false, "src", "src/sub/file.txt")
 	assert.Equal(t, filepath.Clean("/dst/renamed/sub/file.txt"), got)
 }
 
@@ -151,14 +151,14 @@ func TestMaterializeTargetsCreatesDirsAndPreSizedFiles(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "dst")
 
-	entries := []transferManifestEntry{
+	entries := []TransferManifestEntry{
 		{RelPath: "top", IsDir: true, Mode: 0755},
 		{RelPath: "top/sub", IsDir: true, Mode: 0755},
 		{RelPath: "top/file.txt", Size: 123, Mode: 0644},
 		{RelPath: "top/sub/nested.txt", Size: 7, Mode: 0644},
 	}
 
-	require.NoError(t, materializeTargets(entries, dst, true))
+	require.NoError(t, MaterializeTargets(entries, dst, true))
 
 	info, err := os.Stat(filepath.Join(dst, "top", "sub"))
 	require.NoError(t, err)
@@ -177,11 +177,11 @@ func TestMaterializeTargetsSingleFileRename(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "renamed.txt")
 
-	entries := []transferManifestEntry{
+	entries := []TransferManifestEntry{
 		{RelPath: "original.txt", Size: 42, Mode: 0644},
 	}
 
-	require.NoError(t, materializeTargets(entries, dst, false))
+	require.NoError(t, MaterializeTargets(entries, dst, false))
 
 	fi, err := os.Stat(dst)
 	require.NoError(t, err)
@@ -277,7 +277,7 @@ func TestRecvPriorityPrefersBufferedValue(t *testing.T) {
 	ch <- 42
 	close(closed) // closed is also ready, but the buffered value must win
 
-	v, err := recvPriority(ch, closed, time.Second)
+	v, err := RecvPriority(ch, closed, time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, 42, v)
 }
@@ -287,7 +287,7 @@ func TestRecvPriorityReturnsErrorOnClose(t *testing.T) {
 	closed := make(chan struct{})
 	close(closed)
 
-	_, err := recvPriority(ch, closed, time.Second)
+	_, err := RecvPriority(ch, closed, time.Second)
 	require.ErrorIs(t, err, io.ErrClosedPipe)
 }
 

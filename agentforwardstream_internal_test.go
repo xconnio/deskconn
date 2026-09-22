@@ -23,7 +23,7 @@ func TestAgentForwardStartSuccessAndDataRoundTrip(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.handleQUICAgentForwardStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
 	require.NoError(t, sendPortEnvelope(client, agentFwdMsgControl,
@@ -68,7 +68,7 @@ func TestAgentForwardStartFailureReportsError(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.handleQUICAgentForwardStream(server)
 
-	sendKey, _, err := quicClientKeyExchange(client)
+	sendKey, _, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
 	// A control message that isn't a "start" op is rejected instead of acked.
@@ -86,7 +86,7 @@ func TestAgentForwardSocketPathCompareAndDeleteOnCleanup(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.handleQUICAgentForwardStream(server1)
 
-	sendKey1, receiveKey1, err := quicClientKeyExchange(client1)
+	sendKey1, receiveKey1, err := QuicClientKeyExchange(client1)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client1, agentFwdMsgControl,
 		mustJSON(agentForwardMsg{Op: agentFwdOpStart, AuthID: testAuthID}), sendKey1))
@@ -100,7 +100,7 @@ func TestAgentForwardSocketPathCompareAndDeleteOnCleanup(t *testing.T) {
 	t.Cleanup(func() { _ = client2.Close() })
 	go d.handleQUICAgentForwardStream(server2)
 
-	sendKey2, receiveKey2, err := quicClientKeyExchange(client2)
+	sendKey2, receiveKey2, err := QuicClientKeyExchange(client2)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client2, agentFwdMsgControl,
 		mustJSON(agentForwardMsg{Op: agentFwdOpStart, AuthID: testAuthID}), sendKey2))
@@ -132,14 +132,15 @@ func TestAgentForwardIgnoresPing(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.handleQUICAgentForwardStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client, agentFwdMsgControl,
 		mustJSON(agentForwardMsg{Op: agentFwdOpStart, AuthID: testAuthID}), sendKey))
 	_, _, err = recvPortEnvelope(client, receiveKey)
 	require.NoError(t, err)
 
-	require.NoError(t, sendPortEnvelope(client, agentFwdMsgControl, mustJSON(agentForwardMsg{}), sendKey))
+	require.NoError(t, sendPortEnvelope(client, agentFwdMsgControl,
+		mustJSON(agentForwardMsg{}), sendKey))
 
 	sockPath, ok := d.agentForwardSessions.socketPathByAuthID(testAuthID)
 	require.True(t, ok)
@@ -163,7 +164,7 @@ func TestAgentForwardConcurrentConnections(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.handleQUICAgentForwardStream(server)
 
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client, agentFwdMsgControl,
 		mustJSON(agentForwardMsg{Op: agentFwdOpStart, AuthID: testAuthID}), sendKey))

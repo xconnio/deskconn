@@ -12,22 +12,22 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// p2pRequestTimeout bounds how long a client waits for a channel to open or
+// P2PRequestTimeout bounds how long a client waits for a channel to open or
 // for the remote side's response to a control request (list/init) or the
 // first ack on a read/write chunk request.
-const p2pRequestTimeout = 15 * time.Second
+const P2PRequestTimeout = 15 * time.Second
 
-// p2pChannelOpener is the subset of a connected P2P session needed merely
+// P2PChannelOpener is the subset of a connected P2P session needed merely
 // to open a raw data channel on it. Depending on the interface rather than
 // the concrete type also lets tests drive this code against a bare
 // *webrtc.PeerConnection, with no WAMP handshake required.
-type p2pChannelOpener interface {
+type P2PChannelOpener interface {
 	OpenChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
 }
 
 // openP2PChannel opens a fresh, reliable, ordered raw data channel on
 // sess's shared PeerConnection and waits for it to open.
-func openP2PChannel(sess p2pChannelOpener, label string) (*webrtc.DataChannel, error) {
+func openP2PChannel(sess P2PChannelOpener, label string) (*webrtc.DataChannel, error) {
 	channel, err := sess.OpenChannel(label, nil)
 	if err != nil {
 		return nil, err
@@ -47,13 +47,13 @@ func openP2PChannel(sess p2pChannelOpener, label string) (*webrtc.DataChannel, e
 		return channel, nil
 	case <-closedCh:
 		return nil, fmt.Errorf("remote closed the file-stream channel before it opened")
-	case <-time.After(p2pRequestTimeout):
+	case <-time.After(P2PRequestTimeout):
 		_ = channel.Close()
 		return nil, fmt.Errorf("timed out opening file-stream channel")
 	}
 }
 
-func responseErr(resp fsResponse) error {
+func responseErr(resp FSResponse) error {
 	if resp.Err == "" {
 		return fmt.Errorf("remote operation failed")
 	}
@@ -64,26 +64,26 @@ func responseErr(resp fsResponse) error {
 // p2pClientKeyExchange), sends one encrypted request, and waits for the one
 // encrypted response it expects back -- the pattern used by the list and
 // init control ops, which carry no binary payload.
-func p2pRequest(sess p2pChannelOpener, label string, req fsRequest) (*fsResponse, error) {
+func p2pRequest(sess P2PChannelOpener, label string, req FSRequest) (*FSResponse, error) {
 	channel, err := openP2PChannel(sess, label)
 	if err != nil {
 		return nil, err
 	}
 	defer channel.Close()
 
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
 		return nil, err
 	}
 
-	respCh := make(chan fsResponse, 1)
+	respCh := make(chan FSResponse, 1)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		kind, plaintext, err := decryptEnvelope(msg.Data, receiveKey)
-		if err != nil || kind != p2pMsgControl {
+		kind, plaintext, err := DecryptEnvelope(msg.Data, receiveKey)
+		if err != nil || kind != P2PMsgControl {
 			return
 		}
-		var resp fsResponse
+		var resp FSResponse
 		if json.Unmarshal(plaintext, &resp) == nil {
 			select {
 			case respCh <- resp:
@@ -92,11 +92,11 @@ func p2pRequest(sess p2pChannelOpener, label string, req fsRequest) (*fsResponse
 		}
 	})
 
-	if err := sendEncryptedJSON(channel, req, sendKey); err != nil {
+	if err := SendEncryptedJSON(channel, req, sendKey); err != nil {
 		return nil, err
 	}
 
-	resp, err := recvPriority(respCh, closed, p2pRequestTimeout)
+	resp, err := RecvPriority(respCh, closed, P2PRequestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func p2pRequest(sess p2pChannelOpener, label string, req fsRequest) (*fsResponse
 // p2pReadWorker opens one data channel on sess's shared PeerConnection and
 // owns it for the lifetime of the goroutine running it, reusing it across
 // every job pulled from jobs.
-func p2pReadWorker(sess p2pChannelOpener, rootArg string, jobs <-chan transferChunk, localPath string,
+func p2pReadWorker(sess P2PChannelOpener, rootArg string, jobs <-chan transferChunk, localPath string,
 	localIsDir bool, sourceRoot string, progress *transferProgress) error {
 	channel, err := openP2PChannel(sess, "filestream-read")
 	if err != nil {
@@ -117,29 +117,29 @@ func p2pReadWorker(sess p2pChannelOpener, rootArg string, jobs <-chan transferCh
 	}
 	defer channel.Close()
 
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
 		return err
 	}
 
-	ackCh := make(chan fsResponse, 1)
+	ackCh := make(chan FSResponse, 1)
 	dataCh := make(chan []byte, 4)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		kind, plaintext, err := decryptEnvelope(msg.Data, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(msg.Data, receiveKey)
 		if err != nil {
 			return
 		}
 		switch kind {
-		case p2pMsgControl:
-			var resp fsResponse
+		case P2PMsgControl:
+			var resp FSResponse
 			if json.Unmarshal(plaintext, &resp) == nil {
 				select {
 				case ackCh <- resp:
 				default:
 				}
 			}
-		case p2pMsgData:
+		case P2PMsgData:
 			select {
 			case dataCh <- plaintext:
 			case <-closed:
@@ -156,15 +156,15 @@ func p2pReadWorker(sess p2pChannelOpener, rootArg string, jobs <-chan transferCh
 	return nil
 }
 
-func p2pReadOneChunk(channel *webrtc.DataChannel, closed <-chan struct{}, ackCh chan fsResponse, dataCh chan []byte,
+func p2pReadOneChunk(channel *webrtc.DataChannel, closed <-chan struct{}, ackCh chan FSResponse, dataCh chan []byte,
 	sendKey []byte, rootArg string, chunk transferChunk, localPath string, localIsDir bool, sourceRoot string,
 	progress *transferProgress) error {
-	req := fsRequest{Op: fsOpRead, Path: rootArg, RelPath: chunk.RelPath, Offset: chunk.Offset, Length: chunk.Length}
-	if err := sendEncryptedJSON(channel, req, sendKey); err != nil {
+	req := FSRequest{Op: FSOpRead, Path: rootArg, RelPath: chunk.RelPath, Offset: chunk.Offset, Length: chunk.Length}
+	if err := SendEncryptedJSON(channel, req, sendKey); err != nil {
 		return err
 	}
 
-	ack, err := recvPriority(ackCh, closed, p2pRequestTimeout)
+	ack, err := RecvPriority(ackCh, closed, P2PRequestTimeout)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func p2pReadOneChunk(channel *webrtc.DataChannel, closed <-chan struct{}, ackCh 
 		return responseErr(ack)
 	}
 
-	dest := resolveDestPath(localPath, localIsDir, sourceRoot, chunk.RelPath)
+	dest := ResolveDestPath(localPath, localIsDir, sourceRoot, chunk.RelPath)
 	f, err := os.OpenFile(dest, os.O_WRONLY, 0) //nolint:gosec
 	if err != nil {
 		return err
@@ -182,7 +182,7 @@ func p2pReadOneChunk(channel *webrtc.DataChannel, closed <-chan struct{}, ackCh 
 	ow := io.NewOffsetWriter(f, chunk.Offset)
 	var received int64
 	for received < chunk.Length {
-		data, err := recvPriority(dataCh, closed, fileStreamRequestTimeout)
+		data, err := RecvPriority(dataCh, closed, FileStreamRequestTimeout)
 		if err != nil {
 			return fmt.Errorf("receiving chunk data (%d/%d bytes): %w", received, chunk.Length, err)
 		}
@@ -201,7 +201,7 @@ func p2pReadOneChunk(channel *webrtc.DataChannel, closed <-chan struct{}, ackCh 
 // p2pWriteWorker is the upload counterpart to p2pReadWorker: it opens one
 // data channel on sess's shared PeerConnection and owns it for the lifetime
 // of the goroutine running it, reusing it across every job pulled from jobs.
-func p2pWriteWorker(sess p2pChannelOpener, rootArg string, jobs <-chan transferChunk, localBase string,
+func p2pWriteWorker(sess P2PChannelOpener, rootArg string, jobs <-chan transferChunk, localBase string,
 	sourceIsDir, targetIsDirHint bool, progress *transferProgress) error {
 	channel, err := openP2PChannel(sess, "filestream-write")
 	if err != nil {
@@ -209,19 +209,19 @@ func p2pWriteWorker(sess p2pChannelOpener, rootArg string, jobs <-chan transferC
 	}
 	defer channel.Close()
 
-	closed, sendReady := webrtcBackpressure(channel)
+	closed, sendReady := WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
 		return err
 	}
 
-	ackCh := make(chan fsResponse, 2)
+	ackCh := make(chan FSResponse, 2)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		kind, plaintext, err := decryptEnvelope(msg.Data, receiveKey)
-		if err != nil || kind != p2pMsgControl {
+		kind, plaintext, err := DecryptEnvelope(msg.Data, receiveKey)
+		if err != nil || kind != P2PMsgControl {
 			return
 		}
-		var resp fsResponse
+		var resp FSResponse
 		if json.Unmarshal(plaintext, &resp) == nil {
 			select {
 			case ackCh <- resp:
@@ -239,18 +239,18 @@ func p2pWriteWorker(sess p2pChannelOpener, rootArg string, jobs <-chan transferC
 	return nil
 }
 
-func p2pWriteOneChunk(channel *webrtc.DataChannel, closed, sendReady <-chan struct{}, ackCh chan fsResponse,
+func p2pWriteOneChunk(channel *webrtc.DataChannel, closed, sendReady <-chan struct{}, ackCh chan FSResponse,
 	sendKey []byte, rootArg string, chunk transferChunk, localBase string, sourceIsDir, targetIsDirHint bool,
 	progress *transferProgress) error {
-	req := fsRequest{
-		Op: fsOpWrite, Path: rootArg, RelPath: chunk.RelPath, Offset: chunk.Offset, Length: chunk.Length,
+	req := FSRequest{
+		Op: FSOpWrite, Path: rootArg, RelPath: chunk.RelPath, Offset: chunk.Offset, Length: chunk.Length,
 		SourceIsDir: sourceIsDir, TargetIsDirHint: targetIsDirHint,
 	}
-	if err := sendEncryptedJSON(channel, req, sendKey); err != nil {
+	if err := SendEncryptedJSON(channel, req, sendKey); err != nil {
 		return err
 	}
 
-	ack, err := recvPriority(ackCh, closed, p2pRequestTimeout)
+	ack, err := RecvPriority(ackCh, closed, P2PRequestTimeout)
 	if err != nil {
 		return err
 	}
@@ -266,11 +266,11 @@ func p2pWriteOneChunk(channel *webrtc.DataChannel, closed, sendReady <-chan stru
 	defer f.Close()
 
 	section := io.NewSectionReader(f, chunk.Offset, chunk.Length)
-	buf := make([]byte, fileStreamChunkSize)
+	buf := make([]byte, FileStreamChunkSize)
 	for {
 		n, readErr := section.Read(buf)
 		if n > 0 {
-			if err := sendEncryptedBytes(channel, closed, sendReady, buf[:n], sendKey); err != nil {
+			if err := SendEncryptedBytes(channel, closed, sendReady, buf[:n], sendKey); err != nil {
 				return err
 			}
 			if progress != nil {
@@ -285,7 +285,7 @@ func p2pWriteOneChunk(channel *webrtc.DataChannel, closed, sendReady <-chan stru
 		}
 	}
 
-	final, err := recvPriority(ackCh, closed, fileStreamRequestTimeout)
+	final, err := RecvPriority(ackCh, closed, FileStreamRequestTimeout)
 	if err != nil {
 		return err
 	}
@@ -301,9 +301,9 @@ func p2pWriteOneChunk(channel *webrtc.DataChannel, closed, sendReady <-chan stru
 // default). Opening additional channels on an already-connected
 // PeerConnection needs no new ICE/DTLS handshake, so every worker's channel
 // comes up immediately once sess itself is connected.
-func DownloadFilesP2P(sess p2pChannelOpener, remotePath, localPath string, recursive bool, numWorkers int) error {
+func DownloadFilesP2P(sess P2PChannelOpener, remotePath, localPath string, recursive bool, numWorkers int) error {
 	return downloadFiles(remotePath, localPath, recursive, numWorkers,
-		func(req fsRequest) (*fsResponse, error) { return p2pRequest(sess, "filestream-list", req) },
+		func(req FSRequest) (*FSResponse, error) { return p2pRequest(sess, "filestream-list", req) },
 		func(sourceRoot string, localIsDir bool, progress *transferProgress) func(jobs <-chan transferChunk) error {
 			return func(jobs <-chan transferChunk) error {
 				return p2pReadWorker(sess, remotePath, jobs, localPath, localIsDir, sourceRoot, progress)
@@ -318,10 +318,10 @@ func DownloadFilesP2P(sess p2pChannelOpener, remotePath, localPath string, recur
 // additional channels on an already-connected PeerConnection needs no new
 // ICE/DTLS handshake, so every worker's channel comes up immediately once
 // sess itself is connected.
-func UploadFilesP2P(sess p2pChannelOpener, localPath, remotePath string, recursive bool, numWorkers int) error {
+func UploadFilesP2P(sess P2PChannelOpener, localPath, remotePath string, recursive bool, numWorkers int) error {
 	localBase := filepath.Dir(localPath)
 	return uploadFiles(localPath, remotePath, recursive, numWorkers,
-		func(req fsRequest) (*fsResponse, error) { return p2pRequest(sess, "filestream-init", req) },
+		func(req FSRequest) (*FSResponse, error) { return p2pRequest(sess, "filestream-init", req) },
 		func(sourceIsDir, targetIsDirHint bool, progress *transferProgress) func(jobs <-chan transferChunk) error {
 			return func(jobs <-chan transferChunk) error {
 				return p2pWriteWorker(sess, remotePath, jobs, localBase, sourceIsDir, targetIsDirHint, progress)

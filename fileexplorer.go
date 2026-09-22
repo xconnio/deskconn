@@ -30,13 +30,30 @@ var errEditConflict = errors.New("file changed on the device, patch could not be
 
 const binarySniffLen = 8000
 
+// IsEditableExtension reports whether the CLI's `file edit` should treat
+// remotePath as text rather than refusing it outright -- mirrors the same
+// image/video/pdf/document extension classification host's file indexer
+// uses to skip thumbnailing/full-text indexing for these categories.
 func IsEditableExtension(name string) bool {
-	switch fileCategory(name) {
-	case CategoryImages, CategoryVideos, CategoryPDFs, CategoryDocuments:
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".heic", ".heif",
+		extMp4, extWebm, extMov, extAvi, extMkv, extOgv, extFlv, extWmv, extM4v, ext3gp,
+		extPdf,
+		".doc", ".docx", ".odt", ".rtf", ".xls", ".xlsx", ".ods",
+		".ppt", ".pptx", ".odp", ".pages", ".numbers", ".key", ".epub":
 		return false
 	default:
 		return true
 	}
+}
+
+// BuildEditPatch computes a unified diff between original and edited,
+// formatted for ProcedureFileEdit to apply on the device.
+func BuildEditPatch(original, edited []byte) string {
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain(string(original), string(edited), false)
+	patches := dmp.PatchMake(string(original), diffs)
+	return dmp.PatchToText(patches)
 }
 
 func isBinaryContent(content []byte) bool {
@@ -329,17 +346,18 @@ func isImageFile(name string) bool {
 
 func isVideoFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
-	case ".mp4", ".webm", ".mov", ".avi", ".mkv", ".ogv", ".flv", ".wmv":
+	case extMp4, extWebm, extMov, extAvi, extMkv, extOgv, extFlv, extWmv:
 		return true
 	}
 	return false
 }
 
 func isPDFFile(name string) bool {
-	return strings.ToLower(filepath.Ext(name)) == ".pdf"
+	return strings.ToLower(filepath.Ext(name)) == extPdf
 }
 
 func generateThumbnail(path string) string {
+	//nolint:gosec // path comes from an already-resolved FileEntry/walk under a jailed root
 	f, err := os.Open(path)
 	if err != nil {
 		return ""
@@ -366,6 +384,7 @@ func generateVideoThumbnail(path string) string {
 		return ""
 	}
 
+	//nolint:gosec // path comes from an already-resolved FileEntry/walk under a jailed root
 	cmd := exec.Command(ffmpeg,
 		"-ss", "00:00:01",
 		"-i", path,
@@ -390,6 +409,7 @@ func generatePDFThumbnail(path string) string {
 		return ""
 	}
 
+	//nolint:gosec // path comes from an already-resolved FileEntry/walk under a jailed root
 	cmd := exec.Command(pdftocairo,
 		"-jpeg",
 		"-singlefile",
@@ -580,13 +600,6 @@ func (f *FileBrowser) Edit(pathArg, patchText string) error {
 
 	//nolint:gosec // resolved is validated by resolveOperationPath
 	return os.WriteFile(resolved, []byte(patched), info.Mode().Perm())
-}
-
-func BuildEditPatch(original, edited []byte) string {
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(string(original), string(edited), false)
-	patches := dmp.PatchMake(string(original), diffs)
-	return dmp.PatchToText(patches)
 }
 
 func copyFile(src, dst string) error {

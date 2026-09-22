@@ -2,15 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -18,17 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn"
-	"github.com/xconnio/wampproto-go"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
-)
-
-const (
-	port = 18080
-
-	xconnURIPrefix = "io.xconn."
 )
 
 func main() {
@@ -36,242 +22,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	localRouter, err := xconn.NewRouter(xconn.DefaultRouterConfig())
-	if err != nil {
-		log.Fatalln(err)
-	}
 
-	if err := localRouter.AddRealm(deskconn.LocalRealm, &xconn.RealmConfig{
-		AutoDiscloseCaller: true,
-		Meta:               true,
-		Roles: []xconn.RealmRole{{
-			Name: "anonymous",
-			Permissions: []xconn.Permission{{
-				URI:         "",
-				MatchPolicy: wampproto.MatchPrefix,
-				AllowCall:   true,
-			}},
-		}},
-	}); err != nil {
-		log.Fatalln(err)
-	}
-
-	localserver := xconn.NewServer(localRouter, nil, &xconn.ServerConfig{})
-	localListener, err := localserver.ListenAndServeRawSocket(xconn.NetworkUnix,
-		filepath.Join(cfgDirectory, "deskconn.sock"))
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer localListener.Close()
-
-	sess, err := xconn.ConnectInMemory(localRouter, deskconn.LocalRealm)
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	clientSession := deskconn.NewClientSessions()
-
-	regRespFileOp := sess.Register(deskconn.ProcedureProxyFileOp,
-		deskconn.ProxyFileOpHandler(clientSession, cfgDirectory)).Do()
-	if regRespFileOp.Err != nil {
-		log.Fatal(regRespFileOp.Err)
-	}
-
-	regRespDeviceInfo := sess.Register(deskconn.ProcedureProxyDeviceInfo,
-		deskconn.ProxyDeviceInfoHandler(clientSession, cfgDirectory)).Do()
-	if regRespDeviceInfo.Err != nil {
-		log.Fatal(regRespDeviceInfo.Err)
-	}
-
-	regRespPing := sess.Register(deskconn.ProcedureProxyPing,
-		deskconn.ProxyPingHandler(clientSession, cfgDirectory)).Do()
-	if regRespPing.Err != nil {
-		log.Fatal(regRespPing.Err)
-	}
-
-	regRespCat := sess.Register(deskconn.ProcedureProxyCat,
-		deskconn.ProxyCatHandler(clientSession, cfgDirectory)).Do()
-	if regRespCat.Err != nil {
-		log.Fatal(regRespCat.Err)
-	}
-
-	// currentDeskconn tracks whichever *deskconn.Deskconn belongs to the current reconnect
-	// cycle (rebuilt fresh each time), so the VPN handlers below -- registered once, here --
-	// resolve it at call time instead of closing over one fixed instance.
-	var currentDeskconn atomic.Pointer[deskconn.Deskconn]
-	getCurrentDeskconn := func() *deskconn.Deskconn { return currentDeskconn.Load() }
-
-	regRespVPNStart := sess.Register(deskconn.ProcedureProxyVPNStart,
-		deskconn.ProxyVPNStartHandler(getCurrentDeskconn)).Do()
-	if regRespVPNStart.Err != nil {
-		log.Fatal(regRespVPNStart.Err)
-	}
-
-	regRespVPNStop := sess.Register(deskconn.ProcedureProxyVPNStop,
-		deskconn.ProxyVPNStopHandler(getCurrentDeskconn)).Do()
-	if regRespVPNStop.Err != nil {
-		log.Fatal(regRespVPNStop.Err)
-	}
-
-	regRespPrinterList := sess.Register(deskconn.ProcedureProxyPrinterList,
-		deskconn.ProxyPrinterListHandler(clientSession, cfgDirectory)).Do()
-	if regRespPrinterList.Err != nil {
-		log.Fatal(regRespPrinterList.Err)
-	}
-
-	regRespPrinterPrint := sess.Register(deskconn.ProcedureProxyPrinterPrint,
-		deskconn.ProxyPrinterPrintHandler(clientSession, cfgDirectory)).Do()
-	if regRespPrinterPrint.Err != nil {
-		log.Fatal(regRespPrinterPrint.Err)
-	}
-
-	regRespLogin := sess.Register(deskconn.ProcedureLogin,
-		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-			clientSession.Login()
-			return xconn.NewInvocationResult()
-		}).Do()
-	if regRespLogin.Err != nil {
-		log.Fatal(regRespLogin.Err)
-	}
-
-	regRespLogout := sess.Register(deskconn.ProcedureLogout,
-		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-			clientSession.Logout()
-			return xconn.NewInvocationResult()
-		}).Do()
-	if regRespLogout.Err != nil {
-		log.Fatal(regRespLogout.Err)
-	}
-
-	regRespConnect := sess.Register(deskconn.ProcedureConnect,
-		func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-			realm, err := inv.ArgString(0)
-			if err != nil {
-				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
-			}
-			_, err = clientSession.EnsureDeviceSession(ctx, realm, cfgDirectory)
-			if err != nil {
-				return xconn.NewInvocationError(deskconn.ErrOperationFailed, err.Error())
-			}
-			return xconn.NewInvocationResult()
-		}).Do()
-	if regRespConnect.Err != nil {
-		log.Fatal(regRespConnect.Err)
-	}
-
-	regRespDisconnect := sess.Register(deskconn.ProcedureDisconnect,
-		func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-			realm, err := inv.ArgString(0)
-			if err != nil {
-				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
-			}
-			clientSession.Disconnect(realm)
-			return xconn.NewInvocationResult()
-		}).Do()
-	if regRespDisconnect.Err != nil {
-		log.Fatal(regRespDisconnect.Err)
-	}
-
-	regRespDisconnectAll := sess.Register(deskconn.ProcedureDisconnectAll,
-		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-			clientSession.DisconnectAll()
-			return xconn.NewInvocationResult()
-		}).Do()
-	if regRespDisconnectAll.Err != nil {
-		log.Fatal(regRespDisconnectAll.Err)
-	}
-
-	regRespConnectedDevices := sess.Register(deskconn.ProcedureConnectedDevices,
-		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-			return xconn.NewInvocationResult(clientSession.DeviceSessions())
-		}).Do()
-	if regRespConnectedDevices.Err != nil {
-		log.Fatal(regRespConnectedDevices.Err)
-	}
-
-	host, _ := os.Hostname()
-
-	for runDeviceSession(cfgDirectory, host, clientSession, &currentDeskconn) {
-	}
-
-	localRouter.Close()
-}
-
-// runDeviceSession runs one connect/serve cycle against the device's cloud realm: it sets up
-// the realm router, local hardware APIs, and the cloud reconnect loop, then blocks until either
-// a shutdown signal or a detach event. It returns true if the caller should start another
-// cycle (detach happened), false to shut down.
-//
-// currentDeskconn is updated to this cycle's *deskconn.Deskconn as soon as it's built -- see
-// its registration in main.
-func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientSessions,
-	currentDeskconn *atomic.Pointer[deskconn.Deskconn]) bool {
-	cred, err := deskconn.EnsureCredentials()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	machineID, err := os.ReadFile(deskconn.MachineIDPath)
-	if err != nil {
-		log.Fatalln("failed to read machine-id: ", err)
-	}
-	machineIDStr := strings.TrimSpace(string(machineID))
-
-	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	err = router.AddRealm(cred.Realm, &xconn.RealmConfig{
-		AutoDiscloseCaller: true,
-		Meta:               true,
-		Roles: []xconn.RealmRole{
-			{Name: "owner", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-			{Name: "admin", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-			{Name: "member", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-		},
-	})
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	principals, err := deskconn.ReadPrincipalsFromFile()
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			log.Fatal(err)
-		}
-	}
-
-	authenticator := deskconn.NewAuthenticator(principals)
-	server := xconn.NewServer(router, authenticator, &xconn.ServerConfig{})
-	listener, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:18080")
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer listener.Close()
-
-	localSession, err := xconn.ConnectInMemory(router, cred.Realm)
-	if err != nil {
-		log.Fatal(err)
-	}
+	clientSessions := deskconn.NewClientSessions()
 
 	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
@@ -302,231 +54,140 @@ func runDeviceSession(cfgDirectory, host string, clientSession *deskconn.ClientS
 	}
 
 	deskconnApis := deskconn.NewDeskconn(screen, mpris, audio, isDesktop, cfgDirectory)
-	currentDeskconn.Store(deskconnApis)
-	defer currentDeskconn.CompareAndSwap(deskconnApis, nil)
-
-	if err := deskconnApis.Register(localSession); err != nil {
-		log.Fatal(err)
-	}
+	defer deskconnApis.CloseVPNTunnel()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	deskconnApis.StartIndexer(ctx)
 	defer cancel()
+	deskconnApis.StartIndexer(ctx)
 
-	detachChan := make(chan struct{}, 1)
-
-	var cloudConnMu sync.Mutex
-	var activeDeviceSess, activeCloudSess *xconn.QUICSession
-
-	deskconn.SafeGo(func() {
-		retryDelay := 1 * time.Second
-		maxDelay := 30 * time.Second
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			cryptosignAuth, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
-			if err != nil {
-				log.Printf("failed to initialize cryptosign authenticator: %v", err)
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			// Open the QUIC connection and the first WAMP session on the device realm.
-			deviceSess, err := xconn.ConnectQUIC(ctx, deskconn.CloudQUICAddress(), cred.Realm,
-				&xconn.QUICDialerConfig{Authenticator: cryptosignAuth, TLSConfig: deskconn.CloudQUICTLSConfig()})
-			if err != nil {
-				if err.Error() == "wamp.error.no_such_realm" {
-					select {
-					case detachChan <- struct{}{}:
-					default:
-					}
-				}
-				log.Printf("failed to connect to cloud, will retry in %v: %v", retryDelay, err)
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			// Open a second WAMP session on the cloud realm over the same QUIC connection.
-			cloudSess, err := deviceSess.OpenSession(ctx, deskconn.CloudRealm,
-				&xconn.QUICDialerConfig{Authenticator: cryptosignAuth})
-			if err != nil {
-				log.Printf("failed to open cloud realm session, will retry in %v: %v", retryDelay, err)
-				_ = deviceSess.Close()
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			deviceSession := deviceSess.Session
-			cloudSession := cloudSess.Session
-
-			cloudConnMu.Lock()
-			activeDeviceSess = deviceSess
-			activeCloudSess = cloudSess
-			cloudConnMu.Unlock()
-
-			log.Println("connected to cloud")
-
-			// Accept file-transfer streams relayed from CLI clients.
-			deskconn.SafeGo(func() { deskconnApis.AcceptQUICStreams(deviceSess) })
-
-			if err := deskconnApis.Register(deviceSession); err != nil {
-				log.Printf("failed to register procedures on cloud, will retry in %v: %v", retryDelay, err)
-				_ = deviceSess.Connection().Close()
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			// Fetch and maintain authorized principals via the cloud realm session.
-			callResp := cloudSession.Call(deskconn.ProcedureListKeys).Do()
-			if callResp.Err != nil {
-				log.Println("failed to list keys:", callResp.Err)
-				_ = deviceSess.Connection().Close()
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			if len(callResp.Args()) == 0 {
-				log.Println("unexpected response from list keys: no args")
-				_ = deviceSess.Connection().Close()
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			jsonData, err := json.MarshalIndent(callResp.Args()[0], "", "  ")
-			if err != nil {
-				log.Println(err)
-				_ = deviceSess.Connection().Close()
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			var cryptosignPrincipals []*deskconn.CryptosignPrincipal
-			if err = json.Unmarshal(jsonData, &cryptosignPrincipals); err != nil {
-				log.Println(err)
-				_ = deviceSess.Connection().Close()
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			jsonData = append(jsonData, '\n')
-			if err = os.WriteFile(filepath.Join(cfgDirectory, "principals.json"), jsonData, 0600); err != nil {
-				log.Println(err)
-			}
-
-			authenticator.SetPrincipals(cryptosignPrincipals)
-			if err := authenticator.SubscribeEvents(cloudSession, machineIDStr); err != nil {
-				log.Println(err)
-			}
-
-			subResp := cloudSession.Subscribe(fmt.Sprintf(deskconn.TopicDeskconnDesktopDetachFormat, machineIDStr),
-				func(event *xconn.Event) {
-					select {
-					case detachChan <- struct{}{}:
-					default:
-					}
-				}).Do()
-			if subResp.Err != nil {
-				log.Println(subResp.Err)
-			}
-
-			webRtcManager := xconnwebrtc.NewWebRTCHandler()
-			cfg := &xconnwebrtc.ProviderConfig{
-				Session:                     deviceSession,
-				ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
-				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
-				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
-				Serializer:                  &serializers.CBORSerializer{},
-				Authenticator:               authenticator,
-				Router:                      router,
-				ICEServers: []xconnwebrtc.ICEServer{
-					{URLs: []string{deskconn.StunServerURL}},
-				},
-			}
-			if err := webRtcManager.Setup(cfg); err != nil {
-				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
-				_ = deviceSess.Connection().Close()
-				retryDelay = min(retryDelay*2, maxDelay)
-				time.Sleep(retryDelay)
-				continue
-			}
-
-			webRtcManager.OnDataChannel(deskconnApis.HandleAuxDataChannel)
-
-			// Reset backoff after successful connection.
-			retryDelay = 1 * time.Second
-
-			// Both sessions share the QUIC connection; either ending means reconnect.
-			select {
-			case <-deviceSession.Done():
-			case <-cloudSession.Done():
-			}
-
-			cloudConnMu.Lock()
-			activeDeviceSess = nil
-			activeCloudSess = nil
-			cloudConnMu.Unlock()
-
-			_ = deviceSess.Connection().Close()
-			log.Println("disconnected from cloud, retrying...")
-		}
-	})
-
-	zeroconfServer, err := deskconn.AdvertiseService(host, port, cred.Realm)
+	// Raw stream relay listener: xlink dials in once per classified
+	// remote stream/channel (see deskconn.RelayHeader).
+	streamSockPath := filepath.Join(cfgDirectory, "xlink-streams.sock")
+	_ = os.Remove(streamSockPath)
+	streamListener, err := net.Listen("unix", streamSockPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer zeroconfServer.Shutdown()
+	defer streamListener.Close()
+	deskconn.SafeGo(func() { deskconnApis.ServeStreamRelay(streamListener) })
+
+	deskconn.SafeGo(func() { runXlinkSession(ctx, cfgDirectory, deskconnApis, clientSessions) })
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigChan)
+	<-sigChan
 
-	select {
-	case <-sigChan:
-		cancel()
-		deskconnApis.CloseVPNTunnel()
-		clientSession.Logout()
+	cancel()
+}
 
-		cloudConnMu.Lock()
-		if activeCloudSess != nil {
-			_ = activeCloudSess.Close()
+// registerLocalProcedures registers the CLI-facing procedures on session.
+func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconn.Deskconn,
+	clientSessions *deskconn.ClientSessions, cfgDirectory string) error {
+	handlers := map[string]xconn.InvocationHandler{
+		deskconn.ProcedureProxyFileOp:       deskconn.ProxyFileOpHandler(clientSessions, cfgDirectory),
+		deskconn.ProcedureProxyDeviceInfo:   deskconn.ProxyDeviceInfoHandler(clientSessions, cfgDirectory),
+		deskconn.ProcedureProxyPing:         deskconn.ProxyPingHandler(clientSessions, cfgDirectory),
+		deskconn.ProcedureProxyCat:          deskconn.ProxyCatHandler(clientSessions, cfgDirectory),
+		deskconn.ProcedureProxyVPNStart:     deskconn.ProxyVPNStartHandler(deskconnApis),
+		deskconn.ProcedureProxyVPNStop:      deskconn.ProxyVPNStopHandler(deskconnApis),
+		deskconn.ProcedureProxyPrinterList:  deskconn.ProxyPrinterListHandler(clientSessions, cfgDirectory),
+		deskconn.ProcedureProxyPrinterPrint: deskconn.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
+		deskconn.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			clientSessions.Login()
+			return xconn.NewInvocationResult()
+		},
+		deskconn.ProcedureLogout: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			clientSessions.Logout()
+			return xconn.NewInvocationResult()
+		},
+		deskconn.ProcedureConnect: func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+			realm, err := inv.ArgString(0)
+			if err != nil {
+				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
+			}
+			_, err = clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+			if err != nil {
+				return xconn.NewInvocationError(deskconn.ErrOperationFailed, err.Error())
+			}
+			return xconn.NewInvocationResult()
+		},
+		deskconn.ProcedureDisconnect: func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+			realm, err := inv.ArgString(0)
+			if err != nil {
+				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
+			}
+			clientSessions.Disconnect(realm)
+			return xconn.NewInvocationResult()
+		},
+		deskconn.ProcedureDisconnectAll: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			clientSessions.DisconnectAll()
+			return xconn.NewInvocationResult()
+		},
+		deskconn.ProcedureConnectedDevices: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			return xconn.NewInvocationResult(clientSessions.DeviceSessions())
+		},
+	}
+
+	for uri, handler := range handlers {
+		if resp := session.Register(uri, handler).Do(); resp.Err != nil {
+			return resp.Err
 		}
-		if activeDeviceSess != nil {
-			_ = activeDeviceSess.Close()
-			_ = activeDeviceSess.Connection().Close()
-		}
-		cloudConnMu.Unlock()
+	}
+	return nil
+}
 
-		router.Close()
-		return false
-	case <-detachChan:
-		cancel()
-		deskconnApis.CloseVPNTunnel()
-		_ = os.Remove(filepath.Join(cfgDirectory, "credentials.json"))
+// runXlinkSession keeps a session on xlink's local realm alive, registering
+// every app-layer and CLI-facing procedure on it, reconnecting on failure.
+func runXlinkSession(ctx context.Context, cfgDirectory string, deskconnApis *deskconn.Deskconn,
+	clientSessions *deskconn.ClientSessions) {
+	retryDelay := 1 * time.Second
+	maxDelay := 30 * time.Second
 
-		cloudConnMu.Lock()
-		if activeCloudSess != nil {
-			_ = activeCloudSess.Close()
-		}
-		if activeDeviceSess != nil {
-			_ = activeDeviceSess.Close()
-			_ = activeDeviceSess.Connection().Close()
-		}
-		cloudConnMu.Unlock()
+	localSockPath := filepath.Join(cfgDirectory, "deskconn.sock")
 
-		router.Close()
-		return true
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		session, err := xconn.ConnectAnonymous(ctx, fmt.Sprintf("unix://%s", localSockPath), deskconn.LocalRealm)
+		if err != nil {
+			log.Printf("xlink session: failed to connect to xlink, will retry in %v: %v", retryDelay, err)
+			retryDelay = min(retryDelay*2, maxDelay)
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		if err := deskconnApis.Register(session); err != nil {
+			log.Printf("xlink session: failed to register app-layer procedures, will retry in %v: %v",
+				retryDelay, err)
+			_ = session.Leave()
+			retryDelay = min(retryDelay*2, maxDelay)
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		if err := registerLocalProcedures(session, deskconnApis, clientSessions, cfgDirectory); err != nil {
+			log.Printf("xlink session: failed to register CLI-facing procedures, will retry in %v: %v",
+				retryDelay, err)
+			_ = session.Leave()
+			retryDelay = min(retryDelay*2, maxDelay)
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		log.Println("xlink session: registered procedures with xlink")
+		retryDelay = 1 * time.Second
+
+		select {
+		case <-session.Done():
+			log.Println("xlink session: disconnected from xlink, retrying...")
+		case <-ctx.Done():
+			_ = session.Leave()
+			return
+		}
 	}
 }

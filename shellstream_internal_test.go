@@ -42,10 +42,12 @@ func TestBeginShellSessionCreatesNewPTY(t *testing.T) {
 	p := newInteractiveShellSession()
 	transport := &fakeShellTransport{}
 
-	shellID, token, ptmx, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, transport)
+	shellID, token, ptmx, startReader, err := p.beginShellSession(
+		shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, transport)
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
 	require.NoError(t, err)
+	startReader()
 	assert.NotEmpty(t, shellID)
 	assert.NotEmpty(t, token, "a fresh session should be issued a migration token")
 	require.NotNil(t, ptmx)
@@ -66,10 +68,11 @@ func TestBeginShellSessionRunsExecCommand(t *testing.T) {
 	p := newInteractiveShellSession()
 	transport := &fakeShellTransport{}
 
-	shellID, _, _, err := p.beginShellSession(shellControlMsg{
+	shellID, _, _, startReader, err := p.beginShellSession(shellControlMsg{
 		Op: shellOpSize, Cols: 80, Rows: 24, Command: "echo", Args: []string{"hello-exec-test"},
 	}, transport)
 	require.NoError(t, err)
+	startReader()
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
 	require.Eventually(t, func() bool {
@@ -102,10 +105,11 @@ func TestCleanupShellIDKillsProcessGroup(t *testing.T) {
 	p := newInteractiveShellSession()
 	transport := &fakeShellTransport{}
 
-	shellID, _, _, err := p.beginShellSession(shellControlMsg{
+	shellID, _, _, startReader, err := p.beginShellSession(shellControlMsg{
 		Op: shellOpSize, Cols: 80, Rows: 24, Command: "sleep", Args: []string{"30"},
 	}, transport)
 	require.NoError(t, err)
+	startReader()
 
 	p.Lock()
 	pid := p.pids[shellID]
@@ -124,15 +128,18 @@ func TestCleanupShellIDKillsProcessGroup(t *testing.T) {
 func TestBeginShellSessionMigrateValidToken(t *testing.T) {
 	p := newInteractiveShellSession()
 	original := &fakeShellTransport{}
-	shellID, token, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
+	shellID, token, _, startReader, err := p.beginShellSession(
+		shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
 	require.NoError(t, err)
+	startReader()
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
 	newTransport := &fakeShellTransport{}
-	claimedID, _, ptmx, err := p.beginShellSession(
+	claimedID, _, ptmx, migrateStartReader, err := p.beginShellSession(
 		shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: token}, newTransport)
 
 	require.NoError(t, err)
+	migrateStartReader()
 	assert.Equal(t, shellID, claimedID, "migration keeps the same shell ID, no rekeying needed")
 	require.NotNil(t, ptmx)
 
@@ -150,12 +157,15 @@ func TestBeginShellSessionMigrateValidToken(t *testing.T) {
 func TestBeginShellSessionMigrateWrongToken(t *testing.T) {
 	p := newInteractiveShellSession()
 	original := &fakeShellTransport{}
-	shellID, _, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
+	shellID, _, _, startReader, err := p.beginShellSession(
+		shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
 	require.NoError(t, err)
+	startReader()
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
-	_, _, _, err = p.beginShellSession(
-		shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: "not-the-real-token"}, &fakeShellTransport{})
+	_, _, _, _, err = p.beginShellSession(
+		shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: "not-the-real-token"},
+		&fakeShellTransport{})
 	assert.Error(t, err)
 
 	p.Lock()
@@ -170,8 +180,10 @@ func TestBeginShellSessionMigrateWrongToken(t *testing.T) {
 func TestBeginShellSessionMigrateExpiredToken(t *testing.T) {
 	p := newInteractiveShellSession()
 	original := &fakeShellTransport{}
-	shellID, token, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
+	shellID, token, _, startReader, err := p.beginShellSession(
+		shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
 	require.NoError(t, err)
+	startReader()
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
 	p.Lock()
@@ -180,15 +192,16 @@ func TestBeginShellSessionMigrateExpiredToken(t *testing.T) {
 	p.migrationTokens[shellID] = expired
 	p.Unlock()
 
-	_, _, _, err = p.beginShellSession(
+	_, _, _, _, err = p.beginShellSession(
 		shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: token}, &fakeShellTransport{})
 	assert.Error(t, err)
 }
 
 func TestBeginShellSessionMigrateUnknownShellID(t *testing.T) {
 	p := newInteractiveShellSession()
-	_, _, _, err := p.beginShellSession(
-		shellControlMsg{Op: shellOpMigrate, OldID: "no-such-shell", Token: "whatever"}, &fakeShellTransport{})
+	_, _, _, _, err := p.beginShellSession(
+		shellControlMsg{Op: shellOpMigrate, OldID: "no-such-shell", Token: "whatever"},
+		&fakeShellTransport{})
 	assert.Error(t, err)
 }
 
@@ -197,7 +210,7 @@ func TestBeginShellSessionMigrateUnknownShellID(t *testing.T) {
 // closing the connection.
 func TestBeginShellSessionExecNonexistentCommand(t *testing.T) {
 	p := newInteractiveShellSession()
-	_, _, _, err := p.beginShellSession(shellControlMsg{
+	_, _, _, _, err := p.beginShellSession(shellControlMsg{
 		Op: shellOpSize, Cols: 80, Rows: 24, Command: "this-command-does-not-exist-xyz",
 	}, &fakeShellTransport{})
 	require.Error(t, err)
@@ -207,8 +220,10 @@ func TestBeginShellSessionExecNonexistentCommand(t *testing.T) {
 func TestEndShellInputCleansUpWhenStillOwner(t *testing.T) {
 	p := newInteractiveShellSession()
 	transport := &fakeShellTransport{}
-	shellID, _, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, transport)
+	shellID, _, _, startReader, err := p.beginShellSession(
+		shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, transport)
 	require.NoError(t, err)
+	startReader()
 
 	p.endShellInput(shellID, transport)
 
@@ -221,13 +236,17 @@ func TestEndShellInputCleansUpWhenStillOwner(t *testing.T) {
 func TestEndShellInputNoOpAfterMigration(t *testing.T) {
 	p := newInteractiveShellSession()
 	original := &fakeShellTransport{}
-	shellID, token, _, err := p.beginShellSession(shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
+	shellID, token, _, startReader, err := p.beginShellSession(
+		shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}, original)
 	require.NoError(t, err)
+	startReader()
 	t.Cleanup(func() { p.cleanupShellID(shellID) })
 
 	newTransport := &fakeShellTransport{}
-	_, _, _, err = p.beginShellSession(shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: token}, newTransport)
+	_, _, _, migrateStartReader, err := p.beginShellSession(
+		shellControlMsg{Op: shellOpMigrate, OldID: shellID, Token: token}, newTransport)
 	require.NoError(t, err)
+	migrateStartReader()
 
 	// The old connection dying after a successful migration must not kill
 	// the PTY the new connection is now serving.
@@ -248,13 +267,20 @@ func TestHandleQUICShellStreamEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	d := Deskconn{shellSession: newInteractiveShellSession()}
-	go d.HandleQUICStream(nil, server)
+	go func() {
+		op, err := ReadStreamOp(server)
+		if err != nil {
+			return
+		}
+		d.DispatchQUICOp(op, server)
+	}()
 
-	require.NoError(t, writeMsg(client, routingFrame{Op: fsOpShell}))
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	require.NoError(t, WriteMsg(client, RoutingFrame{Op: FSOpShell}))
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
-	require.NoError(t, sendQUICShellControl(client, sendKey, shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}))
+	require.NoError(t, sendQUICShellControl(client, sendKey,
+		shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}))
 	ack, err := recvQUICShellEnvelope(client, receiveKey)
 	require.NoError(t, err)
 	require.NotEmpty(t, ack.ackShellID)
@@ -281,13 +307,20 @@ func TestHandleQUICShellStreamIgnoresPing(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	d := Deskconn{shellSession: newInteractiveShellSession()}
-	go d.HandleQUICStream(nil, server)
+	go func() {
+		op, err := ReadStreamOp(server)
+		if err != nil {
+			return
+		}
+		d.DispatchQUICOp(op, server)
+	}()
 
-	require.NoError(t, writeMsg(client, routingFrame{Op: fsOpShell}))
-	sendKey, receiveKey, err := quicClientKeyExchange(client)
+	require.NoError(t, WriteMsg(client, RoutingFrame{Op: FSOpShell}))
+	sendKey, receiveKey, err := QuicClientKeyExchange(client)
 	require.NoError(t, err)
 
-	require.NoError(t, sendQUICShellControl(client, sendKey, shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}))
+	require.NoError(t, sendQUICShellControl(client, sendKey,
+		shellControlMsg{Op: shellOpSize, Cols: 80, Rows: 24}))
 	ack, err := recvQUICShellEnvelope(client, receiveKey)
 	require.NoError(t, err)
 	require.NotEmpty(t, ack.ackShellID)
@@ -313,7 +346,7 @@ func sendQUICShellControl(conn net.Conn, sendKey []byte, msg shellControlMsg) er
 	if err != nil {
 		return err
 	}
-	return writeFrame(conn, envelope)
+	return WriteFrame(conn, envelope)
 }
 
 func sendQUICShellData(conn net.Conn, sendKey, data []byte) error {
@@ -321,15 +354,15 @@ func sendQUICShellData(conn net.Conn, sendKey, data []byte) error {
 	if err != nil {
 		return err
 	}
-	return writeFrame(conn, envelope)
+	return WriteFrame(conn, envelope)
 }
 
 func recvQUICShellEnvelope(conn net.Conn, receiveKey []byte) (shellAck, error) {
-	frame, err := readFrame(conn)
+	frame, err := ReadFrame(conn)
 	if err != nil {
 		return shellAck{}, err
 	}
-	kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+	kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 	if err != nil {
 		return shellAck{}, err
 	}

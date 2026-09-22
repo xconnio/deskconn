@@ -54,10 +54,10 @@ func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 		return err
 	}
 	defer stream.Close()
-	if err := writeMsg(stream, routingFrame{Realm: realm, Op: fsOpLogs}); err != nil {
+	if err := WriteMsg(stream, RoutingFrame{Realm: realm, Op: FSOpLogs}); err != nil {
 		return err
 	}
-	sendKey, receiveKey, err := quicClientKeyExchange(stream)
+	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 	if err != nil {
 		return err
 	}
-	if err := writeFrame(stream, env); err != nil {
+	if err := WriteFrame(stream, env); err != nil {
 		return err
 	}
 
@@ -95,7 +95,7 @@ func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 				if err != nil {
 					continue
 				}
-				if err := writeFrame(stream, env); err != nil {
+				if err := WriteFrame(stream, env); err != nil {
 					closeAll()
 					return
 				}
@@ -105,14 +105,14 @@ func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 
 	for {
 		_ = stream.SetReadDeadline(time.Now().Add(shellIdleTimeout))
-		frame, err := readFrame(stream)
+		frame, err := ReadFrame(stream)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			return nil
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}
@@ -122,14 +122,14 @@ func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 	}
 }
 
-func runLogsP2P(ctx context.Context, p2pSess p2pChannelOpener, source string,
+func runLogsP2P(ctx context.Context, p2pSess P2PChannelOpener, source string,
 	follow bool, tailN int64, since string) error {
-	channel, err := openP2PChannel(p2pSess, logChannelLabel)
+	channel, err := openP2PChannel(p2pSess, LogChannelLabel)
 	if err != nil {
 		return err
 	}
 	defer channel.Close()
-	closed, _ := webrtcBackpressure(channel)
+	closed, _ := WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
 		return err
@@ -173,14 +173,14 @@ func runLogsP2P(ctx context.Context, p2pSess p2pChannelOpener, source string,
 	})
 
 	for {
-		frame, err := recvPriority(conn.msgCh, closed, shellIdleTimeout)
+		frame, err := RecvPriority(conn.msgCh, closed, shellIdleTimeout)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			return nil
 		}
-		kind, plaintext, err := decryptEnvelope(frame, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(frame, receiveKey)
 		if err != nil {
 			continue
 		}

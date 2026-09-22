@@ -1,6 +1,9 @@
-package deskconn_test
+package main
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -8,6 +11,11 @@ import (
 	"github.com/xconnio/deskconn"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/wampproto-go/messages"
+)
+
+const (
+	user  = "user"
+	admin = "admin"
 )
 
 func makeCryptoSignRequest(authid, publicKeyHex string) auth.Request {
@@ -21,7 +29,7 @@ func makeBaseRequest(method auth.Method, authid string) auth.Request {
 }
 
 func TestNewAuthenticator(t *testing.T) {
-	a := deskconn.NewAuthenticator([]*deskconn.CryptosignPrincipal{
+	a := NewAuthenticator([]*CryptosignPrincipal{
 		{AuthID: "user1", AuthorizedKeys: []string{"key1"}, AuthRole: admin},
 	})
 	require.NotNil(t, a)
@@ -35,7 +43,7 @@ func TestNewAuthenticator(t *testing.T) {
 }
 
 func TestAuthenticatorMethods(t *testing.T) {
-	methods := deskconn.NewAuthenticator(nil).Methods()
+	methods := NewAuthenticator(nil).Methods()
 	require.Len(t, methods, 1)
 	require.Equal(t, auth.Method(auth.MethodCryptoSign), methods[0])
 }
@@ -46,7 +54,7 @@ func TestAuthenticatorAuthenticate(t *testing.T) {
 	otherKey, _, err := auth.GenerateCryptoSignKeyPair()
 	require.NoError(t, err)
 
-	a := deskconn.NewAuthenticator([]*deskconn.CryptosignPrincipal{
+	a := NewAuthenticator([]*CryptosignPrincipal{
 		{AuthID: "alice", AuthorizedKeys: []string{pubKey}, AuthRole: admin},
 	})
 
@@ -69,11 +77,11 @@ func TestAuthenticatorAuthenticate(t *testing.T) {
 }
 
 func TestAuthenticatorSetPrincipals(t *testing.T) {
-	a := deskconn.NewAuthenticator([]*deskconn.CryptosignPrincipal{
+	a := NewAuthenticator([]*CryptosignPrincipal{
 		{AuthID: "old", AuthorizedKeys: []string{"k"}, AuthRole: user},
 	})
 
-	a.SetPrincipals([]*deskconn.CryptosignPrincipal{
+	a.SetPrincipals([]*CryptosignPrincipal{
 		{AuthID: "new1", AuthorizedKeys: []string{"k1"}, AuthRole: admin},
 		{AuthID: "new2", AuthorizedKeys: []string{"k2"}, AuthRole: user},
 	})
@@ -87,9 +95,9 @@ func TestAuthenticatorSetPrincipals(t *testing.T) {
 }
 
 func TestAuthenticatorSetPrincipal(t *testing.T) {
-	a := deskconn.NewAuthenticator(nil)
+	a := NewAuthenticator(nil)
 	const key = "key-d"
-	a.SetPrincipal("dave", &deskconn.CryptosignPrincipal{
+	a.SetPrincipal("dave", &CryptosignPrincipal{
 		AuthID: "dave", AuthorizedKeys: []string{key}, AuthRole: user,
 	})
 
@@ -97,7 +105,7 @@ func TestAuthenticatorSetPrincipal(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, []string{key}, p.AuthorizedKeys)
 
-	a.SetPrincipal("dave", &deskconn.CryptosignPrincipal{
+	a.SetPrincipal("dave", &CryptosignPrincipal{
 		AuthID: "dave", AuthorizedKeys: []string{key, "new-key"}, AuthRole: admin,
 	})
 
@@ -105,4 +113,74 @@ func TestAuthenticatorSetPrincipal(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, admin, p.AuthRole)
 	require.Len(t, p.AuthorizedKeys, 2)
+}
+
+func savePrincipalsFile(t *testing.T) func() {
+	t.Helper()
+	cfgDir, err := deskconn.CfgDirectory()
+	require.NoError(t, err)
+	path := filepath.Join(cfgDir, "principals.json")
+
+	original, readErr := os.ReadFile(path)
+	existed := readErr == nil
+
+	return func() {
+		if existed {
+			_ = os.WriteFile(path, original, 0600)
+		} else {
+			_ = os.Remove(path)
+		}
+	}
+}
+
+func TestWriteAndReadPrincipalsRoundTrip(t *testing.T) {
+	t.Cleanup(savePrincipalsFile(t))
+
+	principals := []*CryptosignPrincipal{
+		{AuthID: "alice", AuthorizedKeys: []string{"key-a1", "key-a2"}, AuthRole: admin},
+		{AuthID: "bob", AuthorizedKeys: []string{"key-b1"}, AuthRole: user},
+	}
+
+	require.NoError(t, WritePrincipalsToFile(principals))
+
+	got, err := ReadPrincipalsFromFile()
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	byID := make(map[string]*CryptosignPrincipal, len(got))
+	for _, p := range got {
+		byID[p.AuthID] = p
+	}
+	require.Equal(t, []string{"key-a1", "key-a2"}, byID["alice"].AuthorizedKeys)
+	require.Equal(t, admin, byID["alice"].AuthRole)
+	require.Equal(t, []string{"key-b1"}, byID["bob"].AuthorizedKeys)
+}
+
+func TestWritePrincipalsProducesValidJSON(t *testing.T) {
+	t.Cleanup(savePrincipalsFile(t))
+
+	principals := []*CryptosignPrincipal{
+		{AuthID: "charlie", AuthorizedKeys: []string{"key-c"}, AuthRole: user},
+	}
+	require.NoError(t, WritePrincipalsToFile(principals))
+
+	cfgDir, err := deskconn.CfgDirectory()
+	require.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(cfgDir, "principals.json"))
+	require.NoError(t, err)
+
+	var raw []map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	require.Len(t, raw, 1)
+	require.Equal(t, "charlie", raw[0]["authid"])
+}
+
+func TestWritePrincipalsEmptyList(t *testing.T) {
+	t.Cleanup(savePrincipalsFile(t))
+
+	require.NoError(t, WritePrincipalsToFile([]*CryptosignPrincipal{}))
+
+	got, err := ReadPrincipalsFromFile()
+	require.NoError(t, err)
+	require.Empty(t, got)
 }

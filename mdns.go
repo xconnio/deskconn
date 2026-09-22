@@ -20,7 +20,7 @@ func AdvertiseService(hostname string, port int, realm string) (*zeroconf.Server
 		"path=/ws",
 	}
 
-	instanceName := fmt.Sprintf("deskconnd (%s)", hostname)
+	instanceName := fmt.Sprintf("xlink (%s)", hostname)
 
 	return zeroconf.Register(instanceName, "_xconn._tcp", "local.", port, txt, nil)
 }

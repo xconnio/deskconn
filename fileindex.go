@@ -21,6 +21,17 @@ const (
 	extGif  = ".gif"
 	extBmp  = ".bmp"
 	extWebp = ".webp"
+	extAvi  = ".avi"
+	extPdf  = ".pdf"
+	extFlv  = ".flv"
+	extMkv  = ".mkv"
+	extMp4  = ".mp4"
+	extWebm = ".webm"
+	extMov  = ".mov"
+	extOgv  = ".ogv"
+	extWmv  = ".wmv"
+	extM4v  = ".m4v"
+	ext3gp  = ".3gp"
 
 	CategoryImages    = "images"
 	CategoryVideos    = "videos"
@@ -165,6 +176,7 @@ func (s *IndexService) indexRoots() []string {
 	roots := make([]string, 0, len(candidates))
 	for _, name := range candidates {
 		p := filepath.Join(s.homeDir, name)
+		//nolint:gosec // p is joined from a fixed well-known folder name list, not user input
 		if _, err := os.Stat(p); err == nil {
 			roots = append(roots, p)
 		}
@@ -344,6 +356,7 @@ func (s *IndexService) walkFileEntries(ctx context.Context, roots []string, fn f
 		if ctx.Err() != nil {
 			return
 		}
+		//nolint:gosec // root comes from indexRoots, a fixed well-known folder name list
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -386,6 +399,7 @@ func (s *IndexService) walkFileEntries(ctx context.Context, roots []string, fn f
 // walkDirs walks roots and calls fn for each non-hidden directory (used to register watcher paths).
 func (s *IndexService) walkDirs(ctx context.Context, roots []string, fn func(path string)) {
 	for _, root := range roots {
+		//nolint:gosec // root comes from indexRoots, a fixed well-known folder name list
 		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -430,9 +444,9 @@ func fileCategory(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case extJpg, extJpeg, extPng, extGif, extBmp, extWebp, ".ico", ".tiff", ".tif", ".heic", ".heif":
 		return CategoryImages
-	case ".mp4", ".webm", ".mov", ".avi", ".mkv", ".ogv", ".flv", ".wmv", ".m4v", ".3gp":
+	case extMp4, extWebm, extMov, extAvi, extMkv, extOgv, extFlv, extWmv, extM4v, ext3gp:
 		return CategoryVideos
-	case ".pdf":
+	case extPdf:
 		return CategoryPDFs
 	case ".txt", ".md", ".log", ".csv", ".json", ".yaml", ".yml", ".toml",
 		".ini", ".cfg", ".xml", ".html", ".htm", ".rst":

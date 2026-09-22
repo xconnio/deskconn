@@ -10,6 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// EnableScreenshot/DisableScreenshot/ScreenshotEnabled are purely local
+// machine settings (config.yml read/write, no device/network round trip),
+// so the CLI (`deskconn screenshot enable/disable`) calls them directly.
 func EnableScreenshot(cfgDirectory string) error {
 	return updateScreenshotConfig(cfgDirectory, true)
 }
@@ -59,7 +62,8 @@ func updateScreenshotConfig(cfgDirectory string, enabled bool) error {
 }
 
 // RevokeScreenshotPermission clears the screenshot entry from the portal
-// permission store.
+// permission store. Called directly by the CLI when the device rejects a
+// permission-check call.
 func RevokeScreenshotPermission(conn *dbus.Conn) error {
 	obj := conn.Object("org.freedesktop.impl.portal.PermissionStore",
 		"/org/freedesktop/impl/portal/PermissionStore")

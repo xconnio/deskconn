@@ -4,8 +4,6 @@ set -e
 REPO="xconnio/deskconn"
 BIN_DIR="$HOME/.local/bin"
 EXEC_DIR="$HOME/.local/lib/exec"
-SERVICE_NAME="deskconnd"
-SERVICE_FILE="$HOME/.config/systemd/user/$SERVICE_NAME.service"
 
 mkdir -p "$BIN_DIR"
 mkdir -p "$EXEC_DIR"
@@ -44,16 +42,18 @@ curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE"
 echo "Extracting archive..."
 tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
 
-if [ ! -f "$TMP_DIR/deskconn" ] || [ ! -f "$TMP_DIR/deskconnd" ] || [ ! -f "$TMP_DIR/deskconn-vpnd" ]; then
-    echo "Release archive does not contain deskconn, deskconnd and deskconn-vpnd binaries."
+if [ ! -f "$TMP_DIR/deskconn" ] || [ ! -f "$TMP_DIR/xlink" ] || [ ! -f "$TMP_DIR/deskconnd" ] || [ ! -f "$TMP_DIR/deskconn-vpnd" ]; then
+    echo "Release archive does not contain deskconn, xlink, deskconnd and deskconn-vpnd binaries."
     exit 1
 fi
 
 mv "$TMP_DIR/deskconn" "$BIN_DIR/deskconn"
+mv "$TMP_DIR/xlink" "$EXEC_DIR/xlink"
 mv "$TMP_DIR/deskconnd" "$EXEC_DIR/deskconnd"
 mv "$TMP_DIR/deskconn-vpnd" "$BIN_DIR/deskconn-vpnd"
 
 chmod 755 "$BIN_DIR/deskconn"
+chmod 700 "$EXEC_DIR/xlink"
 chmod 700 "$EXEC_DIR/deskconnd"
 chmod 755 "$BIN_DIR/deskconn-vpnd"
 
@@ -140,35 +140,57 @@ case ":$PATH:" in
         ;;
 esac
 
-echo "Setting up systemd user service for $SERVICE_NAME..."
-mkdir -p "$(dirname "$SERVICE_FILE")"
-
 # systemd --user services don't reliably inherit DISPLAY/WAYLAND_DISPLAY from
 # the desktop session, so deskconnd can't tell a desktop from a headless
 # server apart without them being exported explicitly. Capture them from the
 # installer's own environment: on a real desktop session they'll be set here;
 # on a headless server they won't, and deskconnd will register server-only
-# APIs (no screenshot/display RPCs).
-ENV_LINES="Environment=TERM=xterm-256color"
+# APIs (no screenshot/display RPCs). xlink itself never touches the display,
+# so this only needs to apply to deskconnd's unit.
+DESKCONND_ENV_LINES="Environment=TERM=xterm-256color"
 if [ -n "${DISPLAY:-}" ]; then
-    ENV_LINES="$ENV_LINES
+    DESKCONND_ENV_LINES="$DESKCONND_ENV_LINES
 Environment=DISPLAY=$DISPLAY"
 fi
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    ENV_LINES="$ENV_LINES
+    DESKCONND_ENV_LINES="$DESKCONND_ENV_LINES
 Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 fi
 
-cat > "$SERVICE_FILE" <<EOL
+echo "Setting up systemd user services..."
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+
+cat > "$SYSTEMD_USER_DIR/xlink.service" <<EOL
 [Unit]
-Description=DeskConn Daemon
+Description=xlink connectivity daemon (NAT tunnels, remote-client auth, QUIC/WebRTC streams)
 After=network.target
+
+[Service]
+ExecStart=$EXEC_DIR/xlink
+Restart=always
+RestartSec=5
+Environment=TERM=xterm-256color
+
+[Install]
+WantedBy=default.target
+EOL
+
+# Wants+After (not Requires) is deliberate: deskconnd and xlink each retry
+# their connection to the other with backoff and tolerate the other
+# restarting independently, so systemd doesn't need to (and shouldn't) tear
+# one down when the other stops -- see xlink/deskconnd's own reconnect loops.
+cat > "$SYSTEMD_USER_DIR/deskconnd.service" <<EOL
+[Unit]
+Description=deskconnd application daemon (shell, files, screen, printer, VPN control, ...)
+After=network.target xlink.service
+Wants=xlink.service
 
 [Service]
 ExecStart=$EXEC_DIR/deskconnd
 Restart=always
 RestartSec=5
-$ENV_LINES
+$DESKCONND_ENV_LINES
 
 [Install]
 WantedBy=default.target
@@ -176,12 +198,14 @@ EOL
 
 systemctl --user daemon-reload
 
-if systemctl --user is-enabled --quiet "$SERVICE_NAME"; then
-    echo "Service exists. Restarting..."
-    systemctl --user restart "$SERVICE_NAME"
-else
-    echo "Enabling and starting service..."
-    systemctl --user enable "$SERVICE_NAME"
-    systemctl --user start "$SERVICE_NAME"
-fi
-echo "Systemd service $SERVICE_NAME installed and started!"
+for service_name in xlink deskconnd; do
+    if systemctl --user is-enabled --quiet "$service_name"; then
+        echo "Service $service_name exists. Restarting..."
+        systemctl --user restart "$service_name"
+    else
+        echo "Enabling and starting $service_name..."
+        systemctl --user enable "$service_name"
+        systemctl --user start "$service_name"
+    fi
+done
+echo "Systemd services xlink and deskconnd installed and started!"

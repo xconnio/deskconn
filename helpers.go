@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
@@ -32,24 +32,8 @@ const (
 	ProcedureAccountLogin       = "io.xconn.deskconn.account.login"
 	ProcedureAccountLoginVerify = "io.xconn.deskconn.account.login.verify"
 
-	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
-	ProcedureProxyDeviceInfo   = "io.xconn.deskconn.deskconnd.proxy.device.info"
-	ProcedureProxyPing         = "io.xconn.deskconn.deskconnd.proxy.ping"
-	ProcedureProxyCat          = "io.xconn.deskconn.deskconnd.proxy.file.cat"
-	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
-	ProcedureProxyPrinterPrint = "io.xconn.deskconn.deskconnd.proxy.printer.print"
-	ProcedureProxyVPNStart     = "io.xconn.deskconn.deskconnd.proxy.vpn.start"
-	ProcedureProxyVPNStop      = "io.xconn.deskconn.deskconnd.proxy.vpn.stop"
-	ProcedureLogin             = "io.xconn.deskconn.login"
-	ProcedureLogout            = "io.xconn.deskconn.logout"
-	ProcedureConnect           = "io.xconn.deskconn.connect"
-	ProcedureDisconnect        = "io.xconn.deskconn.disconnect"
-	ProcedureDisconnectAll     = "io.xconn.deskconn.disconnect_all"
-	ProcedureConnectedDevices  = "io.xconn.deskconn.connected_devices"
-
 	ProcedureListDesktop = "io.xconn.deskconn.desktop.list"
 
-	LocalRealm = "io.xconn.deskconn.local"
 	CloudRealm = "io.xconn.deskconn"
 
 	ErrAuthenticationFailed = "wamp.error.authentication_failed"
@@ -58,50 +42,6 @@ const (
 )
 
 var ErrKeyExpired = errors.New("authentication key expired, please login again")
-
-func EnsureCredentials() (*Credentials, error) {
-	credFilePath, err := CredentialsFilePath()
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := os.Stat(credFilePath); err != nil {
-		watcher, err := fsnotify.NewWatcher()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create watcher: %w", err)
-		}
-		defer watcher.Close()
-
-		if err := watcher.Add(filepath.Dir(credFilePath)); err != nil {
-			return nil, fmt.Errorf("failed to add watcher: %w", err)
-		}
-
-		log.Println("Waiting for credentials file...")
-
-		for event := range watcher.Events {
-			if event.Name != credFilePath {
-				continue
-			}
-
-			if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
-				log.Println("Desktop successfully attached to cloud")
-				break
-			}
-		}
-	}
-
-	data, err := os.ReadFile(credFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read credentials file: %w", err)
-	}
-
-	var creds Credentials
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal credentials: %w", err)
-	}
-
-	return &creds, nil
-}
 
 func CredentialsFilePath() (string, error) {
 	homedir, err := os.UserHomeDir()
@@ -234,46 +174,6 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 	}
 
 	return authid, privKey, nil
-}
-
-func ReadPrincipalsFromFile() ([]*CryptosignPrincipal, error) {
-	cfgDirectory, err := CfgDirectory()
-	if err != nil {
-		log.Fatal(err)
-	}
-	principalsFile := filepath.Join(cfgDirectory, "principals.json")
-
-	data, err := os.ReadFile(principalsFile)
-	if err != nil {
-		return nil, err
-	}
-
-	if strings.TrimSpace(string(data)) == "" {
-		return []*CryptosignPrincipal{}, nil
-	}
-
-	var principals []*CryptosignPrincipal
-	if err := json.Unmarshal(data, &principals); err != nil {
-		return nil, err
-	}
-
-	return principals, nil
-}
-
-func WritePrincipalsToFile(principals []*CryptosignPrincipal) error {
-	cfgDirectory, err := CfgDirectory()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	jsonData, err := json.MarshalIndent(principals, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	jsonData = append(jsonData, '\n')
-
-	return os.WriteFile(filepath.Join(cfgDirectory, "principals.json"), jsonData, 0600)
 }
 
 func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
@@ -461,7 +361,16 @@ func CacheDevices(cfgDirectory string, devices []Device) error {
 	return nil
 }
 
-func clientKeyExchange(session *xconn.Session) (*encryptionKeys, error) {
+// SessionKeys is one X25519 key exchange's derived send/receive keys, from
+// the calling (client) side's perspective.
+type SessionKeys struct {
+	SendKey    []byte
+	ReceiveKey []byte
+}
+
+// ClientKeyExchange performs a key exchange against session's
+// ProcedureKeyExchange, as the calling side.
+func ClientKeyExchange(session *xconn.Session) (*SessionKeys, error) {
 	publicKey, privateKey, err := CreateX25519KeyPair()
 	if err != nil {
 		return nil, err
@@ -482,11 +391,13 @@ func clientKeyExchange(session *xconn.Session) (*encryptionKeys, error) {
 		return nil, err
 	}
 
-	return &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey}, nil
+	return &SessionKeys{SendKey: sendKey, ReceiveKey: receiveKey}, nil
 }
 
-func encryptedCall(session *xconn.Session, procedure string, payload []byte, enc *encryptionKeys) ([]byte, error) {
-	encrypted, err := EncryptPayload(payload, enc.sendKey)
+// EncryptedCall encrypts payload with enc, calls procedure with it, and
+// decrypts the single-argument encrypted result.
+func EncryptedCall(session *xconn.Session, procedure string, payload []byte, enc *SessionKeys) ([]byte, error) {
+	encrypted, err := EncryptPayload(payload, enc.SendKey)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +412,7 @@ func encryptedCall(session *xconn.Session, procedure string, payload []byte, enc
 		return nil, err
 	}
 
-	return DecryptPayload(encResult, enc.receiveKey)
+	return DecryptPayload(encResult, enc.ReceiveKey)
 }
 
 func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessions *ClientSessions,
@@ -525,17 +436,45 @@ func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessio
 	return strArg, bytesArg, sess, nil
 }
 
+// CallFileOp performs one key-exchange-then-encrypted-call round trip
+// against deviceSession -- used both by direct CLI calls and, with its own
+// key cache, deskconnd's ProxyFileOpHandler.
 func CallFileOp(deviceSession *xconn.Session, procedure string, payload []byte) ([]byte, error) {
-	enc, err := clientKeyExchange(deviceSession)
+	enc, err := ClientKeyExchange(deviceSession)
 	if err != nil {
 		return nil, err
 	}
 
-	return encryptedCall(deviceSession, procedure, payload, enc)
+	return EncryptedCall(deviceSession, procedure, payload, enc)
+}
+
+// proxyKeyCache caches the client-role SessionKeys ProxyFileOpHandler
+// derives per outbound device session, so repeated proxied calls to the
+// same device don't re-run the key exchange every time.
+type proxyKeyCache struct {
+	mu   sync.Mutex
+	keys map[uint64]*SessionKeys
+}
+
+func newProxyKeyCache() *proxyKeyCache {
+	return &proxyKeyCache{keys: make(map[uint64]*SessionKeys)}
+}
+
+func (c *proxyKeyCache) fetch(sessionID uint64) (*SessionKeys, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	enc, ok := c.keys[sessionID]
+	return enc, ok
+}
+
+func (c *proxyKeyCache) store(sessionID uint64, enc *SessionKeys) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.keys[sessionID] = enc
 }
 
 func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	km := newKeyManager()
+	km := newProxyKeyCache()
 
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		procedure, payload, deviceSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
@@ -546,14 +485,14 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 		enc, ok := km.fetch(deviceSession.ID())
 		if !ok {
 			var err error
-			enc, err = clientKeyExchange(deviceSession)
+			enc, err = ClientKeyExchange(deviceSession)
 			if err != nil {
 				return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 			}
 			km.store(deviceSession.ID(), enc)
 		}
 
-		result, err := encryptedCall(deviceSession, procedure, payload, enc)
+		result, err := EncryptedCall(deviceSession, procedure, payload, enc)
 		if err != nil {
 			return xconn.NewInvocationError(ErrOperationFailed, err.Error())
 		}
@@ -666,24 +605,19 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 	}
 }
 
-// ProxyVPNStartHandler proxies "deskconn vpn start": it arms the current Deskconn (fetched via
-// getDeskconn, since deskconnd rebuilds it on every reconnect/detach cycle) to accept inbound
-// VPN tunnel requests using helperSocket, a deskconn-vpnd socket the caller already started.
-// deskconnd has no capability or terminal of its own for the privileged setup work.
+// ProxyVPNStartHandler proxies "deskconn vpn start": it arms d to accept
+// inbound VPN tunnel requests using helperSocket, a deskconn-vpnd socket the
+// caller already started.
 //
-// Returns as soon as arming succeeds, without blocking, so the CLI can hand off immediately.
-// No tunnel can start at all until some caller has armed serving this way -- this feature's
-// only gate today, in place of a real consent prompt.
-func ProxyVPNStartHandler(getDeskconn func() *Deskconn) xconn.InvocationHandler {
+// Returns as soon as arming succeeds, without blocking, so the CLI can hand
+// off immediately. No tunnel can start at all until some caller has armed
+// serving this way -- this feature's only gate today, in place of a real
+// consent prompt.
+func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
 	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		helperSocket, err := inv.ArgString(0)
 		if err != nil {
 			return xconn.NewInvocationError(ErrInvalidArgument, err.Error())
-		}
-
-		d := getDeskconn()
-		if d == nil {
-			return xconn.NewInvocationError(ErrOperationFailed, "not currently connected")
 		}
 
 		helper, err := iptun.DialClient(helperSocket)
@@ -702,10 +636,9 @@ func ProxyVPNStartHandler(getDeskconn func() *Deskconn) xconn.InvocationHandler 
 // ProxyVPNStopHandler proxies "deskconn vpn stop": disarms serving, tearing down any active
 // tunnel and closing the helper connection so deskconn-vpnd unwinds and exits. Meant to run as
 // an independent command from "deskconn vpn start", not necessarily the same terminal.
-func ProxyVPNStopHandler(getDeskconn func() *Deskconn) xconn.InvocationHandler {
+func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
 	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-		d := getDeskconn()
-		if d == nil || !d.DisarmVPNServing() {
+		if !d.DisarmVPNServing() {
 			return xconn.NewInvocationError(ErrOperationFailed, "not currently serving")
 		}
 		return xconn.NewInvocationResult()

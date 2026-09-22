@@ -36,9 +36,8 @@ const (
 	// VPNFrameOpen  and VPNFrameReady are the "type" discriminators for the two
 	// control frames exchanged -- as DataChannel *text* messages -- before
 	// either side starts treating channel messages as raw binary IP
-	// packets. VPNFrameOpen also lets the server's single OnDataChannel
-	// callback tell a VPN channel apart from a file-stream channel; see
-	// HandleAuxDataChannel.
+	// packets. VPNFrameOpen also lets xlink's channel classification
+	// tell a VPN channel apart from a file-stream channel.
 	VPNFrameOpen  = "vpn-open"
 	VPNFrameReady = "vpn-ready"
 
@@ -96,49 +95,16 @@ func newVPNServer() *vpnServer {
 
 type vpnTunnelSession struct {
 	tun       *os.File
-	channel   *webrtc.DataChannel
+	channel   MessageChannel
 	done      chan struct{}
 	wg        sync.WaitGroup
 	closeOnce sync.Once
 	cleanup   func()
 }
 
-// HandleAuxDataChannel is the single callback wired to the WebRTC
-// provider's OnDataChannel; it classifies each channel and dispatches to the
-// matching handler. Shell, port forward/reverse, agent-forward, and logs
-// channels are classified by label, since their first message -- a
-// plaintext public key -- is indistinguishable by content from a
-// file-stream channel's. VPN and file-stream channels are still classified
-// by a "type" field in their first message.
-func (d *Deskconn) HandleAuxDataChannel(sessionID string, channel *webrtc.DataChannel, firstMessage []byte) {
-	switch channel.Label() {
-	case shellChannelLabel:
-		d.HandleShellChannel(sessionID, channel, firstMessage)
-		return
-	case portForwardChannelLabel:
-		d.HandlePortForwardChannel(sessionID, channel, firstMessage)
-		return
-	case portReverseChannelLabel:
-		d.HandlePortReverseChannel(sessionID, channel, firstMessage)
-		return
-	case agentForwardChannelLabel:
-		d.HandleAgentForwardChannel(sessionID, channel, firstMessage)
-		return
-	case logChannelLabel:
-		d.HandleLogsChannel(sessionID, channel, firstMessage)
-		return
-	}
-
-	var probe VPNOpenFrame
-	if json.Unmarshal(firstMessage, &probe) == nil && probe.Type == VPNFrameOpen {
-		d.handleVPNChannel(channel)
-		return
-	}
-
-	d.HandleFileStreamChannel(sessionID, channel, firstMessage)
-}
-
-func (d *Deskconn) handleVPNChannel(channel *webrtc.DataChannel) {
+// handleVPNChannel is called once xlink's channel classification has
+// identified channel as a VPN tunnel request (see RelayHeader).
+func (d *Deskconn) handleVPNChannel(channel MessageChannel) {
 	d.vpn.mu.Lock()
 	if d.vpn.closed || d.vpn.helper == nil {
 		d.vpn.mu.Unlock()
@@ -196,8 +162,8 @@ func (d *Deskconn) closeVPNSession(sess *vpnTunnelSession) {
 }
 
 // CloseVPNTunnel tears down the active VPN tunnel, disarms serving, and
-// refuses any new tunnel or serve session afterward. Call on daemon
-// shutdown/detach so a lost connection never leaves networking changed.
+// refuses any new tunnel or serve session afterward. Call on process
+// shutdown so a lost connection never leaves networking changed.
 func (d *Deskconn) CloseVPNTunnel() {
 	d.vpn.mu.Lock()
 	sess := d.vpn.active
@@ -253,7 +219,7 @@ func (d *Deskconn) DisarmVPNServing() bool {
 	return true
 }
 
-func startVPNTunnelServer(channel *webrtc.DataChannel, helper *iptun.Client) (*vpnTunnelSession, error) {
+func startVPNTunnelServer(channel MessageChannel, helper *iptun.Client) (*vpnTunnelSession, error) {
 	tun, ifaceName, err := helper.OpenTUN(VPNServerTUNName)
 	if err != nil {
 		return nil, fmt.Errorf("open tun: %w", err)
@@ -381,7 +347,7 @@ func (s *vpnTunnelSession) close() {
 
 // pinTargets returns the IPv4 addresses that must be pinned to the current
 // default route before it's replaced: the WebRTC peer (so the tunnel
-// doesn't route into itself) and the cloud relay (so deskconnd's own
+// doesn't route into itself) and the cloud relay (so xlink's own
 // control connection survives the switch).
 func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []string {
 	var ips []string
@@ -415,7 +381,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 //
 // All privileged networking goes through helper (a deskconn-vpnd
 // connection, see iptun.LaunchHelper) rather than being done directly, so
-// neither the CLI nor deskconnd needs any capability grant of its own.
+// neither the CLI nor xlink needs any capability grant of its own.
 //
 // onReady, if non-nil, is called once the remote end confirms the tunnel
 // is actually up -- callers printing something like "tunnel up" should
@@ -550,9 +516,9 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 }
 
 // PumpTUNToChannel reads raw IP packets from tun and sends each as one
-// binary DataChannel message, blocking on the channel's own backpressure
-// rather than buffering unboundedly. Shared by both server and client.
-func PumpTUNToChannel(tun *os.File, channel *webrtc.DataChannel, done <-chan struct{}) {
+// binary message, blocking on channel's own backpressure rather than
+// buffering unboundedly. Shared by both server and client.
+func PumpTUNToChannel(tun *os.File, channel MessageChannel, done <-chan struct{}) {
 	sendReady := make(chan struct{}, 1)
 	channel.SetBufferedAmountLowThreshold(vpnSendBufferLow)
 	channel.OnBufferedAmountLow(func() {

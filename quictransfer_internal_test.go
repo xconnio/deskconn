@@ -21,24 +21,31 @@ func newQUICTestStream(t *testing.T) net.Conn {
 	t.Helper()
 	client, server := net.Pipe()
 	var d Deskconn
-	go d.HandleQUICStream(nil, server)
+	go func() {
+		op, err := ReadStreamOp(server)
+		if err != nil {
+			return
+		}
+		d.DispatchQUICOp(op, server)
+	}()
 	t.Cleanup(func() { _ = client.Close() })
 	return client
 }
 
-// sendReq writes req as a real client would: a leading routingFrame (which
+// sendReq writes req as a real client would: a leading RoutingFrame (which
 // HandleQUICStream always discards -- see its doc comment), then performs
 // the per-stream key exchange, then sends the real request encrypted.
 // Returns the derived keys so the caller can decrypt the response and any
 // data that follows on the stream.
-func sendReq(t *testing.T, conn net.Conn, req fsRequest) (sendKey, receiveKey []byte) {
+func sendReq(t *testing.T, conn net.Conn, req FSRequest) (sendKey, receiveKey []byte) {
 	t.Helper()
-	require.NoError(t, writeMsg(conn, routingFrame{Op: req.Op, Path: req.Path, Recursive: req.Recursive}))
+	require.NoError(t, WriteMsg(conn,
+		RoutingFrame{Op: req.Op, Path: req.Path, Recursive: req.Recursive}))
 
-	sendKey, receiveKey, err := quicClientKeyExchange(conn)
+	sendKey, receiveKey, err := QuicClientKeyExchange(conn)
 	require.NoError(t, err)
 
-	require.NoError(t, writeEncryptedMsg(conn, req, sendKey))
+	require.NoError(t, WriteEncryptedMsg(conn, req, sendKey))
 	return sendKey, receiveKey
 }
 
@@ -48,10 +55,10 @@ func TestQUICHandleListSingleFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(filePath, []byte("hello world"), 0644))
 
 	client := newQUICTestStream(t)
-	_, receiveKey := sendReq(t, client, fsRequest{Op: fsOpList, Path: filePath})
+	_, receiveKey := sendReq(t, client, FSRequest{Op: FSOpList, Path: filePath})
 
-	var resp fsResponse
-	require.NoError(t, readEncryptedMsg(client, &resp, receiveKey))
+	var resp FSResponse
+	require.NoError(t, ReadEncryptedMsg(client, &resp, receiveKey))
 	require.True(t, resp.OK)
 	require.Len(t, resp.Entries, 1)
 	assert.Equal(t, "hello.txt", resp.Entries[0].RelPath)
@@ -66,10 +73,10 @@ func TestQUICHandleListDirRecursive(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("aaa"), 0644))
 
 	client := newQUICTestStream(t)
-	_, receiveKey := sendReq(t, client, fsRequest{Op: fsOpList, Path: srcDir, Recursive: true})
+	_, receiveKey := sendReq(t, client, FSRequest{Op: FSOpList, Path: srcDir, Recursive: true})
 
-	var resp fsResponse
-	require.NoError(t, readEncryptedMsg(client, &resp, receiveKey))
+	var resp FSResponse
+	require.NoError(t, ReadEncryptedMsg(client, &resp, receiveKey))
 	require.True(t, resp.OK)
 	require.Len(t, resp.Entries, 2)
 }
@@ -78,20 +85,21 @@ func TestQUICHandleListDirWithoutRecursiveFails(t *testing.T) {
 	dir := t.TempDir()
 
 	client := newQUICTestStream(t)
-	_, receiveKey := sendReq(t, client, fsRequest{Op: fsOpList, Path: dir})
+	_, receiveKey := sendReq(t, client, FSRequest{Op: FSOpList, Path: dir})
 
-	var resp fsResponse
-	require.NoError(t, readEncryptedMsg(client, &resp, receiveKey))
+	var resp FSResponse
+	require.NoError(t, ReadEncryptedMsg(client, &resp, receiveKey))
 	assert.False(t, resp.OK)
 	assert.Contains(t, resp.Err, "is a directory")
 }
 
 func TestQUICHandleListNonExistent(t *testing.T) {
 	client := newQUICTestStream(t)
-	_, receiveKey := sendReq(t, client, fsRequest{Op: fsOpList, Path: filepath.Join(t.TempDir(), "nope")})
+	_, receiveKey := sendReq(t, client,
+		FSRequest{Op: FSOpList, Path: filepath.Join(t.TempDir(), "nope")})
 
-	var resp fsResponse
-	require.NoError(t, readEncryptedMsg(client, &resp, receiveKey))
+	var resp FSResponse
+	require.NoError(t, ReadEncryptedMsg(client, &resp, receiveKey))
 	assert.False(t, resp.OK)
 	assert.NotEmpty(t, resp.Err)
 }
@@ -103,15 +111,15 @@ func TestQUICHandleReadRange(t *testing.T) {
 	require.NoError(t, os.WriteFile(filePath, content, 0644))
 
 	client := newQUICTestStream(t)
-	req := fsRequest{Op: fsOpRead, Path: filePath, RelPath: "data.bin", Offset: 3, Length: 5}
+	req := FSRequest{Op: FSOpRead, Path: filePath, RelPath: "data.bin", Offset: 3, Length: 5}
 	_, receiveKey := sendReq(t, client, req)
 
-	var resp fsResponse
-	require.NoError(t, readEncryptedMsg(client, &resp, receiveKey))
+	var resp FSResponse
+	require.NoError(t, ReadEncryptedMsg(client, &resp, receiveKey))
 	require.True(t, resp.OK)
 
 	var buf bytes.Buffer
-	require.NoError(t, copyDecrypted(&buf, client, 5, receiveKey, nil))
+	require.NoError(t, CopyDecrypted(&buf, client, 5, receiveKey, nil))
 	assert.Equal(t, content[3:8], buf.Bytes())
 }
 
@@ -119,11 +127,11 @@ func TestQUICHandleReadNonExistentFile(t *testing.T) {
 	dir := t.TempDir()
 
 	client := newQUICTestStream(t)
-	req := fsRequest{Op: fsOpRead, Path: dir, RelPath: "missing.txt", Offset: 0, Length: 1}
+	req := FSRequest{Op: FSOpRead, Path: dir, RelPath: "missing.txt", Offset: 0, Length: 1}
 	_, receiveKey := sendReq(t, client, req)
 
-	var resp fsResponse
-	require.NoError(t, readEncryptedMsg(client, &resp, receiveKey))
+	var resp FSResponse
+	require.NoError(t, ReadEncryptedMsg(client, &resp, receiveKey))
 	assert.False(t, resp.OK)
 	assert.NotEmpty(t, resp.Err)
 }
@@ -132,16 +140,16 @@ func TestQUICHandleInitAndWrite(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "dst")
 
-	entries := []transferManifestEntry{
+	entries := []TransferManifestEntry{
 		{RelPath: testFileName, Size: 10, Mode: 0644},
 	}
 
 	initClient := newQUICTestStream(t)
-	_, initReceiveKey := sendReq(t, initClient, fsRequest{
-		Op: fsOpInit, Path: dst, Entries: entries, TargetIsDirHint: true,
+	_, initReceiveKey := sendReq(t, initClient, FSRequest{
+		Op: FSOpInit, Path: dst, Entries: entries, TargetIsDirHint: true,
 	})
-	var initResp fsResponse
-	require.NoError(t, readEncryptedMsg(initClient, &initResp, initReceiveKey))
+	var initResp FSResponse
+	require.NoError(t, ReadEncryptedMsg(initClient, &initResp, initReceiveKey))
 	require.True(t, initResp.OK)
 
 	fi, err := os.Stat(filepath.Join(dst, testFileName))
@@ -149,19 +157,19 @@ func TestQUICHandleInitAndWrite(t *testing.T) {
 	assert.EqualValues(t, 10, fi.Size())
 
 	writeClient := newQUICTestStream(t)
-	writeReq := fsRequest{
-		Op: fsOpWrite, Path: dst, RelPath: testFileName, Offset: 2, Length: 5, TargetIsDirHint: true,
+	writeReq := FSRequest{
+		Op: FSOpWrite, Path: dst, RelPath: testFileName, Offset: 2, Length: 5, TargetIsDirHint: true,
 	}
 	sendKey, receiveKey := sendReq(t, writeClient, writeReq)
 
-	var ack fsResponse
-	require.NoError(t, readEncryptedMsg(writeClient, &ack, receiveKey))
+	var ack FSResponse
+	require.NoError(t, ReadEncryptedMsg(writeClient, &ack, receiveKey))
 	require.True(t, ack.OK)
 
-	require.NoError(t, copyEncrypted(writeClient, bytes.NewReader([]byte("HELLO")), 5, sendKey, nil))
+	require.NoError(t, CopyEncrypted(writeClient, bytes.NewReader([]byte("HELLO")), 5, sendKey, nil))
 
-	var final fsResponse
-	require.NoError(t, readEncryptedMsg(writeClient, &final, receiveKey))
+	var final FSResponse
+	require.NoError(t, ReadEncryptedMsg(writeClient, &final, receiveKey))
 	require.True(t, final.OK)
 
 	got, err := os.ReadFile(filepath.Join(dst, testFileName))
@@ -176,11 +184,13 @@ func TestQUICHandleWriteBeforeInitFails(t *testing.T) {
 	dst := filepath.Join(root, "dst")
 
 	client := newQUICTestStream(t)
-	req := fsRequest{Op: fsOpWrite, Path: dst, RelPath: testFileName, Offset: 0, Length: 5, TargetIsDirHint: true}
+	req := FSRequest{
+		Op: FSOpWrite, Path: dst, RelPath: testFileName, Offset: 0, Length: 5, TargetIsDirHint: true,
+	}
 	_, receiveKey := sendReq(t, client, req)
 
-	var resp fsResponse
-	require.NoError(t, readEncryptedMsg(client, &resp, receiveKey))
+	var resp FSResponse
+	require.NoError(t, ReadEncryptedMsg(client, &resp, receiveKey))
 	assert.False(t, resp.OK)
 	assert.NotEmpty(t, resp.Err)
 }
@@ -189,15 +199,15 @@ func TestQUICHandleInitSingleFileTarget(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "renamed.txt")
 
-	entries := []transferManifestEntry{
+	entries := []TransferManifestEntry{
 		{RelPath: "original.txt", Size: 4, Mode: 0644},
 	}
 
 	client := newQUICTestStream(t)
-	_, receiveKey := sendReq(t, client, fsRequest{Op: fsOpInit, Path: dst, Entries: entries})
+	_, receiveKey := sendReq(t, client, FSRequest{Op: FSOpInit, Path: dst, Entries: entries})
 
-	var resp fsResponse
-	require.NoError(t, readEncryptedMsg(client, &resp, receiveKey))
+	var resp FSResponse
+	require.NoError(t, ReadEncryptedMsg(client, &resp, receiveKey))
 	require.True(t, resp.OK)
 
 	fi, err := os.Stat(dst)

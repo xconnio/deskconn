@@ -15,9 +15,6 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-const ProcedureGitStatus = "io.xconn.deskconn.deskconnd.git.status"
-const ProcedureGitOriginal = "io.xconn.deskconn.deskconnd.git.original"
-
 // GitStatusEntry Status is one of "untracked", "added", "modified", "ignored".
 // Anything else (clean, renamed, ...) is omitted from GitStatusResult.Entries.
 type GitStatusEntry struct {

@@ -5,44 +5,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	// fileStreamChunkSize is the size of each binary data channel message
-	// used while streaming a byte range, in either direction. Set just under
-	// pion's default SCTP max message size (math.MaxUint16 = 65535 bytes),
-	// leaving room for the 1-byte envelope kind prefix and the 28-byte
-	// ChaCha20-Poly1305 nonce+tag overhead (see filestreamencryption.go).
-	fileStreamChunkSize = 65024
-
-	// fileStreamMaxBuffered/fileStreamBufferedLow mirror the backpressure
-	// thresholds used for the main WAMP peer in xconn-webrtc-go's peer.go, so a
-	// slow reader can't make the send buffer grow unbounded.
-	fileStreamMaxBuffered = 512 * 1024 // 512KB
-	fileStreamBufferedLow = 256 * 1024 // 256KB
-
-	// fileStreamRequestTimeout bounds how long a write handler waits between
-	// binary messages before giving up on a stalled sender.
-	fileStreamRequestTimeout = 10 * time.Second
-
-	// fileStreamSessionIdleTimeout bounds how long a read/write channel
-	// waits for the next chunk request from its worker before giving up and
-	// closing -- normally the worker either sends another request right away
-	// or closes the channel itself once its share of the transfer is done.
-	fileStreamSessionIdleTimeout = 30 * time.Second
-)
-
-// HandleFileStreamChannel is the file-transfer entry point wired into
-// HandleAuxDataChannel: every raw (non-WAMP) data channel opened for a file
-// transfer -- list/read for downloads, init/write for uploads -- lands here.
-// firstMessage is the client's plaintext ephemeral public key that opens
-// the per-channel key exchange, so it's parsed directly rather than waiting to receive it again.
-func (d *Deskconn) HandleFileStreamChannel(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
+// HandleFileStreamChannel is the file-transfer entry point for every raw
+// (non-WAMP) data channel opened for a file transfer -- list/read for
+// downloads, init/write for uploads. firstMessage is the client's plaintext
+// ephemeral public key that opens the per-channel key exchange, so it's
+// parsed directly rather than waiting to receive it again.
+func (d *Deskconn) HandleFileStreamChannel(_ string, channel MessageChannel, firstMessage []byte) {
 	SafeGo(func() { serveFileStreamChannel(channel, firstMessage) })
 }
 
@@ -52,32 +25,32 @@ func (d *Deskconn) HandleFileStreamChannel(_ string, channel *webrtc.DataChannel
 // and close immediately. read and write go to serveFileStreamSession,
 // which keeps the channel open across many chunk requests -- reopening
 // a channel per chunk was measured to badly limit throughput on real (non-loopback) links.
-func serveFileStreamChannel(channel *webrtc.DataChannel, firstMessage []byte) {
-	sendKey, receiveKey, err := p2pServerKeyExchange(channel, firstMessage)
+func serveFileStreamChannel(channel MessageChannel, firstMessage []byte) {
+	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
 	if err != nil {
 		log.Debugf("filestream: key exchange failed: %v", err)
 		_ = channel.Close()
 		return
 	}
 
-	closed, sendReady := webrtcBackpressure(channel)
-	reqCh := make(chan fsRequest, 1)
+	closed, sendReady := WebrtcBackpressure(channel)
+	reqCh := make(chan FSRequest, 1)
 	dataCh := make(chan []byte, 4)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		kind, plaintext, err := decryptEnvelope(msg.Data, receiveKey)
+		kind, plaintext, err := DecryptEnvelope(msg.Data, receiveKey)
 		if err != nil {
 			return
 		}
 		switch kind {
-		case p2pMsgControl:
-			var next fsRequest
+		case P2PMsgControl:
+			var next FSRequest
 			if json.Unmarshal(plaintext, &next) == nil {
 				select {
 				case reqCh <- next:
 				case <-closed:
 				}
 			}
-		case p2pMsgData:
+		case P2PMsgData:
 			select {
 			case dataCh <- plaintext:
 			case <-closed:
@@ -85,31 +58,23 @@ func serveFileStreamChannel(channel *webrtc.DataChannel, firstMessage []byte) {
 		}
 	})
 
-	req, err := recvPriority(reqCh, closed, p2pRequestTimeout)
+	req, err := RecvPriority(reqCh, closed, P2PRequestTimeout)
 	if err != nil {
 		_ = channel.Close()
 		return
 	}
 
 	switch req.Op {
-	case fsOpList:
+	case FSOpList:
 		serveWebRTCList(channel, req, sendKey)
-	case fsOpInit:
+	case FSOpInit:
 		serveWebRTCInit(channel, req, sendKey)
-	case fsOpRead, fsOpWrite:
+	case FSOpRead, FSOpWrite:
 		serveFileStreamSession(channel, req, sendKey, closed, sendReady, reqCh, dataCh)
 	default:
 		log.Debugf("filestream: unknown op %q", req.Op)
 		_ = channel.Close()
 	}
-}
-
-func sendWebRTCJSON(channel *webrtc.DataChannel, v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return channel.SendText(string(b))
 }
 
 // remoteRootAndBase resolves a remote transfer's root argument
@@ -123,65 +88,40 @@ func remoteRootAndBase(rootArg string) (root, base string, err error) {
 	return root, filepath.Dir(root), nil
 }
 
-func serveWebRTCList(channel *webrtc.DataChannel, req fsRequest, sendKey []byte) {
+func serveWebRTCList(channel MessageChannel, req FSRequest, sendKey []byte) {
 	defer channel.Close()
 
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+		_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 		return
 	}
 
-	entries, err := buildManifest(resolvedRoot, req.Recursive)
+	entries, err := BuildManifest(resolvedRoot, req.Recursive)
 	if err != nil {
-		_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+		_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 		return
 	}
 
-	_ = sendEncryptedJSON(channel, fsResponse{OK: true, Entries: entries}, sendKey)
+	_ = SendEncryptedJSON(channel, FSResponse{OK: true, Entries: entries}, sendKey)
 }
 
-func serveWebRTCInit(channel *webrtc.DataChannel, req fsRequest, sendKey []byte) {
+func serveWebRTCInit(channel MessageChannel, req FSRequest, sendKey []byte) {
 	defer channel.Close()
 
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+		_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 		return
 	}
 
-	rootIsDir := isRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
-	if err := materializeTargets(req.Entries, resolvedRoot, rootIsDir); err != nil {
-		_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+	rootIsDir := IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
+	if err := MaterializeTargets(req.Entries, resolvedRoot, rootIsDir); err != nil {
+		_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 		return
 	}
 
-	_ = sendEncryptedJSON(channel, fsResponse{OK: true}, sendKey)
-}
-
-// webrtcBackpressure wires up the OnClose/OnError/OnBufferedAmountLow
-// callbacks shared by anything streaming a lot of binary messages over
-// channel, in either direction.
-func webrtcBackpressure(channel *webrtc.DataChannel) (closed <-chan struct{}, sendReady <-chan struct{}) {
-	closedCh := make(chan struct{})
-	var closeOnce sync.Once
-	markClosed := func() { closeOnce.Do(func() { close(closedCh) }) }
-	channel.OnClose(markClosed)
-	channel.OnError(func(err error) {
-		log.Debugf("filestream: channel error: %v", err)
-		markClosed()
-	})
-
-	readyCh := make(chan struct{}, 1)
-	channel.SetBufferedAmountLowThreshold(fileStreamBufferedLow)
-	channel.OnBufferedAmountLow(func() {
-		select {
-		case readyCh <- struct{}{}:
-		default:
-		}
-	})
-
-	return closedCh, readyCh
+	_ = SendEncryptedJSON(channel, FSResponse{OK: true}, sendKey)
 }
 
 // serveFileStreamSession serves req and then any further read/write
@@ -190,16 +130,16 @@ func webrtcBackpressure(channel *webrtc.DataChannel) (closed <-chan struct{}, se
 // assigned. closed/sendReady/reqCh/dataCh come from serveFileStreamChannel,
 // which already needed the channel's OnMessage handler set up to read the
 // key exchange and req.
-func serveFileStreamSession(channel *webrtc.DataChannel, req fsRequest, sendKey []byte,
-	closed, sendReady <-chan struct{}, reqCh <-chan fsRequest, dataCh <-chan []byte) {
+func serveFileStreamSession(channel MessageChannel, req FSRequest, sendKey []byte,
+	closed, sendReady <-chan struct{}, reqCh <-chan FSRequest, dataCh <-chan []byte) {
 	defer channel.Close()
 
 	for {
 		var err error
 		switch req.Op {
-		case fsOpRead:
+		case FSOpRead:
 			err = serveWebRTCReadOnce(channel, closed, sendReady, req, sendKey)
-		case fsOpWrite:
+		case FSOpWrite:
 			err = serveWebRTCWriteOnce(channel, closed, dataCh, req, sendKey)
 		default:
 			return
@@ -208,7 +148,7 @@ func serveFileStreamSession(channel *webrtc.DataChannel, req fsRequest, sendKey 
 			return
 		}
 
-		next, err := recvPriority(reqCh, closed, fileStreamSessionIdleTimeout)
+		next, err := RecvPriority(reqCh, closed, FileStreamSessionIdleTimeout)
 		if err != nil {
 			return
 		}
@@ -219,36 +159,36 @@ func serveFileStreamSession(channel *webrtc.DataChannel, req fsRequest, sendKey 
 // serveWebRTCReadOnce serves one byte-range read. It only returns a non-nil
 // error for a transport failure that should end the session; an
 // application-level failure (bad path, etc.) is reported to the client via
-// fsResponse.Err and treated as handled.
-func serveWebRTCReadOnce(channel *webrtc.DataChannel, closed, sendReady <-chan struct{}, req fsRequest,
+// FSResponse.Err and treated as handled.
+func serveWebRTCReadOnce(channel MessageChannel, closed, sendReady <-chan struct{}, req FSRequest,
 	sendKey []byte) error {
 	_, basePath, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+		_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 		return nil
 	}
 	absPath := filepath.Join(basePath, filepath.FromSlash(req.RelPath))
 
 	f, err := os.Open(absPath) //nolint:gosec
 	if err != nil {
-		_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+		_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 		return nil
 	}
 	defer f.Close()
 
 	if req.Offset > 0 {
 		if _, err := f.Seek(req.Offset, io.SeekStart); err != nil {
-			_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+			_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 			return nil
 		}
 	}
 
-	if err := sendEncryptedJSON(channel, fsResponse{OK: true}, sendKey); err != nil {
+	if err := SendEncryptedJSON(channel, FSResponse{OK: true}, sendKey); err != nil {
 		return err
 	}
 
 	remaining := req.Length
-	buf := make([]byte, fileStreamChunkSize)
+	buf := make([]byte, FileStreamChunkSize)
 	for remaining > 0 {
 		toRead := int64(len(buf))
 		if toRead > remaining {
@@ -256,7 +196,7 @@ func serveWebRTCReadOnce(channel *webrtc.DataChannel, closed, sendReady <-chan s
 		}
 		n, readErr := f.Read(buf[:toRead])
 		if n > 0 {
-			if err := sendEncryptedBytes(channel, closed, sendReady, buf[:n], sendKey); err != nil {
+			if err := SendEncryptedBytes(channel, closed, sendReady, buf[:n], sendKey); err != nil {
 				return err
 			}
 			remaining -= int64(n)
@@ -274,36 +214,36 @@ func serveWebRTCReadOnce(channel *webrtc.DataChannel, closed, sendReady <-chan s
 
 // serveWebRTCWriteOnce serves one byte-range write. Same error-return
 // convention as serveWebRTCReadOnce.
-func serveWebRTCWriteOnce(channel *webrtc.DataChannel, closed <-chan struct{}, dataCh <-chan []byte,
-	req fsRequest, sendKey []byte) error {
+func serveWebRTCWriteOnce(channel MessageChannel, closed <-chan struct{}, dataCh <-chan []byte,
+	req FSRequest, sendKey []byte) error {
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+		_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 		return nil
 	}
 
-	rootIsDir := isRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
+	rootIsDir := IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
 	// A single chunk request never carries the whole manifest, but the
 	// sourceRoot argument only matters when rootIsDir is false, and that
 	// case only ever has one (non-recursive) entry -- whose RelPath is
 	// trivially its own sourceRoot.
-	dest := resolveDestPath(resolvedRoot, rootIsDir, req.RelPath, req.RelPath)
+	dest := ResolveDestPath(resolvedRoot, rootIsDir, req.RelPath, req.RelPath)
 
 	f, err := os.OpenFile(dest, os.O_WRONLY, 0) //nolint:gosec
 	if err != nil {
-		_ = sendEncryptedJSON(channel, fsResponse{Err: err.Error()}, sendKey)
+		_ = SendEncryptedJSON(channel, FSResponse{Err: err.Error()}, sendKey)
 		return nil
 	}
 	defer f.Close()
 
-	if err := sendEncryptedJSON(channel, fsResponse{OK: true}, sendKey); err != nil {
+	if err := SendEncryptedJSON(channel, FSResponse{OK: true}, sendKey); err != nil {
 		return err
 	}
 
 	ow := io.NewOffsetWriter(f, req.Offset)
 	var received int64
 	for received < req.Length {
-		data, err := recvPriority(dataCh, closed, fileStreamRequestTimeout)
+		data, err := RecvPriority(dataCh, closed, FileStreamRequestTimeout)
 		if err != nil {
 			log.Debugf("filestream: write stopped after %d/%d bytes: %v", received, req.Length, err)
 			return err
@@ -315,5 +255,5 @@ func serveWebRTCWriteOnce(channel *webrtc.DataChannel, closed <-chan struct{}, d
 		}
 	}
 
-	return sendEncryptedJSON(channel, fsResponse{OK: true}, sendKey)
+	return SendEncryptedJSON(channel, FSResponse{OK: true}, sendKey)
 }
