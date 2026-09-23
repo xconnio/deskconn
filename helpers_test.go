@@ -90,6 +90,32 @@ func TestDevicesFromCfgInvalidYAML(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestCacheDevicesPreservesOtherSections(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"),
+		[]byte("devices:\n  - authid: old\nprinting:\n  mode: accept\nscreenshot:\n  enabled: true\n"), 0600))
+
+	require.NoError(t, deskconn.CacheDevices(tmpDir, []deskconn.Device{{Authid: "new"}}))
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, "config.yml"))
+	require.NoError(t, err)
+	var config deskconn.Config
+	require.NoError(t, yaml.Unmarshal(data, &config))
+	require.Len(t, config.Devices, 1)
+	require.Equal(t, "new", config.Devices[0].Authid)
+	require.Equal(t, deskconn.PrintModeAccept, config.Printing.Mode)
+	require.True(t, config.Screenshot.Enabled)
+}
+
+func TestCacheDevicesMissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, deskconn.CacheDevices(tmpDir, []deskconn.Device{{Authid: "new"}}))
+
+	devices, err := deskconn.DevicesFromCfg(tmpDir)
+	require.NoError(t, err)
+	require.Len(t, devices, 1)
+}
+
 func TestReadCredentialsSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(

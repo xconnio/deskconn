@@ -348,17 +348,26 @@ func fetchDevices(session *xconn.Session) ([]Device, error) {
 	return devices, nil
 }
 
+// CacheDevices replaces the devices in config.yml, keeping its other sections.
 func CacheDevices(cfgDirectory string, devices []Device) error {
-	devicesYAML, err := yaml.Marshal(Config{Devices: devices})
+	cfgPath := filepath.Join(cfgDirectory, "config.yml")
+
+	var config Config
+	data, err := os.ReadFile(cfgPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	config.Devices = devices
+	b, err := yaml.Marshal(config)
 	if err != nil {
-		return fmt.Errorf("failed to marshal devices: %w", err)
+		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), devicesYAML, 0600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
+	return os.WriteFile(cfgPath, b, 0600)
 }
 
 // SessionKeys is one X25519 key exchange's derived send/receive keys, from

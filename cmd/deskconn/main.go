@@ -1060,13 +1060,7 @@ func main() {
 			return
 		}
 
-		b, err := yaml.Marshal(deskconn.Config{Devices: devices})
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), b, 0600); err != nil {
+		if err := deskconn.CacheDevices(cfgDirectory, devices); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
@@ -2176,17 +2170,12 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 	devices, err := deskconn.DevicesFromCfg(cfgDirectory)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			_, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
+			devices, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
 			if err != nil {
 				return "", err
 			}
 
-			b, err := yaml.Marshal(deskconn.Config{Devices: devices})
-			if err != nil {
-				return "", err
-			}
-
-			if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), b, 0600); err != nil {
+			if err := deskconn.CacheDevices(cfgDirectory, devices); err != nil {
 				return "", err
 			}
 
@@ -2660,7 +2649,7 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 		return fmt.Errorf("device %s not found", deviceKey)
 	}
 
-	out, err := yaml.Marshal(deskconn.Config{Devices: devices})
+	out, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
