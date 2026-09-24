@@ -218,7 +218,6 @@ func RemoveCredentialsFiles(cfgDirectory string) error {
 	files := []string{
 		filepath.Join(cfgDirectory, "id_ed25519"),
 		filepath.Join(cfgDirectory, "id_ed25519.pub"),
-		filepath.Join(cfgDirectory, "config.yml"),
 	}
 
 	for _, f := range files {
@@ -227,10 +226,26 @@ func RemoveCredentialsFiles(cfgDirectory string) error {
 		}
 	}
 
+	// Drop the cloud devices but keep direct devices and other settings.
+	cfgPath := filepath.Join(cfgDirectory, "config.yml")
+	if _, err := os.Stat(cfgPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err := CacheDevices(cfgDirectory, nil); err != nil {
+		return os.Remove(cfgPath) // unreadable config: drop it, as before
+	}
 	return nil
 }
 
 func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*xconn.QUICSession, error) {
+	if IsDirectRealm(realm) {
+		device, err := directDeviceByRealm(cfgDirectory, realm)
+		if err != nil {
+			return nil, err
+		}
+		return ConnectDirectQUIC(ctx, device, cfgDirectory)
+	}
+
 	authid, privKey, err := ReadCredentials(cfgDirectory)
 	if err != nil {
 		return nil, err
@@ -263,7 +278,7 @@ func ConnectDeviceRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xc
 // channels such as the IP tunnel) and Connection (e.g. to inspect the
 // selected ICE candidate pair).
 func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory string) (*xconnwebrtc.WebRTCSession, error) {
-	authid, privKey, err := ReadCredentials(cfgDirectory)
+	authid, privKey, err := clientCredentials(realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +288,12 @@ func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory strin
 		return nil, err
 	}
 
-	webrtcSess, err := connectWebrtcSession(quicSess.Session, realm, authid, privKey, func() {})
+	// The WAMP session over WebRTC joins the realm the device actually serves.
+	sessionRealm := realm
+	if IsDirectRealm(realm) {
+		sessionRealm = StandaloneRealm
+	}
+	webrtcSess, err := connectWebrtcSession(quicSess.Session, sessionRealm, authid, privKey, func() {})
 	quicSess.Connection().Close()
 	if err != nil {
 		return nil, err
@@ -348,17 +368,40 @@ func fetchDevices(session *xconn.Session) ([]Device, error) {
 	return devices, nil
 }
 
+// CacheDevices replaces the cloud devices in config.yml, keeping direct devices.
 func CacheDevices(cfgDirectory string, devices []Device) error {
-	devicesYAML, err := yaml.Marshal(Config{Devices: devices})
+	return updateDevices(cfgDirectory, func(existing []Device) ([]Device, error) {
+		for _, d := range existing {
+			if d.Address != "" {
+				devices = append(devices, d)
+			}
+		}
+		return devices, nil
+	})
+}
+
+// updateDevices rewrites the devices in config.yml with update, keeping its other sections.
+func updateDevices(cfgDirectory string, update func([]Device) ([]Device, error)) error {
+	cfgPath := filepath.Join(cfgDirectory, "config.yml")
+
+	var config Config
+	data, err := os.ReadFile(cfgPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	if config.Devices, err = update(config.Devices); err != nil {
+		return err
+	}
+	b, err := yaml.Marshal(config)
 	if err != nil {
-		return fmt.Errorf("failed to marshal devices: %w", err)
+		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), devicesYAML, 0600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
+	return os.WriteFile(cfgPath, b, 0600)
 }
 
 // SessionKeys is one X25519 key exchange's derived send/receive keys, from

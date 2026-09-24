@@ -92,6 +92,81 @@ deskconn shell <device> --mode p2p      # force WebRTC
 deskconn shell <device> --mode routed   # force cloud router
 ```
 
+## Standalone mode (no cloud)
+
+A device with a reachable IP (for example a cloud server) can be used without an account or the cloud router. Its
+`xlink` serves the device directly over QUIC (UDP) to a fixed list of keys, and clients connect to it by address.
+Shell, exec, file operations, port and agent forwarding, logs, P2P and VPN all work the same way.
+
+### 1. Get the client's key
+
+On each machine that should have access:
+
+```bash
+deskconn device key
+# alice:65160c38…
+```
+
+### 2. Enable standalone mode on the device
+
+Either with environment variables on the `xlink` service:
+
+```bash
+systemctl --user edit xlink
+```
+
+```ini
+[Service]
+Environment=DESKCONN_STANDALONE=1
+Environment=DESKCONN_STANDALONE_KEYS=alice:65160c38…,bob:9a1f…
+```
+
+or in `~/.deskconn/config.yml`:
+
+```yaml
+standalone:
+  enabled: true
+  listen: 0.0.0.0:18080   # optional, this is the default
+  principals:
+    - authid: alice
+      authorized_keys: [65160c38…]
+```
+
+Keys from both places are combined. Then restart the services and read the certificate fingerprint:
+
+```bash
+systemctl --user restart xlink deskconnd
+journalctl --user -u xlink | grep fingerprint
+# … add on a client with: deskconn device add <name> <public-ip>:18080 --fingerprint sha256:…
+```
+
+Allow **UDP** port 18080 through the device's firewall or cloud security group.
+
+| Variable                     | Meaning                                                |
+|------------------------------|--------------------------------------------------------|
+| `DESKCONN_STANDALONE`        | `1`/`true` to enable, `0`/`false` to disable           |
+| `DESKCONN_STANDALONE_LISTEN` | `host:port` to listen on (default `0.0.0.0:18080`)     |
+| `DESKCONN_STANDALONE_KEYS`   | Comma-separated `authid:pubkey` entries to authorize   |
+
+### 3. Add the device on the client
+
+```bash
+deskconn device add web1 203.0.113.5 --fingerprint sha256:…
+deskconn shell web1
+```
+
+`device add` connects once to check the fingerprint and that the device accepts your key, then saves the device. The
+port defaults to 18080.
+
+### Security
+
+- The client pins the device's certificate fingerprint and refuses to connect if it changes. The certificate is
+  created on first start (`~/.deskconn/standalone.crt`) and kept across restarts; if it is replaced, re-add the device
+  with the new fingerprint.
+- Access is exactly the configured key list. To revoke a key, remove it and restart `xlink`.
+- The client's key for standalone devices (`~/.deskconn/direct_ed25519`) is separate from the cloud login key: it
+  does not expire and is kept on logout.
+
 ## CLI reference
 
 ### Account
@@ -109,6 +184,14 @@ deskconn detach   [--username] [--password] [--password-stdin]
 ```
 deskconn ls [--refresh] [--detailed]
 deskconn ping <device> [--count N]
+```
+
+Standalone devices (see [Standalone mode](#standalone-mode-no-cloud)):
+
+```
+deskconn device add    <name> <host[:port]> --fingerprint <sha256:…>
+deskconn device remove <name>
+deskconn device key                         # this machine's key to authorize on a device
 ```
 
 ### Shell & exec
@@ -205,7 +288,9 @@ All credentials and configuration are stored under `~/.deskconn/`:
 | `credentials.json`      | Device attach credentials (realm, authid, keypair) used by `deskconnd` |
 | `id_ed25519`            | CLI private key, username, and key expiry                              |
 | `id_ed25519.pub`        | CLI public key, username, and account name                             |
-| `config.yml`            | Device list and aliases                                                |
+| `config.yml`            | Device list and aliases, standalone mode settings                      |
+| `direct_ed25519`        | CLI private key and authid for standalone devices                      |
+| `standalone.crt`/`.key` | Certificate a standalone device presents to clients                    |
 | `principals.json`       | Local CryptoSign principals (used by the local WAMP router)            |
 | `turn_credentials.json` | Cached TURN server credentials for WebRTC                              |
 | `deskconn.sock`         | Unix socket for local CLI–daemon communication                         |

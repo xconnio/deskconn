@@ -29,7 +29,8 @@ import (
 const (
 	port = 18080
 
-	xconnURIPrefix = "io.xconn."
+	xconnURIPrefix  = "io.xconn."
+	webrtcURIPrefix = "io.xconn.webrtc."
 )
 
 func main() {
@@ -38,18 +39,33 @@ func main() {
 		log.Fatal(err)
 	}
 
+	standalone, err := loadStandaloneConfig(cfgDirectory)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if standalone.Enabled {
+		runStandalone(cfgDirectory, standalone)
+		return
+	}
+
+	// Serve the local app layer before waiting for cloud credentials: a machine that is
+	// never attached (e.g. one that only uses standalone devices) still needs it for the
+	// CLI's daemon mode.
+	appRouter, appListener, appSession := startAppLayer(cfgDirectory)
+	defer appRouter.Close()
+	defer appListener.Close()
+
 	host, _ := os.Hostname()
 
-	for runDeviceSession(cfgDirectory, host) {
+	for runDeviceSession(cfgDirectory, host, appSession) {
 	}
 }
 
-// runDeviceSession runs one connect/serve cycle: it sets up the local
-// app-layer bridge, the LAN-facing realm, and the cloud reconnect loop,
-// then blocks until either a shutdown signal or a detach event. It returns
-// true if the caller should start another cycle (detach happened), false
-// to shut down.
-func runDeviceSession(cfgDirectory, host string) bool {
+// runDeviceSession runs one connect/serve cycle: it bridges appSession onto the
+// LAN-facing realm and runs the cloud reconnect loop, then blocks until either a
+// shutdown signal or a detach event. It returns true if the caller should start
+// another cycle (detach happened), false to shut down.
+func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool {
 	cred, err := EnsureCredentials()
 	if err != nil {
 		log.Fatal(err)
@@ -61,81 +77,10 @@ func runDeviceSession(cfgDirectory, host string) bool {
 	}
 	machineIDStr := strings.TrimSpace(string(machineID))
 
-	// appRouter/appSession serve deskconn.LocalRealm on deskconn.sock:
-	// deskconnd and the CLI both dial in here, and appSession is the
-	// in-memory session xlink uses to forward bridged calls (see
-	// RegisterBridge).
-	appRouter, err := xconn.NewRouter(xconn.DefaultRouterConfig())
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err := appRouter.AddRealm(deskconn.LocalRealm, &xconn.RealmConfig{
-		AutoDiscloseCaller: true,
-		Meta:               true,
-		Roles: []xconn.RealmRole{{
-			Name: "anonymous",
-			Permissions: []xconn.Permission{{
-				URI:            "",
-				MatchPolicy:    wampproto.MatchPrefix,
-				AllowCall:      true,
-				AllowRegister:  true,
-				AllowSubscribe: true,
-			}},
-		}},
-	}); err != nil {
-		log.Fatalln(err)
-	}
-	appServer := xconn.NewServer(appRouter, nil, &xconn.ServerConfig{})
-	appListener, err := appServer.ListenAndServeRawSocket(xconn.NetworkUnix,
-		filepath.Join(cfgDirectory, "deskconn.sock"))
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer appListener.Close()
-
-	appSession, err := xconn.ConnectInMemory(appRouter, deskconn.LocalRealm)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// xlinkStreamSock is where deskconnd listens for relayed raw streams.
 	xlinkStreamSock := filepath.Join(cfgDirectory, "xlink-streams.sock")
 
-	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	err = router.AddRealm(cred.Realm, &xconn.RealmConfig{
-		AutoDiscloseCaller: true,
-		Meta:               true,
-		Roles: []xconn.RealmRole{
-			{Name: "owner", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-			{Name: "admin", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-			{Name: "member", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-		},
-	})
-	if err != nil {
-		log.Fatalln(err)
-	}
+	router := newDeviceRouter(cred.Realm)
 
 	principals, err := ReadPrincipalsFromFile()
 	if err != nil {
@@ -296,28 +241,13 @@ func runDeviceSession(cfgDirectory, host string) bool {
 				log.Println(subResp.Err)
 			}
 
-			webRtcManager := xconnwebrtc.NewWebRTCHandler()
-			cfg := &xconnwebrtc.ProviderConfig{
-				Session:                     deviceSession,
-				ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
-				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
-				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
-				Serializer:                  &serializers.CBORSerializer{},
-				Authenticator:               authenticator,
-				Router:                      router,
-				ICEServers: []xconnwebrtc.ICEServer{
-					{URLs: []string{deskconn.StunServerURL}},
-				},
-			}
-			if err := webRtcManager.Setup(cfg); err != nil {
+			if err := setupWebRTC(deviceSession, router, authenticator, xlinkStreamSock); err != nil {
 				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
 				_ = deviceSess.Connection().Close()
 				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
-
-			webRtcManager.OnDataChannel(handleAuxDataChannel(xlinkStreamSock))
 
 			// Reset backoff after successful connection.
 			retryDelay = 1 * time.Second
@@ -363,7 +293,6 @@ func runDeviceSession(cfgDirectory, host string) bool {
 		cloudConnMu.Unlock()
 
 		router.Close()
-		appRouter.Close()
 		return false
 	case <-detachChan:
 		cancel()
@@ -380,9 +309,107 @@ func runDeviceSession(cfgDirectory, host string) bool {
 		cloudConnMu.Unlock()
 
 		router.Close()
-		appRouter.Close()
 		return true
 	}
+}
+
+// startAppLayer serves deskconn.LocalRealm on deskconn.sock: deskconnd and
+// the CLI both dial in here, and the returned in-memory session is what xlink
+// uses to forward bridged calls (see RegisterBridge).
+func startAppLayer(cfgDirectory string) (*xconn.Router, *xconn.Listener, *xconn.Session) {
+	appRouter, err := xconn.NewRouter(xconn.DefaultRouterConfig())
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if err := appRouter.AddRealm(deskconn.LocalRealm, &xconn.RealmConfig{
+		AutoDiscloseCaller: true,
+		Meta:               true,
+		Roles: []xconn.RealmRole{{
+			Name: "anonymous",
+			Permissions: []xconn.Permission{{
+				URI:            "",
+				MatchPolicy:    wampproto.MatchPrefix,
+				AllowCall:      true,
+				AllowRegister:  true,
+				AllowSubscribe: true,
+			}},
+		}},
+	}); err != nil {
+		log.Fatalln(err)
+	}
+	appServer := xconn.NewServer(appRouter, nil, &xconn.ServerConfig{})
+	appListener, err := appServer.ListenAndServeRawSocket(xconn.NetworkUnix,
+		filepath.Join(cfgDirectory, "deskconn.sock"))
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	appSession, err := xconn.ConnectInMemory(appRouter, deskconn.LocalRealm)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return appRouter, appListener, appSession
+}
+
+// setupWebRTC answers WebRTC offers made on session (signaling for P2P), attaching the
+// resulting WAMP-over-WebRTC sessions to router and relaying their raw channels to deskconnd.
+func setupWebRTC(session *xconn.Session, router *xconn.Router, authenticator *Authenticator,
+	xlinkStreamSock string) error {
+	webRtcManager := xconnwebrtc.NewWebRTCHandler()
+	if err := webRtcManager.Setup(&xconnwebrtc.ProviderConfig{
+		Session:                     session,
+		ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
+		TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
+		TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
+		Serializer:                  &serializers.CBORSerializer{},
+		Authenticator:               authenticator,
+		Router:                      router,
+		ICEServers: []xconnwebrtc.ICEServer{
+			{URLs: []string{deskconn.StunServerURL}},
+		},
+	}); err != nil {
+		return err
+	}
+
+	webRtcManager.OnDataChannel(handleAuxDataChannel(xlinkStreamSock))
+	return nil
+}
+
+// newDeviceRouter returns a router serving the device-facing realm that
+// remote clients (cloud, LAN or standalone) call into.
+func newDeviceRouter(realm string) *xconn.Router {
+	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	permissions := []xconn.Permission{
+		{
+			URI:         xconnURIPrefix,
+			MatchPolicy: wampproto.MatchPrefix,
+			AllowCall:   true,
+		},
+		// WebRTC signaling, for clients that reach this router directly (standalone mode).
+		{
+			URI:            webrtcURIPrefix,
+			MatchPolicy:    wampproto.MatchPrefix,
+			AllowPublish:   true,
+			AllowSubscribe: true,
+		},
+	}
+	err = router.AddRealm(realm, &xconn.RealmConfig{
+		AutoDiscloseCaller: true,
+		Meta:               true,
+		Roles: []xconn.RealmRole{
+			{Name: "owner", Permissions: permissions},
+			{Name: "admin", Permissions: permissions},
+			{Name: "member", Permissions: permissions},
+		},
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	return router
 }
 
 // acceptQUICStreams runs an accept loop on sess, relaying each

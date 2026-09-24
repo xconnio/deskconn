@@ -385,7 +385,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 }
 
 func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
-	authID, _, err := ReadCredentials(cfgDirectory)
+	authID, _, err := clientCredentials(realm, cfgDirectory)
 	if err != nil {
 		return err
 	}
