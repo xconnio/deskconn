@@ -48,18 +48,24 @@ func main() {
 		return
 	}
 
+	// Serve the local app layer before waiting for cloud credentials: a machine that is
+	// never attached (e.g. one that only uses standalone devices) still needs it for the
+	// CLI's daemon mode.
+	appRouter, appListener, appSession := startAppLayer(cfgDirectory)
+	defer appRouter.Close()
+	defer appListener.Close()
+
 	host, _ := os.Hostname()
 
-	for runDeviceSession(cfgDirectory, host) {
+	for runDeviceSession(cfgDirectory, host, appSession) {
 	}
 }
 
-// runDeviceSession runs one connect/serve cycle: it sets up the local
-// app-layer bridge, the LAN-facing realm, and the cloud reconnect loop,
-// then blocks until either a shutdown signal or a detach event. It returns
-// true if the caller should start another cycle (detach happened), false
-// to shut down.
-func runDeviceSession(cfgDirectory, host string) bool {
+// runDeviceSession runs one connect/serve cycle: it bridges appSession onto the
+// LAN-facing realm and runs the cloud reconnect loop, then blocks until either a
+// shutdown signal or a detach event. It returns true if the caller should start
+// another cycle (detach happened), false to shut down.
+func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool {
 	cred, err := EnsureCredentials()
 	if err != nil {
 		log.Fatal(err)
@@ -70,9 +76,6 @@ func runDeviceSession(cfgDirectory, host string) bool {
 		log.Fatalln("failed to read machine-id: ", err)
 	}
 	machineIDStr := strings.TrimSpace(string(machineID))
-
-	appRouter, appListener, appSession := startAppLayer(cfgDirectory)
-	defer appListener.Close()
 
 	// xlinkStreamSock is where deskconnd listens for relayed raw streams.
 	xlinkStreamSock := filepath.Join(cfgDirectory, "xlink-streams.sock")
@@ -290,7 +293,6 @@ func runDeviceSession(cfgDirectory, host string) bool {
 		cloudConnMu.Unlock()
 
 		router.Close()
-		appRouter.Close()
 		return false
 	case <-detachChan:
 		cancel()
@@ -307,7 +309,6 @@ func runDeviceSession(cfgDirectory, host string) bool {
 		cloudConnMu.Unlock()
 
 		router.Close()
-		appRouter.Close()
 		return true
 	}
 }
