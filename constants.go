@@ -47,6 +47,9 @@ const (
 	ProcedureConnectedDevices  = "io.xconn.deskconn.connected_devices"
 
 	LocalRealm = "io.xconn.deskconn.local"
+
+	// StandaloneRealm is the device realm xlink serves in standalone mode.
+	StandaloneRealm = "io.xconn.deskconn.standalone"
 )
 
 // These are the device-facing procedures deskconnd's app-layer handlers

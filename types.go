@@ -34,10 +34,24 @@ type ScreenshotConfig struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 }
 
+// StandaloneConfig runs xlink without the cloud: it serves the device realm
+// directly over QUIC to the listed keys.
+type StandaloneConfig struct {
+	Enabled    bool                  `yaml:"enabled,omitempty"`
+	Listen     string                `yaml:"listen,omitempty"`
+	Principals []StandalonePrincipal `yaml:"principals,omitempty"`
+}
+
+type StandalonePrincipal struct {
+	AuthID         string   `yaml:"authid"`
+	AuthorizedKeys []string `yaml:"authorized_keys"`
+}
+
 type Config struct {
 	Devices    []Device         `yaml:"devices"`
 	Printing   PrintingConfig   `yaml:"printing,omitempty"`
 	Screenshot ScreenshotConfig `yaml:"screenshot,omitempty"`
+	Standalone StandaloneConfig `yaml:"standalone,omitempty"`
 }
 
 type deviceSession struct {

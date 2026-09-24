@@ -38,6 +38,15 @@ func main() {
 		log.Fatal(err)
 	}
 
+	standalone, err := loadStandaloneConfig(cfgDirectory)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if standalone.Enabled {
+		runStandalone(cfgDirectory, standalone)
+		return
+	}
+
 	host, _ := os.Hostname()
 
 	for runDeviceSession(cfgDirectory, host) {
@@ -61,81 +70,13 @@ func runDeviceSession(cfgDirectory, host string) bool {
 	}
 	machineIDStr := strings.TrimSpace(string(machineID))
 
-	// appRouter/appSession serve deskconn.LocalRealm on deskconn.sock:
-	// deskconnd and the CLI both dial in here, and appSession is the
-	// in-memory session xlink uses to forward bridged calls (see
-	// RegisterBridge).
-	appRouter, err := xconn.NewRouter(xconn.DefaultRouterConfig())
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err := appRouter.AddRealm(deskconn.LocalRealm, &xconn.RealmConfig{
-		AutoDiscloseCaller: true,
-		Meta:               true,
-		Roles: []xconn.RealmRole{{
-			Name: "anonymous",
-			Permissions: []xconn.Permission{{
-				URI:            "",
-				MatchPolicy:    wampproto.MatchPrefix,
-				AllowCall:      true,
-				AllowRegister:  true,
-				AllowSubscribe: true,
-			}},
-		}},
-	}); err != nil {
-		log.Fatalln(err)
-	}
-	appServer := xconn.NewServer(appRouter, nil, &xconn.ServerConfig{})
-	appListener, err := appServer.ListenAndServeRawSocket(xconn.NetworkUnix,
-		filepath.Join(cfgDirectory, "deskconn.sock"))
-	if err != nil {
-		log.Fatalln(err)
-	}
+	appRouter, appListener, appSession := startAppLayer(cfgDirectory)
 	defer appListener.Close()
-
-	appSession, err := xconn.ConnectInMemory(appRouter, deskconn.LocalRealm)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// xlinkStreamSock is where deskconnd listens for relayed raw streams.
 	xlinkStreamSock := filepath.Join(cfgDirectory, "xlink-streams.sock")
 
-	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	err = router.AddRealm(cred.Realm, &xconn.RealmConfig{
-		AutoDiscloseCaller: true,
-		Meta:               true,
-		Roles: []xconn.RealmRole{
-			{Name: "owner", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-			{Name: "admin", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-			{Name: "member", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-		},
-	})
-	if err != nil {
-		log.Fatalln(err)
-	}
+	router := newDeviceRouter(cred.Realm)
 
 	principals, err := ReadPrincipalsFromFile()
 	if err != nil {
@@ -383,6 +324,85 @@ func runDeviceSession(cfgDirectory, host string) bool {
 		appRouter.Close()
 		return true
 	}
+}
+
+// startAppLayer serves deskconn.LocalRealm on deskconn.sock: deskconnd and
+// the CLI both dial in here, and the returned in-memory session is what xlink
+// uses to forward bridged calls (see RegisterBridge).
+func startAppLayer(cfgDirectory string) (*xconn.Router, *xconn.Listener, *xconn.Session) {
+	appRouter, err := xconn.NewRouter(xconn.DefaultRouterConfig())
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if err := appRouter.AddRealm(deskconn.LocalRealm, &xconn.RealmConfig{
+		AutoDiscloseCaller: true,
+		Meta:               true,
+		Roles: []xconn.RealmRole{{
+			Name: "anonymous",
+			Permissions: []xconn.Permission{{
+				URI:            "",
+				MatchPolicy:    wampproto.MatchPrefix,
+				AllowCall:      true,
+				AllowRegister:  true,
+				AllowSubscribe: true,
+			}},
+		}},
+	}); err != nil {
+		log.Fatalln(err)
+	}
+	appServer := xconn.NewServer(appRouter, nil, &xconn.ServerConfig{})
+	appListener, err := appServer.ListenAndServeRawSocket(xconn.NetworkUnix,
+		filepath.Join(cfgDirectory, "deskconn.sock"))
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	appSession, err := xconn.ConnectInMemory(appRouter, deskconn.LocalRealm)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return appRouter, appListener, appSession
+}
+
+// newDeviceRouter returns a router serving the device-facing realm that
+// remote clients (cloud, LAN or standalone) call into.
+func newDeviceRouter(realm string) *xconn.Router {
+	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	err = router.AddRealm(realm, &xconn.RealmConfig{
+		AutoDiscloseCaller: true,
+		Meta:               true,
+		Roles: []xconn.RealmRole{
+			{Name: "owner", Permissions: []xconn.Permission{
+				{
+					URI:         xconnURIPrefix,
+					MatchPolicy: wampproto.MatchPrefix,
+					AllowCall:   true,
+				},
+			}},
+			{Name: "admin", Permissions: []xconn.Permission{
+				{
+					URI:         xconnURIPrefix,
+					MatchPolicy: wampproto.MatchPrefix,
+					AllowCall:   true,
+				},
+			}},
+			{Name: "member", Permissions: []xconn.Permission{
+				{
+					URI:         xconnURIPrefix,
+					MatchPolicy: wampproto.MatchPrefix,
+					AllowCall:   true,
+				},
+			}},
+		},
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	return router
 }
 
 // acceptQUICStreams runs an accept loop on sess, relaying each
