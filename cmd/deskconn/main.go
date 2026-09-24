@@ -245,6 +245,17 @@ func main() {
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
 	lsDetailedFlag := lsCmd.Flag("detailed", "Show detailed output").Bool()
 
+	deviceCmd := app.Command("device", "Manage standalone devices reached directly, without the cloud")
+	deviceAddCmd := deviceCmd.Command("add", "Add a standalone device")
+	deviceAddName := deviceAddCmd.Arg("name", "Name for the device").Required().String()
+	deviceAddAddress := deviceAddCmd.Arg("address", "host[:port] of the device").Required().String()
+	deviceAddFingerprint := deviceAddCmd.Flag("fingerprint",
+		"Certificate fingerprint printed by the device's xlink").Required().String()
+	deviceRemoveCmd := deviceCmd.Command("remove", "Remove a standalone device")
+	deviceRemoveName := deviceRemoveCmd.Arg("name", "Name or alias of the device").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	deviceKeyCmd := deviceCmd.Command("key", "Show this machine's key to authorize on standalone devices")
+
 	whoamiCMD := app.Command("whoami", "Show current user")
 
 	logoutCmd := app.Command("logout", "Logout")
@@ -1063,6 +1074,24 @@ func main() {
 		if err := deskconn.CacheDevices(cfgDirectory, devices); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
+
+	case deviceAddCmd.FullCommand():
+		if err := addDirectDevice(cfgDirectory, *deviceAddName, *deviceAddAddress, *deviceAddFingerprint); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case deviceRemoveCmd.FullCommand():
+		if err := deskconn.RemoveDirectDevice(cfgDirectory, *deviceRemoveName); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+	case deviceKeyCmd.FullCommand():
+		authid, publicKey, _, err := deskconn.EnsureDirectKey(cfgDirectory)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		fmt.Printf("%s:%s\n", authid, publicKey)
 
 	case whoamiCMD.FullCommand():
 		path := filepath.Join(cfgDirectory, "id_ed25519.pub")
@@ -2164,6 +2193,31 @@ func logout(cfgDirectory string) error {
 	}
 
 	return deskconn.RemoveCredentialsFiles(cfgDirectory)
+}
+
+// addDirectDevice saves a standalone device after checking it is reachable with the
+// pinned fingerprint and that it accepts this machine's direct key.
+func addDirectDevice(cfgDirectory, name, address, fingerprint string) error {
+	device := deskconn.Device{
+		Name:        name,
+		Realm:       deskconn.DirectRealmPrefix + name,
+		Address:     deskconn.NormalizeDirectAddress(address),
+		Fingerprint: fingerprint,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sess, err := deskconn.ConnectDirectQUIC(ctx, device, cfgDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to connect to %s: %w", device.Address, err)
+	}
+	_ = sess.Connection().Close()
+
+	if err := deskconn.AddDirectDevice(cfgDirectory, device); err != nil {
+		return err
+	}
+	fmt.Printf("added %s (%s)\n", name, device.Address)
+	return nil
 }
 
 func deviceRealm(deviceName, cfgDirectory string) (string, error) {

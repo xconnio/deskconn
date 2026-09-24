@@ -24,6 +24,10 @@ type Device struct {
 	Realm        string       `json:"realm" yaml:"realm"`
 	Alias        string       `yaml:"alias"`
 	Connected    bool         `yaml:"-" json:"-"`
+
+	// Address and Fingerprint are set for direct (standalone) devices only.
+	Address     string `yaml:"address,omitempty" json:"-"`
+	Fingerprint string `yaml:"fingerprint,omitempty" json:"-"`
 }
 
 type PrintingConfig struct {
@@ -303,6 +307,12 @@ func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirect
 // upgradeToWebRTC negotiates a WebRTC session using quicSess for signaling. On success, it atomically
 // replaces the stored session, closes the QUIC connection, starts the reconnect loop.
 func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfgDirectory string) {
+	// A direct device's QUIC connection is already peer to peer: nothing to upgrade.
+	if IsDirectRealm(realm) {
+		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
+		return
+	}
+
 	authid, privKey, err := ReadCredentials(cfgDirectory)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)

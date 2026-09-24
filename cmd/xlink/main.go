@@ -29,7 +29,8 @@ import (
 const (
 	port = 18080
 
-	xconnURIPrefix = "io.xconn."
+	xconnURIPrefix  = "io.xconn."
+	webrtcURIPrefix = "io.xconn.webrtc."
 )
 
 func main() {
@@ -237,28 +238,13 @@ func runDeviceSession(cfgDirectory, host string) bool {
 				log.Println(subResp.Err)
 			}
 
-			webRtcManager := xconnwebrtc.NewWebRTCHandler()
-			cfg := &xconnwebrtc.ProviderConfig{
-				Session:                     deviceSession,
-				ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
-				TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
-				TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
-				Serializer:                  &serializers.CBORSerializer{},
-				Authenticator:               authenticator,
-				Router:                      router,
-				ICEServers: []xconnwebrtc.ICEServer{
-					{URLs: []string{deskconn.StunServerURL}},
-				},
-			}
-			if err := webRtcManager.Setup(cfg); err != nil {
+			if err := setupWebRTC(deviceSession, router, authenticator, xlinkStreamSock); err != nil {
 				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
 				_ = deviceSess.Connection().Close()
 				retryDelay = min(retryDelay*2, maxDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
-
-			webRtcManager.OnDataChannel(handleAuxDataChannel(xlinkStreamSock))
 
 			// Reset backoff after successful connection.
 			retryDelay = 1 * time.Second
@@ -364,6 +350,30 @@ func startAppLayer(cfgDirectory string) (*xconn.Router, *xconn.Listener, *xconn.
 	return appRouter, appListener, appSession
 }
 
+// setupWebRTC answers WebRTC offers made on session (signaling for P2P), attaching the
+// resulting WAMP-over-WebRTC sessions to router and relaying their raw channels to deskconnd.
+func setupWebRTC(session *xconn.Session, router *xconn.Router, authenticator *Authenticator,
+	xlinkStreamSock string) error {
+	webRtcManager := xconnwebrtc.NewWebRTCHandler()
+	if err := webRtcManager.Setup(&xconnwebrtc.ProviderConfig{
+		Session:                     session,
+		ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
+		TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
+		TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
+		Serializer:                  &serializers.CBORSerializer{},
+		Authenticator:               authenticator,
+		Router:                      router,
+		ICEServers: []xconnwebrtc.ICEServer{
+			{URLs: []string{deskconn.StunServerURL}},
+		},
+	}); err != nil {
+		return err
+	}
+
+	webRtcManager.OnDataChannel(handleAuxDataChannel(xlinkStreamSock))
+	return nil
+}
+
 // newDeviceRouter returns a router serving the device-facing realm that
 // remote clients (cloud, LAN or standalone) call into.
 func newDeviceRouter(realm string) *xconn.Router {
@@ -372,31 +382,27 @@ func newDeviceRouter(realm string) *xconn.Router {
 		log.Fatalln(err)
 	}
 
+	permissions := []xconn.Permission{
+		{
+			URI:         xconnURIPrefix,
+			MatchPolicy: wampproto.MatchPrefix,
+			AllowCall:   true,
+		},
+		// WebRTC signaling, for clients that reach this router directly (standalone mode).
+		{
+			URI:            webrtcURIPrefix,
+			MatchPolicy:    wampproto.MatchPrefix,
+			AllowPublish:   true,
+			AllowSubscribe: true,
+		},
+	}
 	err = router.AddRealm(realm, &xconn.RealmConfig{
 		AutoDiscloseCaller: true,
 		Meta:               true,
 		Roles: []xconn.RealmRole{
-			{Name: "owner", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-			{Name: "admin", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
-			{Name: "member", Permissions: []xconn.Permission{
-				{
-					URI:         xconnURIPrefix,
-					MatchPolicy: wampproto.MatchPrefix,
-					AllowCall:   true,
-				},
-			}},
+			{Name: "owner", Permissions: permissions},
+			{Name: "admin", Permissions: permissions},
+			{Name: "member", Permissions: permissions},
 		},
 	})
 	if err != nil {

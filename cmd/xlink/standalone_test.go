@@ -81,7 +81,7 @@ func TestLoadOrCreateCertIsStable(t *testing.T) {
 	require.NoError(t, err)
 	second, err := loadOrCreateCert(cfgDir)
 	require.NoError(t, err)
-	require.Equal(t, certFingerprint(first), certFingerprint(second))
+	require.Equal(t, deskconn.CertFingerprint(first.Certificate[0]), deskconn.CertFingerprint(second.Certificate[0]))
 
 	info, err := os.Stat(filepath.Join(cfgDir, "standalone.key"))
 	require.NoError(t, err)

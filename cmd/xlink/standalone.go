@@ -1,10 +1,8 @@
 package main
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -117,11 +115,6 @@ func loadOrCreateCert(cfgDirectory string) (tls.Certificate, error) {
 	return cert, nil
 }
 
-func certFingerprint(cert tls.Certificate) string {
-	sum := sha256.Sum256(cert.Certificate[0])
-	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
 // runStandalone serves the device realm directly over QUIC to the configured keys,
 // with no cloud account, and blocks until SIGINT/SIGTERM.
 func runStandalone(cfgDirectory string, config *deskconn.StandaloneConfig) {
@@ -131,7 +124,7 @@ func runStandalone(cfgDirectory string, config *deskconn.StandaloneConfig) {
 	}
 	defer stop()
 
-	fingerprint := certFingerprint(cert)
+	fingerprint := deskconn.CertFingerprint(cert.Certificate[0])
 	log.Printf("standalone mode: listening on %s/udp (realm %s)", listener.Addr(), deskconn.StandaloneRealm)
 	log.Printf("certificate fingerprint: %s", fingerprint)
 	_, port, _ := net.SplitHostPort(listener.Addr().String())
@@ -158,7 +151,8 @@ func startStandalone(cfgDirectory string, config *deskconn.StandaloneConfig) (*x
 	}
 
 	router := newDeviceRouter(deskconn.StandaloneRealm)
-	server := xconn.NewServer(router, NewAuthenticator(principals), &xconn.ServerConfig{})
+	authenticator := NewAuthenticator(principals)
+	server := xconn.NewServer(router, authenticator, &xconn.ServerConfig{})
 	listener, err := server.ListenAndServeQUIC(config.Listen, &tls.Config{Certificates: []tls.Certificate{cert}})
 	if err != nil {
 		router.Close()
@@ -184,6 +178,10 @@ func startStandalone(cfgDirectory string, config *deskconn.StandaloneConfig) (*x
 	}
 
 	xlinkStreamSock := filepath.Join(cfgDirectory, "xlink-streams.sock")
+	if err := setupWebRTC(localSession, router, authenticator, xlinkStreamSock); err != nil {
+		stop()
+		return nil, tls.Certificate{}, nil, err
+	}
 	deskconn.SafeGo(func() {
 		for range listener.AcceptSession() {
 		}

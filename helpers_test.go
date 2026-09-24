@@ -107,6 +107,21 @@ func TestCacheDevicesPreservesOtherSections(t *testing.T) {
 	require.True(t, config.Screenshot.Enabled)
 }
 
+func TestCacheDevicesKeepsDirectDevices(t *testing.T) {
+	tmpDir := t.TempDir()
+	direct := deskconn.Device{Name: testDirectDevice, Realm: deskconn.DirectRealmPrefix + testDirectDevice,
+		Address: "203.0.113.5:18080"}
+	require.NoError(t, deskconn.CacheDevices(tmpDir, []deskconn.Device{{Authid: "cloud1"}, direct}))
+
+	require.NoError(t, deskconn.CacheDevices(tmpDir, []deskconn.Device{{Authid: "cloud2"}}))
+
+	devices, err := deskconn.DevicesFromCfg(tmpDir)
+	require.NoError(t, err)
+	require.Len(t, devices, 2)
+	require.Equal(t, "cloud2", devices[0].Authid)
+	require.Equal(t, direct, devices[1])
+}
+
 func TestCacheDevicesMissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, deskconn.CacheDevices(tmpDir, []deskconn.Device{{Authid: "new"}}))
@@ -181,6 +196,26 @@ func TestReadCredentialsLegacyNoExpiry(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "myauthid", authid)
 	require.Equal(t, "myprivatekey", privKey)
+}
+
+func TestRemoveCredentialsFilesKeepsDirectDevices(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "id_ed25519"), []byte("x"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"), []byte(`devices:
+  - authid: cloud
+  - name: web1
+    realm: direct.web1
+    address: 203.0.113.5:18080
+`), 0600))
+
+	require.NoError(t, deskconn.RemoveCredentialsFiles(tmpDir))
+
+	_, err := os.Stat(filepath.Join(tmpDir, "id_ed25519"))
+	require.True(t, os.IsNotExist(err))
+	devices, err := deskconn.DevicesFromCfg(tmpDir)
+	require.NoError(t, err)
+	require.Len(t, devices, 1)
+	require.Equal(t, testDirectDevice, devices[0].Name)
 }
 
 func TestRemoveCredentialsFilesRemovesAll(t *testing.T) {

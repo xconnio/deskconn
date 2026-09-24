@@ -16,7 +16,7 @@ import (
 // forwarding, signals ready once the device acks, and for every external
 // connection the device reports, dials agentSock  and relays.
 func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock string, ready chan<- error) error {
-	authID, _, err := ReadCredentials(cfgDirectory)
+	authID, _, err := clientCredentials(realm, cfgDirectory)
 	if err != nil {
 		ready <- err
 		return err
