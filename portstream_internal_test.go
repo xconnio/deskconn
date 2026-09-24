@@ -189,8 +189,11 @@ func TestPortForwardClosesBackendOnClientDisconnect(t *testing.T) {
 }
 
 func TestPortReverseListenFailureReportsError(t *testing.T) {
-	// Occupy a port so the device's listen call fails.
-	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	// Occupy a port so the device's listen call fails. Bind the same wildcard address the
+	// handler itself binds (":<port>") rather than "127.0.0.1:<port>" - on Windows, unlike
+	// Linux/macOS, a wildcard bind is allowed to succeed even while the loopback-only
+	// address on that port is already taken, so the two would never actually conflict.
+	occupied, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = occupied.Close() })
 	_, portStr, err := net.SplitHostPort(occupied.Addr().String())

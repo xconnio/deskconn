@@ -320,7 +320,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
+	uri := deskconn.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
 
 	switch parsedCmd {
 	case selfVersionCmd.FullCommand():
@@ -2511,7 +2511,7 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
+	uri := deskconn.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
 	localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
 	if err != nil {
 		return nil
@@ -2654,8 +2654,11 @@ func toMiB(b uint64) float64 {
 	return float64(b) / (1024 * 1024)
 }
 
+// formatBytes uses binary (1024-based) units, matching toMiB above and what Windows Explorer/
+// macOS Finder/Linux's "df -h" show - a decimal (1000-based) unit here would print a visibly
+// different, larger number for the same disk than what's shown everywhere else on the machine.
 func formatBytes(b uint64) string {
-	const unit = 1000
+	const unit = 1024
 	if b < unit {
 		return fmt.Sprintf("%d B", b)
 	}
@@ -2664,7 +2667,7 @@ func formatBytes(b uint64) string {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {

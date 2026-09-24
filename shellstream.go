@@ -7,10 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
-	"github.com/creack/pty"
+	pty "github.com/aymanbagabas/go-pty"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -139,7 +138,7 @@ func (t *p2pShellTransport) close() error { return t.channel.Close() }
 // since its output reader is already running from before. Shared by both
 // transports.
 func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transport shellTransport) (
-	shellID, migrationToken string, ptmx *os.File, startReader func(), err error) {
+	shellID, migrationToken string, ptmx pty.Pty, startReader func(), err error) {
 	if ctrl.Op == shellOpMigrate {
 		p.Lock()
 		expected, tokenOK := p.migrationTokens[ctrl.OldID]
@@ -165,12 +164,11 @@ func (p *interactiveShellSession) beginShellSession(ctrl shellControlMsg, transp
 	interactive := ctrl.Command == ""
 	command := ctrl.Command
 	if command == "" {
-		command = "bash"
+		command = defaultShell()
 	}
 	shellID = newShellStreamID()
-	ws := &pty.Winsize{Cols: ctrl.Cols, Rows: ctrl.Rows}
-	newPt, startReader, err := p.startPtySession(
-		transport, shellID, p.agentSockForAuthID(ctrl.AuthID), "", command, ws, interactive, ctrl.Args...)
+	newPt, startReader, err := p.startPtySession(transport, shellID, p.agentSockForAuthID(ctrl.AuthID), "",
+		command, ctrl.Cols, ctrl.Rows, interactive, ctrl.Args...)
 	if err != nil {
 		return "", "", nil, nil, err
 	}
@@ -232,7 +230,7 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 		case shellMsgControl:
 			var next shellControlMsg
 			if json.Unmarshal(plaintext, &next) == nil && next.Op == shellOpSize {
-				_ = pty.Setsize(ptmx, &pty.Winsize{Cols: next.Cols, Rows: next.Rows})
+				_ = ptmx.Resize(int(next.Cols), int(next.Rows))
 			}
 		case shellMsgData:
 			_, _ = ptmx.Write(plaintext)
@@ -305,7 +303,7 @@ func (d *Deskconn) serveShellChannel(channel MessageChannel, firstMessage []byte
 		case shellMsgControl:
 			var next shellControlMsg
 			if json.Unmarshal(plaintext, &next) == nil && next.Op == shellOpSize {
-				_ = pty.Setsize(ptmx, &pty.Winsize{Cols: next.Cols, Rows: next.Rows})
+				_ = ptmx.Resize(int(next.Cols), int(next.Rows))
 			}
 		case shellMsgData:
 			_, _ = ptmx.Write(plaintext)

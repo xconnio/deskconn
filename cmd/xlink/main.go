@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,11 +70,10 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 		log.Fatal(err)
 	}
 
-	machineID, err := os.ReadFile(deskconn.MachineIDPath)
+	machineIDStr, err := deskconn.MachineID()
 	if err != nil {
 		log.Fatalln("failed to read machine-id: ", err)
 	}
-	machineIDStr := strings.TrimSpace(string(machineID))
 
 	// xlinkStreamSock is where deskconnd listens for relayed raw streams.
 	xlinkStreamSock := filepath.Join(cfgDirectory, "xlink-streams.sock")

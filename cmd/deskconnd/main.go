@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -25,7 +25,10 @@ func main() {
 
 	clientSessions := deskconn.NewClientSessions()
 
-	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	// DISPLAY/WAYLAND_DISPLAY only distinguish a desktop from a headless server on Linux.
+	// macOS and Windows have no supported headless-server install path, so treat them as
+	// desktop unconditionally rather than misreading an unset X11/Wayland var as "server".
+	isDesktop := runtime.GOOS != "linux" || os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
 	var screen *deskconn.Screen
 	var mpris *deskconn.MPRIS
@@ -34,15 +37,19 @@ func main() {
 	if isDesktop {
 		systemBus, err := dbus.ConnectSystemBus()
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("system bus unavailable, screen features disabled: %v", err)
+			systemBus = nil
+		} else {
+			defer systemBus.Close()
 		}
-		defer systemBus.Close()
 
 		sessionBus, err := dbus.ConnectSessionBus()
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("session bus unavailable, screen lock/mpris features disabled: %v", err)
+			sessionBus = nil
+		} else {
+			defer sessionBus.Close()
 		}
-		defer sessionBus.Close()
 
 		screen = deskconn.NewScreen(sessionBus, systemBus, cfgDirectory)
 		mpris = deskconn.NewMPRIS(sessionBus)
@@ -153,7 +160,7 @@ func runXlinkSession(ctx context.Context, cfgDirectory string, deskconnApis *des
 		default:
 		}
 
-		session, err := xconn.ConnectAnonymous(ctx, fmt.Sprintf("unix://%s", localSockPath), deskconn.LocalRealm)
+		session, err := xconn.ConnectAnonymous(ctx, deskconn.UnixSocketURI(localSockPath), deskconn.LocalRealm)
 		if err != nil {
 			log.Printf("xlink session: failed to connect to xlink, will retry in %v: %v", retryDelay, err)
 			retryDelay = min(retryDelay*2, maxDelay)

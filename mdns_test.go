@@ -2,8 +2,6 @@ package deskconn_test
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,10 +12,8 @@ import (
 )
 
 func TestAdvertiseService(t *testing.T) {
-	raw, err := os.ReadFile("/etc/machine-id")
+	machineID, err := deskconn.MachineID()
 	require.NoError(t, err)
-
-	machineID := strings.TrimSpace(string(raw))
 	require.NotEmpty(t, machineID)
 
 	// Advertise service
