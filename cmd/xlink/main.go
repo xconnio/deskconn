@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,43 +13,37 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/deskconn"
-	"github.com/xconnio/wampproto-go"
+	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/xlink"
 	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
 const (
 	port = 18080
-
-	xconnURIPrefix  = "io.xconn."
-	webrtcURIPrefix = "io.xconn.webrtc."
 )
 
 func main() {
-	cfgDirectory, err := deskconn.CfgDirectory()
+	cfgDirectory, err := common.CfgDirectory()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	standalone, err := loadStandaloneConfig(cfgDirectory)
+	standalone, err := xlink.LoadStandaloneConfig(cfgDirectory)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if standalone.Enabled {
-		runStandalone(cfgDirectory, standalone)
+		xlink.RunStandalone(cfgDirectory, standalone)
 		return
 	}
 
 	// Serve the local app layer before waiting for cloud credentials: a machine that is
 	// never attached (e.g. one that only uses standalone devices) still needs it for the
 	// CLI's daemon mode.
-	appRouter, appListener, appSession := startAppLayer(cfgDirectory)
+	appRouter, appListener, appSession := xlink.StartAppLayer(cfgDirectory)
 	defer appRouter.Close()
 	defer appListener.Close()
 
@@ -66,12 +58,12 @@ func main() {
 // shutdown signal or a detach event. It returns true if the caller should start
 // another cycle (detach happened), false to shut down.
 func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool {
-	cred, err := EnsureCredentials()
+	cred, err := xlink.EnsureCredentials()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	machineID, err := os.ReadFile(deskconn.MachineIDPath)
+	machineID, err := os.ReadFile(common.MachineIDPath)
 	if err != nil {
 		log.Fatalln("failed to read machine-id: ", err)
 	}
@@ -80,16 +72,16 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 	// xlinkStreamSock is where deskconnd listens for relayed raw streams.
 	xlinkStreamSock := filepath.Join(cfgDirectory, "xlink-streams.sock")
 
-	router := newDeviceRouter(cred.Realm)
+	router := xlink.NewDeviceRouter(cred.Realm)
 
-	principals, err := ReadPrincipalsFromFile()
+	principals, err := xlink.ReadPrincipalsFromFile()
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			log.Fatal(err)
 		}
 	}
 
-	authenticator := NewAuthenticator(principals)
+	authenticator := xlink.NewAuthenticator(principals)
 	server := xconn.NewServer(router, authenticator, &xconn.ServerConfig{})
 	listener, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:18080")
 	if err != nil {
@@ -105,7 +97,7 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 	// Bridge deskconnd's app-layer procedures onto the LAN-facing realm --
 	// any client reaching this device directly (mDNS discovery + WebSocket,
 	// no cloud hop) gets the same procedures as a cloud caller.
-	if err := RegisterBridge(localSession, appSession); err != nil {
+	if err := xlink.RegisterBridge(localSession, appSession); err != nil {
 		log.Fatal(err)
 	}
 
@@ -117,7 +109,7 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 	var cloudConnMu sync.Mutex
 	var activeDeviceSess, activeCloudSess *xconn.QUICSession
 
-	deskconn.SafeGo(func() {
+	common.SafeGo(func() {
 		retryDelay := 1 * time.Second
 		maxDelay := 30 * time.Second
 		for {
@@ -136,8 +128,8 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 			}
 
 			// Open the QUIC connection and the first WAMP session on the device realm.
-			deviceSess, err := xconn.ConnectQUIC(ctx, deskconn.CloudQUICAddress(), cred.Realm,
-				&xconn.QUICDialerConfig{Authenticator: cryptosignAuth, TLSConfig: deskconn.CloudQUICTLSConfig()})
+			deviceSess, err := xconn.ConnectQUIC(ctx, common.CloudQUICAddress(), cred.Realm,
+				&xconn.QUICDialerConfig{Authenticator: cryptosignAuth, TLSConfig: common.CloudQUICTLSConfig()})
 			if err != nil {
 				if err.Error() == "wamp.error.no_such_realm" {
 					select {
@@ -152,7 +144,7 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 			}
 
 			// Open a second WAMP session on the cloud realm over the same QUIC connection.
-			cloudSess, err := deviceSess.OpenSession(ctx, deskconn.CloudRealm,
+			cloudSess, err := deviceSess.OpenSession(ctx, common.CloudRealm,
 				&xconn.QUICDialerConfig{Authenticator: cryptosignAuth})
 			if err != nil {
 				log.Printf("failed to open cloud realm session, will retry in %v: %v", retryDelay, err)
@@ -173,10 +165,10 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 			log.Println("connected to cloud")
 
 			// Accept and classify streams relayed from CLI clients.
-			deskconn.SafeGo(func() { acceptQUICStreams(deviceSess, xlinkStreamSock) })
+			common.SafeGo(func() { acceptQUICStreams(deviceSess, xlinkStreamSock) })
 
 			// Bridge deskconnd's app-layer procedures onto the cloud-facing realm.
-			if err := RegisterBridge(deviceSession, appSession); err != nil {
+			if err := xlink.RegisterBridge(deviceSession, appSession); err != nil {
 				log.Printf("failed to register procedures on cloud, will retry in %v: %v", retryDelay, err)
 				_ = deviceSess.Connection().Close()
 				retryDelay = min(retryDelay*2, maxDelay)
@@ -185,7 +177,7 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 			}
 
 			// Fetch and maintain authorized principals via the cloud realm session.
-			callResp := cloudSession.Call(ProcedureListKeys).Do()
+			callResp := cloudSession.Call(xlink.ProcedureListKeys).Do()
 			if callResp.Err != nil {
 				log.Println("failed to list keys:", callResp.Err)
 				_ = deviceSess.Connection().Close()
@@ -211,7 +203,7 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 				continue
 			}
 
-			var cryptosignPrincipals []*CryptosignPrincipal
+			var cryptosignPrincipals []*xlink.CryptosignPrincipal
 			if err = json.Unmarshal(jsonData, &cryptosignPrincipals); err != nil {
 				log.Println(err)
 				_ = deviceSess.Connection().Close()
@@ -230,7 +222,7 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 				log.Println(err)
 			}
 
-			subResp := cloudSession.Subscribe(fmt.Sprintf(deskconn.TopicDeskconnDesktopDetachFormat, machineIDStr),
+			subResp := cloudSession.Subscribe(fmt.Sprintf(common.TopicDeskconnDesktopDetachFormat, machineIDStr),
 				func(event *xconn.Event) {
 					select {
 					case detachChan <- struct{}{}:
@@ -241,7 +233,7 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 				log.Println(subResp.Err)
 			}
 
-			if err := setupWebRTC(deviceSession, router, authenticator, xlinkStreamSock); err != nil {
+			if err := xlink.SetupWebRTC(deviceSession, router, authenticator, xlinkStreamSock); err != nil {
 				log.Printf("failed to setup webRtc provider, will retry in %v: %v", retryDelay, err)
 				_ = deviceSess.Connection().Close()
 				retryDelay = min(retryDelay*2, maxDelay)
@@ -268,7 +260,7 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 		}
 	})
 
-	zeroconfServer, err := deskconn.AdvertiseService(host, port, cred.Realm)
+	zeroconfServer, err := xlink.AdvertiseService(host, port, cred.Realm)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -313,105 +305,6 @@ func runDeviceSession(cfgDirectory, host string, appSession *xconn.Session) bool
 	}
 }
 
-// startAppLayer serves deskconn.LocalRealm on deskconn.sock: deskconnd and
-// the CLI both dial in here, and the returned in-memory session is what xlink
-// uses to forward bridged calls (see RegisterBridge).
-func startAppLayer(cfgDirectory string) (*xconn.Router, *xconn.Listener, *xconn.Session) {
-	appRouter, err := xconn.NewRouter(xconn.DefaultRouterConfig())
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err := appRouter.AddRealm(deskconn.LocalRealm, &xconn.RealmConfig{
-		AutoDiscloseCaller: true,
-		Meta:               true,
-		Roles: []xconn.RealmRole{{
-			Name: "anonymous",
-			Permissions: []xconn.Permission{{
-				URI:            "",
-				MatchPolicy:    wampproto.MatchPrefix,
-				AllowCall:      true,
-				AllowRegister:  true,
-				AllowSubscribe: true,
-			}},
-		}},
-	}); err != nil {
-		log.Fatalln(err)
-	}
-	appServer := xconn.NewServer(appRouter, nil, &xconn.ServerConfig{})
-	appListener, err := appServer.ListenAndServeRawSocket(xconn.NetworkUnix,
-		filepath.Join(cfgDirectory, "deskconn.sock"))
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	appSession, err := xconn.ConnectInMemory(appRouter, deskconn.LocalRealm)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return appRouter, appListener, appSession
-}
-
-// setupWebRTC answers WebRTC offers made on session (signaling for P2P), attaching the
-// resulting WAMP-over-WebRTC sessions to router and relaying their raw channels to deskconnd.
-func setupWebRTC(session *xconn.Session, router *xconn.Router, authenticator *Authenticator,
-	xlinkStreamSock string) error {
-	webRtcManager := xconnwebrtc.NewWebRTCHandler()
-	if err := webRtcManager.Setup(&xconnwebrtc.ProviderConfig{
-		Session:                     session,
-		ProcedureHandleOffer:        deskconn.ProcedureWebRTCOffer,
-		TopicHandleRemoteCandidates: deskconn.TopicAnswererOnCandidate,
-		TopicPublishLocalCandidate:  deskconn.TopicOffererOnCandidate,
-		Serializer:                  &serializers.CBORSerializer{},
-		Authenticator:               authenticator,
-		Router:                      router,
-		ICEServers: []xconnwebrtc.ICEServer{
-			{URLs: []string{deskconn.StunServerURL}},
-		},
-	}); err != nil {
-		return err
-	}
-
-	webRtcManager.OnDataChannel(handleAuxDataChannel(xlinkStreamSock))
-	return nil
-}
-
-// newDeviceRouter returns a router serving the device-facing realm that
-// remote clients (cloud, LAN or standalone) call into.
-func newDeviceRouter(realm string) *xconn.Router {
-	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	permissions := []xconn.Permission{
-		{
-			URI:         xconnURIPrefix,
-			MatchPolicy: wampproto.MatchPrefix,
-			AllowCall:   true,
-		},
-		// WebRTC signaling, for clients that reach this router directly (standalone mode).
-		{
-			URI:            webrtcURIPrefix,
-			MatchPolicy:    wampproto.MatchPrefix,
-			AllowPublish:   true,
-			AllowSubscribe: true,
-		},
-	}
-	err = router.AddRealm(realm, &xconn.RealmConfig{
-		AutoDiscloseCaller: true,
-		Meta:               true,
-		Roles: []xconn.RealmRole{
-			{Name: "owner", Permissions: permissions},
-			{Name: "admin", Permissions: permissions},
-			{Name: "member", Permissions: permissions},
-		},
-	})
-	if err != nil {
-		log.Fatalln(err)
-	}
-	return router
-}
-
 // acceptQUICStreams runs an accept loop on sess, relaying each
 // server-initiated stream to deskconnd over xlinkStreamSock.
 func acceptQUICStreams(sess *xconn.QUICSession, xlinkStreamSock string) {
@@ -420,93 +313,6 @@ func acceptQUICStreams(sess *xconn.QUICSession, xlinkStreamSock string) {
 		if err != nil {
 			return
 		}
-		deskconn.SafeGo(func() { relayQUICStream(stream, xlinkStreamSock) })
-	}
-}
-
-// relayQUICStream classifies a freshly accepted QUIC stream and splices its
-// remaining bytes, untouched, to deskconnd's stream-relay listener.
-func relayQUICStream(stream net.Conn, xlinkStreamSock string) {
-	defer stream.Close()
-
-	op, err := deskconn.ReadStreamOp(stream)
-	if err != nil {
-		return
-	}
-
-	conn, err := net.Dial("unix", xlinkStreamSock)
-	if err != nil {
-		log.Printf("relay: failed to dial deskconnd stream socket: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	if err := deskconn.WriteRelayHeader(conn, deskconn.RelayHeader{Kind: deskconn.RelayKindQUIC, Op: op}); err != nil {
-		return
-	}
-
-	done := make(chan struct{})
-	deskconn.SafeGo(func() {
-		_, _ = io.Copy(conn, stream)
-		close(done)
-	})
-	_, _ = io.Copy(stream, conn)
-	<-done
-}
-
-// handleAuxDataChannel is the callback wired to the WebRTC provider's
-// OnDataChannel; it classifies each channel by label (or, for VPN/file-
-// stream channels, by sniffing the first message) and relays it to
-// deskconnd over xlinkStreamSock -- xlink only needs to know enough
-// about a channel to route it, never its payload.
-//
-// The provider invokes this synchronously from the channel's own message
-// dispatch goroutine (it has to: it's the one sniffing the first message),
-// so the actual relay work must happen on its own goroutine -- RelayWebRTCChannel
-// blocks until the channel closes, and until this callback returns, the
-// provider can't dispatch this channel's next message to the OnMessage
-// handler RelayWebRTCChannel registers.
-func handleAuxDataChannel(xlinkStreamSock string) func(sessionID string, channel *webrtc.DataChannel,
-	firstMessage []byte) {
-	return func(_ string, channel *webrtc.DataChannel, firstMessage []byte) {
-		deskconn.SafeGo(func() {
-			var label string
-			ordered := true
-			relayFirstMessage := true
-
-			switch channel.Label() {
-			case deskconn.ShellChannelLabel, deskconn.PortForwardChannelLabel, deskconn.PortReverseChannelLabel,
-				deskconn.AgentForwardChannelLabel, deskconn.LogChannelLabel:
-				label = channel.Label()
-			default:
-				var probe deskconn.VPNOpenFrame
-				if json.Unmarshal(firstMessage, &probe) == nil && probe.Type == deskconn.VPNFrameOpen {
-					label = deskconn.VPNChannelLabel
-					ordered = false
-					relayFirstMessage = false
-				}
-				// else: label stays "" (file-stream), the default case in deskconnd's dispatch.
-			}
-
-			conn, err := net.Dial("unix", xlinkStreamSock)
-			if err != nil {
-				log.Printf("relay: failed to dial deskconnd stream socket: %v", err)
-				_ = channel.Close()
-				return
-			}
-
-			header := deskconn.RelayHeader{Kind: deskconn.RelayKindWebRTC, Label: label, Ordered: ordered}
-			if err := deskconn.WriteRelayHeader(conn, header); err != nil {
-				_ = channel.Close()
-				_ = conn.Close()
-				return
-			}
-
-			var fm []byte
-			if relayFirstMessage {
-				fm = firstMessage
-			}
-			deskconn.RelayWebRTCChannel(channel, conn, fm)
-		})
+		common.SafeGo(func() { xlink.RelayQUICStream(stream, xlinkStreamSock) })
 	}
 }

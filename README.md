@@ -263,8 +263,8 @@ deskconn self update
 ### Build
 
 ```bash
-make build-deskconnd   # builds ./deskconnd
-make build-deskconn    # builds ./deskconn
+make build-deskconnd   # builds bin/deskconnd
+make build-deskconn    # builds bin/deskconn
 ```
 
 Override the cloud endpoint for local development:
