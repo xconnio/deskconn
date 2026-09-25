@@ -28,7 +28,8 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	"github.com/xconnio/deskconn"
+	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/deskconn"
 	sysinfo "github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
 	"github.com/xconnio/xconn-go/auth"
@@ -93,7 +94,7 @@ const (
 )
 
 func main() {
-	cfgDirectory, err := deskconn.CfgDirectory()
+	cfgDirectory, err := common.CfgDirectory()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -338,8 +339,8 @@ func main() {
 
 	case loginCmd.FullCommand():
 		if _, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519")); err == nil {
-			_, _, credErr := deskconn.ReadCredentials(cfgDirectory)
-			if errors.Is(credErr, deskconn.ErrKeyExpired) {
+			_, _, credErr := common.ReadCredentials(cfgDirectory)
+			if errors.Is(credErr, common.ErrKeyExpired) {
 				_ = deskconn.RemoveCredentialsFiles(cfgDirectory)
 			} else {
 				fmt.Fprintln(os.Stderr, "you are already logged in, please logout first")
@@ -351,11 +352,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 		if err != nil {
 			log.Fatal(err)
 		}
-		callResp := session.Call(deskconn.ProcedureLogin).Do()
+		callResp := session.Call(common.ProcedureLogin).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
@@ -388,7 +389,7 @@ func main() {
 			return
 		}
 		payload, _ := json.Marshal(map[string]string{"old_path": srcPath, "new_path": dstPath})
-		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileRename, payload, *mvModeFlag)
+		err = fileOp(context.Background(), uri, realm, cfgDirectory, common.ProcedureFileRename, payload, *mvModeFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -410,7 +411,7 @@ func main() {
 				return
 			}
 			payload, _ := json.Marshal(map[string]string{"src": srcPath, "dst": dstPath})
-			err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileCopy, payload, *cpModeFlag)
+			err = fileOp(context.Background(), uri, realm, cfgDirectory, common.ProcedureFileCopy, payload, *cpModeFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
@@ -423,7 +424,7 @@ func main() {
 			}
 			switch *cpModeFlag {
 			case ModeQUIC:
-				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -453,7 +454,7 @@ func main() {
 					return
 				}
 				fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
-				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -473,7 +474,7 @@ func main() {
 			}
 			switch *cpModeFlag {
 			case ModeQUIC:
-				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -504,7 +505,7 @@ func main() {
 					return
 				}
 				fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
-				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -527,7 +528,7 @@ func main() {
 			return
 		}
 		payload, _ := json.Marshal(map[string]string{jsonFieldPath: path})
-		err = fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileDelete, payload, *rmModeFlag)
+		err = fileOp(context.Background(), uri, realm, cfgDirectory, common.ProcedureFileDelete, payload, *rmModeFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -545,7 +546,7 @@ func main() {
 		}
 		switch *catModeFlag {
 		case ModeQUIC:
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -565,7 +566,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		default:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -594,7 +595,7 @@ func main() {
 		var original []byte
 		switch *editModeFlag {
 		case ModeQUIC:
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -618,7 +619,7 @@ func main() {
 				return
 			}
 		default:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -675,7 +676,7 @@ func main() {
 
 		patch := deskconn.BuildEditPatch(original, edited)
 		payload, _ := json.Marshal(map[string]string{jsonFieldPath: path, "patch": patch})
-		if err := fileOp(context.Background(), uri, realm, cfgDirectory, deskconn.ProcedureFileEdit,
+		if err := fileOp(context.Background(), uri, realm, cfgDirectory, common.ProcedureFileEdit,
 			payload, *editModeFlag); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -736,17 +737,17 @@ func main() {
 			}
 			fmt.Println("printing disabled")
 		case *printStatusFlag:
-			mode, err := deskconn.CurrentPrintMode()
+			mode, err := common.CurrentPrintMode()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 			switch mode {
-			case deskconn.PrintModeDisabled:
+			case common.PrintModeDisabled:
 				fmt.Println("printing disabled")
-			case deskconn.PrintModeAccept:
+			case common.PrintModeAccept:
 				fmt.Println("printing enabled")
-			case deskconn.PrintModeHost:
+			case common.PrintModeHost:
 				fmt.Println("printing enabled; printer hosting enabled")
 			default:
 				fmt.Printf("printing mode: %s\n", mode)
@@ -760,13 +761,13 @@ func main() {
 			var callResp xconn.CallResponse
 			switch *printModeFlag {
 			case ModeQUIC:
-				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
 				defer quicSess.Connection().Close()
-				callResp = quicSess.Session.Call(deskconn.ProcedurePrinterList).Do()
+				callResp = quicSess.Session.Call(common.ProcedurePrinterList).Do()
 			case ModeP2P:
 				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 				if err != nil {
@@ -774,14 +775,14 @@ func main() {
 					return
 				}
 				defer func() { _ = p2pSess.Leave() }()
-				callResp = p2pSess.Call(deskconn.ProcedurePrinterList).Do()
+				callResp = p2pSess.Call(common.ProcedurePrinterList).Do()
 			default:
-				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				callResp = localSession.Call(deskconn.ProcedureProxyPrinterList).Args(realm).Do()
+				callResp = localSession.Call(common.ProcedureProxyPrinterList).Args(realm).Do()
 			}
 			if callResp.Err != nil {
 				fmt.Fprintln(os.Stderr, callResp.Err)
@@ -795,7 +796,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			var printers []deskconn.PrinterInfo
+			var printers []common.PrinterInfo
 			if err := json.Unmarshal(jsonData, &printers); err != nil {
 				fmt.Fprintln(os.Stderr, "expected a list of printers")
 				return
@@ -832,13 +833,13 @@ func main() {
 			var callResp xconn.CallResponse
 			switch *printModeFlag {
 			case ModeQUIC:
-				quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
 				defer quicSess.Connection().Close()
-				callResp = quicSess.Session.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
+				callResp = quicSess.Session.Call(common.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
 			case ModeP2P:
 				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 				if err != nil {
@@ -846,14 +847,14 @@ func main() {
 					return
 				}
 				defer func() { _ = p2pSess.Leave() }()
-				callResp = p2pSess.Call(deskconn.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
+				callResp = p2pSess.Call(common.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
 			default:
-				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
-				callResp = localSession.Call(deskconn.ProcedureProxyPrinterPrint).Args(realm, printerName, filename, data).Do()
+				callResp = localSession.Call(common.ProcedureProxyPrinterPrint).Args(realm, printerName, filename, data).Do()
 			}
 			if callResp.Err != nil {
 				fmt.Fprintln(os.Stderr, callResp.Err)
@@ -909,7 +910,7 @@ func main() {
 		defer signal.Stop(sigCh)
 
 		errCh := make(chan error, 1)
-		deskconn.SafeGo(func() {
+		common.SafeGo(func() {
 			errCh <- deskconn.RunPortForward(ctx, *portForwardModeFlag, realm, cfgDirectory, remotePort, localPort)
 		})
 
@@ -964,7 +965,7 @@ func main() {
 		defer signal.Stop(sigCh)
 
 		errCh := make(chan error, 1)
-		deskconn.SafeGo(func() {
+		common.SafeGo(func() {
 			errCh <- deskconn.RunPortReverse(ctx, *portReverseModeFlag, realm, cfgDirectory, remotePort, localPort)
 		})
 
@@ -979,12 +980,12 @@ func main() {
 		}
 
 	case lsCmd.FullCommand():
-		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		devicesCallResp := session.Call(deskconn.ProcedureConnectedDevices).Do()
+		devicesCallResp := session.Call(common.ProcedureConnectedDevices).Do()
 		if devicesCallResp.Err != nil {
 			fmt.Fprintln(os.Stderr, devicesCallResp.Err)
 			return
@@ -995,7 +996,7 @@ func main() {
 			return
 		}
 		fileExists := true
-		devicesFromCfg, err := deskconn.DevicesFromCfg(cfgDirectory)
+		devicesFromCfg, err := common.DevicesFromCfg(cfgDirectory)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				fileExists = false
@@ -1041,7 +1042,7 @@ func main() {
 		table := tablewriter.NewWriter(os.Stdout)
 		table.Header(tableHeader)
 
-		cfgMap := make(map[string]deskconn.Device, len(devicesFromCfg))
+		cfgMap := make(map[string]common.Device, len(devicesFromCfg))
 		for _, d := range devicesFromCfg {
 			cfgMap[d.Authid] = d
 		}
@@ -1086,7 +1087,7 @@ func main() {
 		}
 
 	case deviceKeyCmd.FullCommand():
-		authid, publicKey, _, err := deskconn.EnsureDirectKey(cfgDirectory)
+		authid, publicKey, _, err := common.EnsureDirectKey(cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -1119,12 +1120,12 @@ func main() {
 			return
 		}
 
-		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		callResp := session.Call(deskconn.ProcedureLogout).Do()
+		callResp := session.Call(common.ProcedureLogout).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 		}
@@ -1154,7 +1155,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -1176,7 +1177,7 @@ func main() {
 			default:
 			}
 
-			callResp := localSession.Call(deskconn.ProcedureProxyPing).Args(realm).Do()
+			callResp := localSession.Call(common.ProcedureProxyPing).Args(realm).Do()
 			sent++
 			if callResp.Err != nil {
 				fmt.Fprintf(os.Stderr, "seq=%d error: %v\n", seq, callResp.Err)
@@ -1219,12 +1220,12 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		callResp := session.Call(deskconn.ProcedureConnect).Args(realm).Do()
+		callResp := session.Call(common.ProcedureConnect).Args(realm).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 			return
@@ -1232,13 +1233,13 @@ func main() {
 		fmt.Printf("connected to %s\n", *connectDevice)
 
 	case disconnectCmd.FullCommand():
-		session, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+		session, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 		if *disconnectAllFlag {
-			callResp := session.Call(deskconn.ProcedureDisconnectAll).Do()
+			callResp := session.Call(common.ProcedureDisconnectAll).Do()
 			if callResp.Err != nil {
 				fmt.Fprintln(os.Stderr, callResp.Err)
 				return
@@ -1255,7 +1256,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		callResp := session.Call(deskconn.ProcedureDisconnect).Args(realm).Do()
+		callResp := session.Call(common.ProcedureDisconnect).Args(realm).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 			return
@@ -1321,13 +1322,13 @@ func main() {
 		var callResp xconn.CallResponse
 		switch *infoModeFlag {
 		case ModeQUIC:
-			quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 			defer quicSess.Connection().Close()
-			callResp = quicSess.Call(deskconn.ProcedureDeviceInfo).Do()
+			callResp = quicSess.Call(common.ProcedureDeviceInfo).Do()
 		case ModeP2P:
 			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
@@ -1335,14 +1336,14 @@ func main() {
 				return
 			}
 			defer func() { _ = p2pSess.Leave() }()
-			callResp = p2pSess.Call(deskconn.ProcedureDeviceInfo).Do()
+			callResp = p2pSess.Call(common.ProcedureDeviceInfo).Do()
 		default:
-			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, deskconn.LocalRealm)
+			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			callResp = localSession.Call(deskconn.ProcedureProxyDeviceInfo).Args(realm).Do()
+			callResp = localSession.Call(common.ProcedureProxyDeviceInfo).Args(realm).Do()
 		}
 
 		if callResp.Err != nil {
@@ -1405,7 +1406,7 @@ func main() {
 		defer signal.Stop(sigCh)
 
 		errCh := make(chan error, 1)
-		deskconn.SafeGo(func() {
+		common.SafeGo(func() {
 			errCh <- deskconn.RunLogs(ctx, *logsModeFlag, realm, cfgDirectory, source, *logsFollow, *logsTail, *logsSince)
 		})
 
@@ -1449,19 +1450,19 @@ func main() {
 			return
 		}
 
-		var creds deskconn.Credentials
+		var creds common.Credentials
 		if err := json.Unmarshal(data, &creds); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 
-		quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), creds.Realm, cfgDirectory)
+		quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), creds.Realm, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 		defer quicSess.Connection().Close()
-		callResp := quicSess.Session.Call(deskconn.ProcedureScreenshotPermission).Do()
+		callResp := quicSess.Session.Call(common.ProcedureScreenshotPermission).Do()
 		if callResp.Err != nil {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 			sessionBus, err := dbus.ConnectSessionBus()
@@ -1630,7 +1631,7 @@ func setupAgentForward(mode, realm, cfgDirectory, agentSock string) func() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan error, 1)
-	deskconn.SafeGo(func() {
+	common.SafeGo(func() {
 		_ = deskconn.RunAgentForward(ctx, mode, realm, cfgDirectory, agentSock, ready)
 	})
 
@@ -1668,7 +1669,7 @@ func confirmPrompt(prompt string, defaultYes bool) (bool, error) {
 // detachIfAttached detaches this device from the cloud account if it is currently
 // attached. It is a no-op otherwise.
 func detachIfAttached() error {
-	credFile, err := deskconn.CredentialsFilePath()
+	credFile, err := common.CredentialsFilePath()
 	if err != nil {
 		return err
 	}
@@ -1681,7 +1682,7 @@ func detachIfAttached() error {
 		return err
 	}
 
-	var cred deskconn.Credentials
+	var cred common.Credentials
 	if err := json.Unmarshal(data, &cred); err != nil {
 		return fmt.Errorf("failed to parse credentials file: %w", err)
 	}
@@ -1693,8 +1694,8 @@ func detachIfAttached() error {
 		return fmt.Errorf("failed to initialize cryptosign authenticator: %w", err)
 	}
 
-	cloudSess, err := xconn.ConnectQUIC(context.Background(), deskconn.CloudQUICAddress(), deskconn.CloudRealm,
-		&xconn.QUICDialerConfig{Authenticator: cryptosignAuth, TLSConfig: deskconn.CloudQUICTLSConfig()})
+	cloudSess, err := xconn.ConnectQUIC(context.Background(), common.CloudQUICAddress(), common.CloudRealm,
+		&xconn.QUICDialerConfig{Authenticator: cryptosignAuth, TLSConfig: common.CloudQUICTLSConfig()})
 	if err != nil {
 		return fmt.Errorf("failed to connect to cloud: %w", err)
 	}
@@ -2025,7 +2026,7 @@ func installBinaryFromReader(src io.Reader, dst string, mode os.FileMode) error 
 }
 
 func attach(flagUsername, flagPassword, name string, useStdin bool) error {
-	file, err := deskconn.CredentialsFilePath()
+	file, err := common.CredentialsFilePath()
 	if err != nil {
 		return err
 	}
@@ -2072,7 +2073,7 @@ func resolveDeviceName(name string) (string, error) {
 }
 
 func promptAttachDevice(username, password string) error {
-	file, err := deskconn.CredentialsFilePath()
+	file, err := common.CredentialsFilePath()
 	if err != nil {
 		return err
 	}
@@ -2097,7 +2098,7 @@ func promptAttachDevice(username, password string) error {
 		return err
 	}
 
-	cfgDirectory, err := deskconn.CfgDirectory()
+	cfgDirectory, err := common.CfgDirectory()
 	if err != nil {
 		return err
 	}
@@ -2144,7 +2145,7 @@ func login(flagUsername, flagPassword string, useStdin bool) error {
 	if err != nil {
 		return err
 	}
-	deskconn.SafeGo(func() {
+	common.SafeGo(func() {
 		<-quicSess.Done()
 		_ = quicSess.Connection().Close()
 	})
@@ -2176,7 +2177,7 @@ func logout(cfgDirectory string) error {
 	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
 		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) ||
-			errors.Is(err, deskconn.ErrKeyExpired) {
+			errors.Is(err, common.ErrKeyExpired) {
 			return deskconn.RemoveCredentialsFiles(cfgDirectory)
 		}
 		return err
@@ -2198,16 +2199,16 @@ func logout(cfgDirectory string) error {
 // addDirectDevice saves a standalone device after checking it is reachable with the
 // pinned fingerprint and that it accepts this machine's direct key.
 func addDirectDevice(cfgDirectory, name, address, fingerprint string) error {
-	device := deskconn.Device{
+	device := common.Device{
 		Name:        name,
-		Realm:       deskconn.DirectRealmPrefix + name,
+		Realm:       common.DirectRealmPrefix + name,
 		Address:     deskconn.NormalizeDirectAddress(address),
 		Fingerprint: fingerprint,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	sess, err := deskconn.ConnectDirectQUIC(ctx, device, cfgDirectory)
+	sess, err := common.ConnectDirectQUIC(ctx, device, cfgDirectory)
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", device.Address, err)
 	}
@@ -2221,7 +2222,7 @@ func addDirectDevice(cfgDirectory, name, address, fingerprint string) error {
 }
 
 func deviceRealm(deviceName, cfgDirectory string) (string, error) {
-	devices, err := deskconn.DevicesFromCfg(cfgDirectory)
+	devices, err := common.DevicesFromCfg(cfgDirectory)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			devices, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
@@ -2443,7 +2444,7 @@ func selectDevice(session *xconn.Session) (authid string, name string, err error
 
 func deviceCompletions(cfgDirectory string) func() []string {
 	return func() []string {
-		devices, err := deskconn.DevicesFromCfg(cfgDirectory)
+		devices, err := common.DevicesFromCfg(cfgDirectory)
 		if err != nil {
 			return nil
 		}
@@ -2459,7 +2460,7 @@ func deviceCompletions(cfgDirectory string) func() []string {
 
 func devicePathCompletions(cfgDirectory string) func() []string {
 	return func() []string {
-		devices, err := deskconn.DevicesFromCfg(cfgDirectory)
+		devices, err := common.DevicesFromCfg(cfgDirectory)
 		if err != nil {
 			return nil
 		}
@@ -2512,14 +2513,14 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 	defer cancel()
 
 	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-	localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
+	localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
 	if err != nil {
 		return nil
 	}
 	defer func() { _ = localSession.Leave() }()
 
 	if !deviceHasPersistentSession(localSession, realm) {
-		_ = localSession.Call(deskconn.ProcedureConnect).Args(realm).Do()
+		_ = localSession.Call(common.ProcedureConnect).Args(realm).Do()
 		return nil
 	}
 
@@ -2527,7 +2528,7 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 	if err != nil {
 		return nil
 	}
-	resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, deskconn.ProcedureFileBrowse, browsePayload).Do()
+	resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, common.ProcedureFileBrowse, browsePayload).Do()
 	if resp.Err != nil {
 		return nil
 	}
@@ -2536,7 +2537,7 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 		return nil
 	}
 
-	var browsed deskconn.FileBrowseResult
+	var browsed common.FileBrowseResult
 	if err := json.Unmarshal(result, &browsed); err != nil {
 		return nil
 	}
@@ -2556,7 +2557,7 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 }
 
 func deviceHasPersistentSession(localSession *xconn.Session, realm string) bool {
-	resp := localSession.Call(deskconn.ProcedureConnectedDevices).Do()
+	resp := localSession.Call(common.ProcedureConnectedDevices).Do()
 	if resp.Err != nil || len(resp.Args()) == 0 {
 		return false
 	}
@@ -2583,7 +2584,7 @@ func parseDevicePath(s string) (device, path string) {
 func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
 	switch mode {
 	case ModeQUIC:
-		quicSess, err := deskconn.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+		quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -2599,11 +2600,11 @@ func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, pay
 		_, err = deskconn.CallFileOp(p2pSess, procedure, payload)
 		return err
 	default:
-		localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
+		localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
 		if err != nil {
 			return err
 		}
-		resp := localSession.Call(deskconn.ProcedureProxyFileOp).Args(realm, procedure, payload).Do()
+		resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Do()
 		return resp.Err
 	}
 }
@@ -2678,7 +2679,7 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
 
-	var config deskconn.Config
+	var config common.Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}

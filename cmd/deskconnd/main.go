@@ -13,23 +13,24 @@ import (
 	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/deskconn"
+	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/deskconnd"
 	"github.com/xconnio/xconn-go"
 )
 
 func main() {
-	cfgDirectory, err := deskconn.CfgDirectory()
+	cfgDirectory, err := common.CfgDirectory()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	clientSessions := deskconn.NewClientSessions()
+	clientSessions := deskconnd.NewClientSessions()
 
 	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
-	var screen *deskconn.Screen
-	var mpris *deskconn.MPRIS
-	var audio *deskconn.Audio
+	var screen *deskconnd.Screen
+	var mpris *deskconnd.MPRIS
+	var audio *deskconnd.Audio
 
 	if isDesktop {
 		systemBus, err := dbus.ConnectSystemBus()
@@ -44,16 +45,16 @@ func main() {
 		}
 		defer sessionBus.Close()
 
-		screen = deskconn.NewScreen(sessionBus, systemBus, cfgDirectory)
-		mpris = deskconn.NewMPRIS(sessionBus)
-		audio = deskconn.NewAudio()
+		screen = deskconnd.NewScreen(sessionBus, systemBus, cfgDirectory)
+		mpris = deskconnd.NewMPRIS(sessionBus)
+		audio = deskconnd.NewAudio()
 		defer audio.Close()
 	} else {
 		log.Println("no display detected (DISPLAY/WAYLAND_DISPLAY unset), " +
 			"running in server mode: display APIs disabled")
 	}
 
-	deskconnApis := deskconn.NewDeskconn(screen, mpris, audio, isDesktop, cfgDirectory)
+	deskconnApis := deskconnd.NewDeskconn(screen, mpris, audio, isDesktop, cfgDirectory)
 	defer deskconnApis.CloseVPNTunnel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,9 +70,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer streamListener.Close()
-	deskconn.SafeGo(func() { deskconnApis.ServeStreamRelay(streamListener) })
+	common.SafeGo(func() { deskconnApis.ServeStreamRelay(streamListener) })
 
-	deskconn.SafeGo(func() { runXlinkSession(ctx, cfgDirectory, deskconnApis, clientSessions) })
+	common.SafeGo(func() { runXlinkSession(ctx, cfgDirectory, deskconnApis, clientSessions) })
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -82,49 +83,49 @@ func main() {
 }
 
 // registerLocalProcedures registers the CLI-facing procedures on session.
-func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconn.Deskconn,
-	clientSessions *deskconn.ClientSessions, cfgDirectory string) error {
+func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Deskconn,
+	clientSessions *deskconnd.ClientSessions, cfgDirectory string) error {
 	handlers := map[string]xconn.InvocationHandler{
-		deskconn.ProcedureProxyFileOp:       deskconn.ProxyFileOpHandler(clientSessions, cfgDirectory),
-		deskconn.ProcedureProxyDeviceInfo:   deskconn.ProxyDeviceInfoHandler(clientSessions, cfgDirectory),
-		deskconn.ProcedureProxyPing:         deskconn.ProxyPingHandler(clientSessions, cfgDirectory),
-		deskconn.ProcedureProxyCat:          deskconn.ProxyCatHandler(clientSessions, cfgDirectory),
-		deskconn.ProcedureProxyVPNStart:     deskconn.ProxyVPNStartHandler(deskconnApis),
-		deskconn.ProcedureProxyVPNStop:      deskconn.ProxyVPNStopHandler(deskconnApis),
-		deskconn.ProcedureProxyPrinterList:  deskconn.ProxyPrinterListHandler(clientSessions, cfgDirectory),
-		deskconn.ProcedureProxyPrinterPrint: deskconn.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
-		deskconn.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureProxyFileOp:       deskconnd.ProxyFileOpHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyDeviceInfo:   deskconnd.ProxyDeviceInfoHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyPing:         deskconnd.ProxyPingHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyCat:          deskconnd.ProxyCatHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyVPNStart:     deskconnd.ProxyVPNStartHandler(deskconnApis),
+		common.ProcedureProxyVPNStop:      deskconnd.ProxyVPNStopHandler(deskconnApis),
+		common.ProcedureProxyPrinterList:  deskconnd.ProxyPrinterListHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyPrinterPrint: deskconnd.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
+		common.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSessions.Login()
 			return xconn.NewInvocationResult()
 		},
-		deskconn.ProcedureLogout: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureLogout: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSessions.Logout()
 			return xconn.NewInvocationResult()
 		},
-		deskconn.ProcedureConnect: func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureConnect: func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 			realm, err := inv.ArgString(0)
 			if err != nil {
-				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
+				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 			}
 			_, err = clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
 			if err != nil {
-				return xconn.NewInvocationError(deskconn.ErrOperationFailed, err.Error())
+				return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 			}
 			return xconn.NewInvocationResult()
 		},
-		deskconn.ProcedureDisconnect: func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureDisconnect: func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 			realm, err := inv.ArgString(0)
 			if err != nil {
-				return xconn.NewInvocationError(deskconn.ErrInvalidArgument, err.Error())
+				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 			}
 			clientSessions.Disconnect(realm)
 			return xconn.NewInvocationResult()
 		},
-		deskconn.ProcedureDisconnectAll: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureDisconnectAll: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSessions.DisconnectAll()
 			return xconn.NewInvocationResult()
 		},
-		deskconn.ProcedureConnectedDevices: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureConnectedDevices: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult(clientSessions.DeviceSessions())
 		},
 	}
@@ -139,8 +140,8 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconn.Desk
 
 // runXlinkSession keeps a session on xlink's local realm alive, registering
 // every app-layer and CLI-facing procedure on it, reconnecting on failure.
-func runXlinkSession(ctx context.Context, cfgDirectory string, deskconnApis *deskconn.Deskconn,
-	clientSessions *deskconn.ClientSessions) {
+func runXlinkSession(ctx context.Context, cfgDirectory string, deskconnApis *deskconnd.Deskconn,
+	clientSessions *deskconnd.ClientSessions) {
 	retryDelay := 1 * time.Second
 	maxDelay := 30 * time.Second
 
@@ -153,7 +154,7 @@ func runXlinkSession(ctx context.Context, cfgDirectory string, deskconnApis *des
 		default:
 		}
 
-		session, err := xconn.ConnectAnonymous(ctx, fmt.Sprintf("unix://%s", localSockPath), deskconn.LocalRealm)
+		session, err := xconn.ConnectAnonymous(ctx, fmt.Sprintf("unix://%s", localSockPath), common.LocalRealm)
 		if err != nil {
 			log.Printf("xlink session: failed to connect to xlink, will retry in %v: %v", retryDelay, err)
 			retryDelay = min(retryDelay*2, maxDelay)

@@ -13,8 +13,9 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/olekukonko/tablewriter"
 
-	"github.com/xconnio/deskconn"
 	"github.com/xconnio/deskconn/ai"
+	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/deskconn"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -131,14 +132,14 @@ func runAILs(cfgDirectory, machine, mode string) error {
 		return err
 	}
 
-	var sessions []deskconn.AISessionSummary
+	var sessions []common.AISessionSummary
 	switch mode {
 	case ModeQUIC:
 		realm, err := deviceRealm(machine, cfgDirectory)
 		if err != nil {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
-		quicSess, err := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+		quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -167,7 +168,7 @@ func runAILs(cfgDirectory, machine, mode string) error {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
 		localSession, err := xconn.ConnectAnonymous(context.Background(),
-			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
+			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), common.LocalRealm)
 		if err != nil {
 			return fmt.Errorf("could not reach local daemon: %w", err)
 		}
@@ -196,7 +197,7 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 		return err
 	}
 
-	var bundles []deskconn.AISessionBundle
+	var bundles []common.AISessionBundle
 	switch mode {
 	case ModeQUIC:
 		var realm string
@@ -204,7 +205,7 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 		if err != nil {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
-		quicSess, qErr := deskconn.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+		quicSess, qErr := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 		if qErr != nil {
 			return qErr
 		}
@@ -229,7 +230,7 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
 		}
 		localSession, lErr := xconn.ConnectAnonymous(context.Background(),
-			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), deskconn.LocalRealm)
+			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), common.LocalRealm)
 		if lErr != nil {
 			return fmt.Errorf("could not reach local daemon: %w", lErr)
 		}

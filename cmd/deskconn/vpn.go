@@ -8,7 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/xconnio/deskconn"
+	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/deskconn"
 	"github.com/xconnio/deskconn/iptun"
 	"github.com/xconnio/xconn-go"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
@@ -85,7 +86,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 	onReady := func() {
 		fmt.Printf("Tunnel up: routing this machine's internet traffic through %q. Press Ctrl-C to stop.\n", device)
 	}
-	deskconn.SafeGo(func() { errCh <- deskconn.ConnectVPNClient(ctx, session, helper, onReady) })
+	common.SafeGo(func() { errCh <- deskconn.ConnectVPNClient(ctx, session, helper, onReady) })
 
 	select {
 	case <-sigCh:
@@ -129,7 +130,7 @@ func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 	}()
 
 	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-	localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
+	localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -142,7 +143,7 @@ func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 		return
 	}
 
-	resp := localSession.Call(deskconn.ProcedureProxyVPNStart).Args(socketPath).DoContext(ctx)
+	resp := localSession.Call(common.ProcedureProxyVPNStart).Args(socketPath).DoContext(ctx)
 	if resp.Err != nil {
 		fmt.Fprintln(os.Stderr, resp.Err)
 		return
@@ -157,14 +158,14 @@ func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 // VPN exit node, if it currently is -- see runVPNStart.
 func runVPNStop(ctx context.Context, cfgDirectory string) {
 	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-	localSession, err := xconn.ConnectAnonymous(ctx, uri, deskconn.LocalRealm)
+	localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
 	defer func() { _ = localSession.Leave() }()
 
-	resp := localSession.Call(deskconn.ProcedureProxyVPNStop).DoContext(ctx)
+	resp := localSession.Call(common.ProcedureProxyVPNStop).DoContext(ctx)
 	if resp.Err != nil {
 		fmt.Fprintln(os.Stderr, resp.Err)
 		return

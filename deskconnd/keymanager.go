@@ -1,0 +1,35 @@
+package deskconnd
+
+import (
+	"sync"
+)
+
+type keyManager struct {
+	keys map[uint64]*encryptionKeys
+	sync.Mutex
+}
+
+func newKeyManager() *keyManager {
+	return &keyManager{
+		keys: make(map[uint64]*encryptionKeys),
+	}
+}
+
+func (k *keyManager) store(sessionID uint64, enc *encryptionKeys) {
+	k.Lock()
+	defer k.Unlock()
+	k.keys[sessionID] = enc
+}
+
+func (k *keyManager) fetch(sessionID uint64) (*encryptionKeys, bool) {
+	k.Lock()
+	defer k.Unlock()
+	enc, ok := k.keys[sessionID]
+	return enc, ok
+}
+
+func (k *keyManager) delete(sessionID uint64) {
+	k.Lock()
+	defer k.Unlock()
+	delete(k.keys, sessionID)
+}
