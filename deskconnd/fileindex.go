@@ -3,6 +3,7 @@ package deskconnd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,6 +193,7 @@ func (s *IndexService) runIndexer(ctx context.Context) {
 
 	if ctx.Err() == nil {
 		_ = s.db.markIndexingComplete()
+		_ = s.db.setThumbnailDim(fmt.Sprint(thumbnailMaxDim))
 		s.ready.Store(true)
 		log.Println("fileindex: indexing complete")
 		s.backfillPDFThumbnails(ctx)
@@ -204,10 +206,14 @@ func (s *IndexService) runIndexer(ctx context.Context) {
 //   - DB entries for files that no longer exist are pruned
 func (s *IndexService) runSync(ctx context.Context) {
 	log.Println("fileindex: syncing changes since last run")
+	regenThumbs := s.db.thumbnailDim() != fmt.Sprint(thumbnailMaxDim)
 
 	batchCount := 0
 	s.walkFileEntries(ctx, s.indexRoots(), func(path string, entry IndexEntry) {
 		if s.db.isEntryUpToDate(path, entry.ModTime, entry.Category) {
+			if regenThumbs {
+				s.storeThumbnailSlow(path, entry.Category, entry.Size)
+			}
 			return
 		}
 		if err := s.db.addEntry(entry); err != nil {
@@ -223,6 +229,9 @@ func (s *IndexService) runSync(ctx context.Context) {
 
 	if ctx.Err() == nil {
 		s.db.removeStaleEntries()
+		if regenThumbs {
+			_ = s.db.setThumbnailDim(fmt.Sprint(thumbnailMaxDim))
+		}
 		log.Println("fileindex: sync complete")
 		s.backfillPDFThumbnails(ctx)
 	}
