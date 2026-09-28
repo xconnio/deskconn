@@ -10,7 +10,6 @@ import (
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
-	"github.com/xconnio/deskconn/iptun"
 	"github.com/xconnio/xconn-go"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
@@ -20,7 +19,7 @@ import (
 // confirmed reachable, so a failure fails fast without prompting first.
 func launchHelper(ctx context.Context, cfgDirectory string) (string, func() error, error) {
 	fmt.Println("A password is needed to grant deskconn-vpnd the network access this requires.")
-	return iptun.LaunchHelper(ctx, cfgDirectory)
+	return deskconn.LaunchVPNHelper(ctx, cfgDirectory)
 }
 
 // closeSessionWithTimeout closes session with a bound, since Leave()'s
@@ -74,7 +73,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 		}
 	}()
 
-	helper, err := iptun.DialClient(socketPath)
+	helper, err := common.DialVPNHelper(socketPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return

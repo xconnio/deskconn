@@ -11,7 +11,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/iptun"
 )
 
 // vpnServer tracks whether this Deskconn is currently willing to act as a
@@ -19,7 +18,7 @@ import (
 // and the single tunnel it allows at a time once it is.
 type vpnServer struct {
 	mu     sync.Mutex
-	helper *iptun.Client // non-nil while armed by ArmVPNServing
+	helper *common.VPNHelperClient // non-nil while armed by ArmVPNServing
 	active *vpnTunnelSession
 
 	// starting is claimed before setup begins so two tunnels can't race to
@@ -127,7 +126,7 @@ func (d *Deskconn) CloseVPNTunnel() {
 // duration, so "deskconn vpn start" can return control to its caller right
 // away). Stays armed, serving tunnels one at a time, until
 // DisarmVPNServing or CloseVPNTunnel.
-func (d *Deskconn) ArmVPNServing(helper *iptun.Client) error {
+func (d *Deskconn) ArmVPNServing(helper *common.VPNHelperClient) error {
 	d.vpn.mu.Lock()
 	defer d.vpn.mu.Unlock()
 
@@ -160,7 +159,7 @@ func (d *Deskconn) DisarmVPNServing() bool {
 	return true
 }
 
-func startVPNTunnelServer(channel common.MessageChannel, helper *iptun.Client) (*vpnTunnelSession, error) {
+func startVPNTunnelServer(channel common.MessageChannel, helper *common.VPNHelperClient) (*vpnTunnelSession, error) {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNServerTUNName)
 	if err != nil {
 		return nil, fmt.Errorf("open tun: %w", err)
@@ -190,7 +189,7 @@ func startVPNTunnelServer(channel common.MessageChannel, helper *iptun.Client) (
 		}
 	})
 
-	egress, err := iptun.GetDefaultRoute(4)
+	egress, err := common.GetDefaultRoute(4)
 	if err != nil {
 		rollback()
 		return nil, fmt.Errorf("determine internet-facing interface: %w", err)

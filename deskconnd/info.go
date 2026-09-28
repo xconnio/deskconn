@@ -6,12 +6,11 @@ import (
 	"math"
 
 	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
 )
 
 func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	deviceInfo, err := info.GetDeviceInfo()
+	deviceInfo, err := GetDeviceInfo()
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
@@ -64,7 +63,7 @@ func (d *Deskconn) handleProcessSignal(_ context.Context, inv *xconn.Invocation)
 		pids = append(pids, int32(pid64))
 	}
 
-	results, err := info.Signal(pids, sig)
+	results, err := SignalProcesses(pids, sig)
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 	}
@@ -99,7 +98,7 @@ func (d *Deskconn) handleAppIcon(_ context.Context, inv *xconn.Invocation) *xcon
 		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 	}
 
-	mimeType, data, err := info.ReadIcon(name)
+	mimeType, data, err := ReadIcon(name)
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}

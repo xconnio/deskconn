@@ -1,4 +1,4 @@
-package info
+package deskconnd
 
 import (
 	"errors"
@@ -131,9 +131,9 @@ func signalProcess(pid int32, sig string) error {
 	}
 }
 
-// Signal sends sig ("term" or "kill") to each pid, collecting a per-pid
+// SignalProcesses sends sig ("term" or "kill") to each pid, collecting a per-pid
 // result rather than failing the whole call on one permission error.
-func Signal(pids []int32, sig string) ([]SignalResult, error) {
+func SignalProcesses(pids []int32, sig string) ([]SignalResult, error) {
 	if sig != "term" && sig != "kill" {
 		return nil, errors.New(`signal must be "term" or "kill"`)
 	}

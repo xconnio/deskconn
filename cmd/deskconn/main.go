@@ -30,7 +30,6 @@ import (
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
-	sysinfo "github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
 	"github.com/xconnio/xconn-go/auth"
 )
@@ -1355,7 +1354,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		var info sysinfo.DeviceInfo
+		var info common.DeviceInfo
 		if err := json.Unmarshal(rawData, &info); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return

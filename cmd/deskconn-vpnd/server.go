@@ -1,4 +1,4 @@
-package iptun
+package main
 
 import (
 	"encoding/json"
@@ -7,9 +7,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
-)
 
-const rpcBufSize = 64 * 1024
+	"github.com/xconnio/deskconn/common"
+)
 
 // Server implements the privileged side of the deskconn-vpnd protocol: it
 // runs the actual iptun calls (expects to be root) on behalf of one
@@ -25,7 +25,7 @@ type Server struct {
 func (s *Server) Serve(conn *net.UnixConn) {
 	defer s.undo.unwindAll()
 
-	buf := make([]byte, rpcBufSize)
+	buf := make([]byte, common.VPNHelperBufSize)
 	for {
 		n, _, _, _, err := conn.ReadMsgUnix(buf, nil)
 		if err != nil {
@@ -35,9 +35,9 @@ func (s *Server) Serve(conn *net.UnixConn) {
 			continue
 		}
 
-		var req rpcRequest
+		var req common.VPNHelperRequest
 		if err := json.Unmarshal(buf[:n], &req); err != nil {
-			writeResponse(conn, rpcResponse{Error: fmt.Sprintf("malformed request: %v", err)}, -1)
+			writeResponse(conn, common.VPNHelperResponse{Error: fmt.Sprintf("malformed request: %v", err)}, -1)
 			continue
 		}
 
@@ -45,47 +45,47 @@ func (s *Server) Serve(conn *net.UnixConn) {
 	}
 }
 
-func (s *Server) handle(conn *net.UnixConn, req rpcRequest) {
+func (s *Server) handle(conn *net.UnixConn, req common.VPNHelperRequest) {
 	switch req.Op {
-	case opOpenTUN:
+	case common.VPNOpOpenTUN:
 		s.handleOpenTUN(conn, req)
-	case opConfigureTUN:
+	case common.VPNOpConfigureTUN:
 		s.handleConfigureTUN(conn, req)
-	case opAddHostRoute:
+	case common.VPNOpAddHostRoute:
 		s.handleAddHostRoute(conn, req)
-	case opDelHostRoute:
+	case common.VPNOpDelHostRoute:
 		s.handleDelHostRoute(conn, req)
-	case opReplaceDefaultRoute:
+	case common.VPNOpReplaceDefaultRoute:
 		s.handleReplaceDefaultRoute(conn, req)
-	case opRestoreDefaultRoute:
+	case common.VPNOpRestoreDefaultRoute:
 		s.handleRestoreDefaultRoute(conn, req)
-	case opBlockIPv6Default:
+	case common.VPNOpBlockIPv6Default:
 		s.handleBlockIPv6Default(conn, req)
-	case opRestoreIPv6Default:
+	case common.VPNOpRestoreIPv6Default:
 		s.handleRestoreIPv6Default(conn, req)
-	case opSetSysctl:
+	case common.VPNOpSetSysctl:
 		s.handleSetSysctl(conn, req)
-	case opRestoreSysctl:
+	case common.VPNOpRestoreSysctl:
 		s.handleRestoreSysctl(conn, req)
-	case opAddMasquerade:
+	case common.VPNOpAddMasquerade:
 		s.handleAddMasquerade(conn, req)
-	case opDelMasquerade:
+	case common.VPNOpDelMasquerade:
 		s.handleDelMasquerade(conn, req)
-	case opAddForwardAccept:
+	case common.VPNOpAddForwardAccept:
 		s.handleAddForwardAccept(conn, req)
-	case opDelForwardAccept:
+	case common.VPNOpDelForwardAccept:
 		s.handleDelForwardAccept(conn, req)
-	case opAddForwardEstablished:
+	case common.VPNOpAddForwardEstablished:
 		s.handleAddForwardEstablished(conn, req)
-	case opDelForwardEstablished:
+	case common.VPNOpDelForwardEstablished:
 		s.handleDelForwardEstablished(conn, req)
 	default:
-		writeResponse(conn, rpcResponse{Error: fmt.Sprintf("unknown op %q", req.Op)}, -1)
+		writeResponse(conn, common.VPNHelperResponse{Error: fmt.Sprintf("unknown op %q", req.Op)}, -1)
 	}
 }
 
-func (s *Server) handleOpenTUN(conn *net.UnixConn, req rpcRequest) {
-	var args openTUNArgs
+func (s *Server) handleOpenTUN(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNOpenTUNArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -107,15 +107,15 @@ func (s *Server) handleOpenTUN(conn *net.UnixConn, req rpcRequest) {
 		return
 	}
 	ctrlErr := rawConn.Control(func(fd uintptr) {
-		writeResponse(conn, dataResponse(openTUNData{Iface: ifaceName}), int(fd))
+		writeResponse(conn, dataResponse(common.VPNOpenTUNData{Iface: ifaceName}), int(fd))
 	})
 	if ctrlErr != nil {
 		log.Debugf("deskconn-vpnd: open_tun: failed to access raw fd: %v", ctrlErr)
 	}
 }
 
-func (s *Server) handleConfigureTUN(conn *net.UnixConn, req rpcRequest) {
-	var args configureTUNArgs
+func (s *Server) handleConfigureTUN(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNConfigureTUNArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -125,11 +125,11 @@ func (s *Server) handleConfigureTUN(conn *net.UnixConn, req rpcRequest) {
 		writeResponse(conn, errResponse(err), -1)
 		return
 	}
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleAddHostRoute(conn *net.UnixConn, req rpcRequest) {
-	var args addHostRouteArgs
+func (s *Server) handleAddHostRoute(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNAddHostRouteArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -145,11 +145,11 @@ func (s *Server) handleAddHostRoute(conn *net.UnixConn, req rpcRequest) {
 			log.Debugf("deskconn-vpnd: failed to remove leftover host route to %s: %v", ip, err)
 		}
 	})
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleDelHostRoute(conn *net.UnixConn, req rpcRequest) {
-	var args delHostRouteArgs
+func (s *Server) handleDelHostRoute(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNDelHostRouteArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -160,11 +160,11 @@ func (s *Server) handleDelHostRoute(conn *net.UnixConn, req rpcRequest) {
 		return
 	}
 	s.undo.pop("host_route:" + args.IP)
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleReplaceDefaultRoute(conn *net.UnixConn, req rpcRequest) {
-	var args replaceDefaultRouteArgs
+func (s *Server) handleReplaceDefaultRoute(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNReplaceDefaultRouteArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -181,11 +181,11 @@ func (s *Server) handleReplaceDefaultRoute(conn *net.UnixConn, req rpcRequest) {
 			log.Debugf("deskconn-vpnd: failed to restore leftover default route: %v", err)
 		}
 	})
-	writeResponse(conn, dataResponse(replaceDefaultRouteData{Prev: prev}), -1)
+	writeResponse(conn, dataResponse(common.VPNReplaceDefaultRouteData{Prev: prev}), -1)
 }
 
-func (s *Server) handleRestoreDefaultRoute(conn *net.UnixConn, req rpcRequest) {
-	var args restoreDefaultRouteArgs
+func (s *Server) handleRestoreDefaultRoute(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNRestoreDefaultRouteArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -196,10 +196,10 @@ func (s *Server) handleRestoreDefaultRoute(conn *net.UnixConn, req rpcRequest) {
 		return
 	}
 	s.undo.pop("default_route")
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleBlockIPv6Default(conn *net.UnixConn, _ rpcRequest) {
+func (s *Server) handleBlockIPv6Default(conn *net.UnixConn, _ common.VPNHelperRequest) {
 	hadDefault, prev, err := BlockIPv6Default()
 	if err != nil {
 		writeResponse(conn, errResponse(err), -1)
@@ -210,11 +210,11 @@ func (s *Server) handleBlockIPv6Default(conn *net.UnixConn, _ rpcRequest) {
 			log.Debugf("deskconn-vpnd: failed to restore leftover ipv6 default route: %v", err)
 		}
 	})
-	writeResponse(conn, dataResponse(blockIPv6DefaultData{HadDefault: hadDefault, Prev: prev}), -1)
+	writeResponse(conn, dataResponse(common.VPNBlockIPv6DefaultData{HadDefault: hadDefault, Prev: prev}), -1)
 }
 
-func (s *Server) handleRestoreIPv6Default(conn *net.UnixConn, req rpcRequest) {
-	var args restoreIPv6DefaultArgs
+func (s *Server) handleRestoreIPv6Default(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNRestoreIPv6DefaultArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -225,11 +225,11 @@ func (s *Server) handleRestoreIPv6Default(conn *net.UnixConn, req rpcRequest) {
 		return
 	}
 	s.undo.pop("ipv6_block")
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleSetSysctl(conn *net.UnixConn, req rpcRequest) {
-	var args setSysctlArgs
+func (s *Server) handleSetSysctl(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNSetSysctlArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -246,11 +246,11 @@ func (s *Server) handleSetSysctl(conn *net.UnixConn, req rpcRequest) {
 			log.Debugf("deskconn-vpnd: failed to restore leftover sysctl %s: %v", key, err)
 		}
 	})
-	writeResponse(conn, dataResponse(setSysctlData{Previous: previous}), -1)
+	writeResponse(conn, dataResponse(common.VPNSetSysctlData{Previous: previous}), -1)
 }
 
-func (s *Server) handleRestoreSysctl(conn *net.UnixConn, req rpcRequest) {
-	var args setSysctlArgs
+func (s *Server) handleRestoreSysctl(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNSetSysctlArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -261,11 +261,11 @@ func (s *Server) handleRestoreSysctl(conn *net.UnixConn, req rpcRequest) {
 		return
 	}
 	s.undo.pop("sysctl:" + args.Key)
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleAddMasquerade(conn *net.UnixConn, req rpcRequest) {
-	var args masqueradeArgs
+func (s *Server) handleAddMasquerade(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNMasqueradeArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -281,11 +281,11 @@ func (s *Server) handleAddMasquerade(conn *net.UnixConn, req rpcRequest) {
 			log.Debugf("deskconn-vpnd: failed to remove leftover masquerade rule: %v", err)
 		}
 	})
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleDelMasquerade(conn *net.UnixConn, req rpcRequest) {
-	var args masqueradeArgs
+func (s *Server) handleDelMasquerade(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNMasqueradeArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -296,11 +296,11 @@ func (s *Server) handleDelMasquerade(conn *net.UnixConn, req rpcRequest) {
 		return
 	}
 	s.undo.pop("masquerade:" + args.Subnet + "|" + args.Oif)
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleAddForwardAccept(conn *net.UnixConn, req rpcRequest) {
-	var args forwardArgs
+func (s *Server) handleAddForwardAccept(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNForwardArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -316,11 +316,11 @@ func (s *Server) handleAddForwardAccept(conn *net.UnixConn, req rpcRequest) {
 			log.Debugf("deskconn-vpnd: failed to remove leftover forward-accept rule: %v", err)
 		}
 	})
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleDelForwardAccept(conn *net.UnixConn, req rpcRequest) {
-	var args forwardArgs
+func (s *Server) handleDelForwardAccept(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNForwardArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -331,11 +331,11 @@ func (s *Server) handleDelForwardAccept(conn *net.UnixConn, req rpcRequest) {
 		return
 	}
 	s.undo.pop("forward_accept:" + args.InIface + "|" + args.OutIface)
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleAddForwardEstablished(conn *net.UnixConn, req rpcRequest) {
-	var args forwardArgs
+func (s *Server) handleAddForwardEstablished(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNForwardArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -351,11 +351,11 @@ func (s *Server) handleAddForwardEstablished(conn *net.UnixConn, req rpcRequest)
 			log.Debugf("deskconn-vpnd: failed to remove leftover forward-established rule: %v", err)
 		}
 	})
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func (s *Server) handleDelForwardEstablished(conn *net.UnixConn, req rpcRequest) {
-	var args forwardArgs
+func (s *Server) handleDelForwardEstablished(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNForwardArgs
 	if err := json.Unmarshal(req.Args, &args); err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
@@ -366,26 +366,26 @@ func (s *Server) handleDelForwardEstablished(conn *net.UnixConn, req rpcRequest)
 		return
 	}
 	s.undo.pop("forward_established:" + args.InIface + "|" + args.OutIface)
-	writeResponse(conn, rpcResponse{OK: true}, -1)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 
-func errResponse(err error) rpcResponse {
-	return rpcResponse{Error: err.Error()}
+func errResponse(err error) common.VPNHelperResponse {
+	return common.VPNHelperResponse{Error: err.Error()}
 }
 
-func dataResponse(v any) rpcResponse {
+func dataResponse(v any) common.VPNHelperResponse {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return rpcResponse{Error: err.Error()}
+		return common.VPNHelperResponse{Error: err.Error()}
 	}
-	return rpcResponse{OK: true, Data: data}
+	return common.VPNHelperResponse{OK: true, Data: data}
 }
 
 // writeResponse sends resp as one datagram, attaching fd as SCM_RIGHTS
 // ancillary data when fd >= 0. Send errors are logged, not returned: if the
 // client already went away there's nothing the caller can do about it here,
 // and Serve's own next ReadMsgUnix will notice and return.
-func writeResponse(conn *net.UnixConn, resp rpcResponse, fd int) {
+func writeResponse(conn *net.UnixConn, resp common.VPNHelperResponse, fd int) {
 	if resp.Error != "" {
 		resp.OK = false
 	}

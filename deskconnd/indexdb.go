@@ -110,7 +110,7 @@ func (d *indexDB) isEntryUpToDate(path string, modTime time.Time, category strin
 func (d *indexDB) isPDFThumbnailsBackfilled() bool {
 	var done bool
 	_ = d.db.View(func(tx *bolt.Tx) error {
-		done = string(tx.Bucket([]byte(bucketMeta)).Get([]byte(metaKeyPDFThumbsBackfilled))) == "true"
+		done = string(tx.Bucket([]byte(bucketMeta)).Get([]byte(metaKeyPDFThumbsBackfilled))) == trueValue
 		return nil
 	})
 	return done
@@ -118,7 +118,7 @@ func (d *indexDB) isPDFThumbnailsBackfilled() bool {
 
 func (d *indexDB) markPDFThumbnailsBackfilled() error {
 	return d.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(bucketMeta)).Put([]byte(metaKeyPDFThumbsBackfilled), []byte("true"))
+		return tx.Bucket([]byte(bucketMeta)).Put([]byte(metaKeyPDFThumbsBackfilled), []byte(trueValue))
 	})
 }
 

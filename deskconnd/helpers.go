@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/iptun"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -203,7 +202,7 @@ func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
 			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 		}
 
-		helper, err := iptun.DialClient(helperSocket)
+		helper, err := common.DialVPNHelper(helperSocket)
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}

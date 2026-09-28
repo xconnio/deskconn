@@ -1,4 +1,4 @@
-package iptun
+package deskconn
 
 import (
 	"context"
@@ -20,7 +20,7 @@ const (
 	helperPollInterval = 200 * time.Millisecond
 )
 
-// LaunchHelper starts deskconn-vpnd under sudo -- prompting for a password
+// LaunchVPNHelper starts deskconn-vpnd under sudo -- prompting for a password
 // on this process's terminal, once per tunnel -- and waits for its socket
 // to come up. Connect to the returned path with DialClient, from this
 // process or (proxy mode) handed to deskconnd to dial instead; the helper
@@ -32,7 +32,7 @@ const (
 // detached helper has actually finished; that safety comes from awaited
 // RPCs before a caller closes its connection, not from this. Call wait
 // from a defer, after the tunnel is done.
-func LaunchHelper(ctx context.Context, cfgDirectory string) (socketPath string, wait func() error, err error) {
+func LaunchVPNHelper(ctx context.Context, cfgDirectory string) (socketPath string, wait func() error, err error) {
 	helperPath, err := findHelperBinary()
 	if err != nil {
 		return "", nil, err

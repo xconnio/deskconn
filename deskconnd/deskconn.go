@@ -10,7 +10,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/info"
 	"github.com/xconnio/wampproto-go"
 	"github.com/xconnio/xconn-go"
 )
@@ -28,8 +27,8 @@ type Deskconn struct {
 	printer              *Printer
 	indexer              *IndexService
 	wallpaper            *Wallpaper
-	processes            *info.ProcessMonitor
-	appRegistry          *info.AppRegistry
+	processes            *ProcessMonitor
+	appRegistry          *AppRegistry
 	desktop              bool
 	vpn                  *vpnServer
 }
@@ -44,8 +43,8 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment 
 		mpris:                mpris,
 		audio:                audio,
 		printer:              NewPrinter(),
-		processes:            info.NewProcessMonitor(),
-		appRegistry:          info.NewAppRegistry(),
+		processes:            NewProcessMonitor(),
+		appRegistry:          NewAppRegistry(),
 		desktop:              desktopEnvironment,
 		vpn:                  newVPNServer(),
 	}

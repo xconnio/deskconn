@@ -1,4 +1,4 @@
-package ai_test
+package deskconnd_test
 
 import (
 	"archive/tar"
@@ -11,7 +11,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/ai"
+	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/deskconnd"
 )
 
 // TestBuildAndExtractTarballRoundTrip also locks in the portability fix: the tarball is built
@@ -24,15 +26,15 @@ func TestBuildAndExtractTarballRoundTrip(t *testing.T) {
 	projectDir := filepath.Join(homeDir, ".claude", "projects", encodedProjectDir(homeDir, path))
 	writeFile(t, filepath.Join(projectDir, "session.jsonl"), []byte(`{"hello":"world"}`), time.Now())
 
-	sessions, err := ai.DiscoverClaudeSessions(homeDir, path)
+	sessions, err := common.DiscoverClaudeSessions(homeDir, path)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 
-	tarball, err := ai.BuildTarball(sessions)
+	tarball, err := deskconnd.BuildAITarball(sessions)
 	require.NoError(t, err)
 
 	restoreHome := t.TempDir()
-	count, err := ai.ExtractTarball(tarball, restoreHome, path)
+	count, err := deskconn.ExtractAITarball(tarball, restoreHome, path)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 
@@ -58,7 +60,7 @@ func TestExtractTarballRejectsPathTraversal(t *testing.T) {
 	require.NoError(t, gz.Close())
 
 	homeDir := t.TempDir()
-	_, err = ai.ExtractTarball(buf.Bytes(), homeDir, testProjectPath)
+	_, err = deskconn.ExtractAITarball(buf.Bytes(), homeDir, testProjectPath)
 	require.Error(t, err)
 
 	_, statErr := os.Stat(filepath.Join(filepath.Dir(homeDir), "etc", "passwd"))

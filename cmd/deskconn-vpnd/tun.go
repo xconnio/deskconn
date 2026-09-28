@@ -1,4 +1,4 @@
-package iptun
+package main
 
 import (
 	"fmt"

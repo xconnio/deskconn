@@ -1,4 +1,4 @@
-package ai
+package deskconn
 
 import (
 	"archive/tar"
@@ -9,54 +9,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/xconnio/deskconn/common"
 )
 
-// BuildTarball tars the given session files (by basename only - not by their on-disk path,
-// which is specific to this machine's home directory) into a gzip-compressed archive.
-// ExtractTarball re-derives the correct destination directory independently, using the
-// extracting machine's own home directory and the same project path.
-func BuildTarball(files []SessionFile) ([]byte, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-
-	for _, f := range files {
-		data, err := os.ReadFile(f.Path) //nolint:gosec
-		if err != nil {
-			return nil, fmt.Errorf("failed to read %s: %w", f.Path, err)
-		}
-		name := filepath.Base(f.Path)
-
-		if err := tw.WriteHeader(&tar.Header{
-			Name:    name,
-			Mode:    0600,
-			Size:    int64(len(data)),
-			ModTime: f.ModTime,
-		}); err != nil {
-			return nil, fmt.Errorf("failed to write tar header for %s: %w", name, err)
-		}
-		if _, err := tw.Write(data); err != nil {
-			return nil, fmt.Errorf("failed to write tar entry for %s: %w", name, err)
-		}
-	}
-
-	if err := tw.Close(); err != nil {
-		return nil, fmt.Errorf("failed to finalize tar archive: %w", err)
-	}
-	if err := gz.Close(); err != nil {
-		return nil, fmt.Errorf("failed to finalize gzip stream: %w", err)
-	}
-
-	return buf.Bytes(), nil
-}
-
-// ExtractTarball reverses BuildTarball, writing each entry into the Claude Code project
+// ExtractAITarball reverses BuildTarball, writing each entry into the Claude Code project
 // directory for path under homeDir - re-derived using this machine's own homeDir, so the same
 // project lands in the right place regardless of username or home directory location. Returns
 // the number of files written. Entries aren't plain filenames (e.g. contain a path separator or
 // "..") are rejected.
-func ExtractTarball(tarball []byte, homeDir, path string) (int, error) {
-	destDir := filepath.Join(homeDir, ".claude", "projects", claudeProjectDir(homeDir, path))
+func ExtractAITarball(tarball []byte, homeDir, path string) (int, error) {
+	destDir := filepath.Join(homeDir, ".claude", "projects", common.ClaudeProjectDir(homeDir, path))
 
 	gz, err := gzip.NewReader(bytes.NewReader(tarball))
 	if err != nil {

@@ -1,4 +1,4 @@
-package ai_test
+package deskconnd_test
 
 import (
 	"encoding/json"
@@ -10,7 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/ai"
+	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/deskconnd"
 )
 
 const (
@@ -42,7 +43,7 @@ func jsonLine(t *testing.T, fields map[string]any) []byte {
 
 func TestDiscoverClaudeSessionsMissingDirReturnsEmpty(t *testing.T) {
 	homeDir := t.TempDir()
-	sessions, err := ai.DiscoverClaudeSessions(homeDir, "/some/repo")
+	sessions, err := common.DiscoverClaudeSessions(homeDir, "/some/repo")
 	require.NoError(t, err)
 	require.Empty(t, sessions)
 }
@@ -59,12 +60,12 @@ func TestDiscoverClaudeSessionsFindsMatchingProjectSortedNewestFirst(t *testing.
 	otherDir := filepath.Join(homeDir, ".claude", "projects", encodedProjectDir(homeDir, "code/other"))
 	writeFile(t, filepath.Join(otherDir, "unrelated.jsonl"), []byte(`{}`), now)
 
-	sessions, err := ai.DiscoverClaudeSessions(homeDir, path)
+	sessions, err := common.DiscoverClaudeSessions(homeDir, path)
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
 	require.Equal(t, "newer.jsonl", filepath.Base(sessions[0].Path))
 	require.Equal(t, "older.jsonl", filepath.Base(sessions[1].Path))
-	require.Equal(t, ai.ToolClaude, sessions[0].Tool)
+	require.Equal(t, common.AIToolClaude, sessions[0].Tool)
 }
 
 func TestDiscoverClaudeSessionsIndependentOfHomeDir(t *testing.T) {
@@ -78,12 +79,12 @@ func TestDiscoverClaudeSessionsIndependentOfHomeDir(t *testing.T) {
 	dirB := filepath.Join(homeB, ".claude", "projects", encodedProjectDir(homeB, path))
 	writeFile(t, filepath.Join(dirB, "b.jsonl"), []byte(`{}`), time.Now())
 
-	sessionsA, err := ai.DiscoverClaudeSessions(homeA, path)
+	sessionsA, err := common.DiscoverClaudeSessions(homeA, path)
 	require.NoError(t, err)
 	require.Len(t, sessionsA, 1)
 	require.Equal(t, "a.jsonl", filepath.Base(sessionsA[0].Path))
 
-	sessionsB, err := ai.DiscoverClaudeSessions(homeB, path)
+	sessionsB, err := common.DiscoverClaudeSessions(homeB, path)
 	require.NoError(t, err)
 	require.Len(t, sessionsB, 1)
 	require.Equal(t, "b.jsonl", filepath.Base(sessionsB[0].Path))
@@ -102,7 +103,7 @@ func TestSessionTitleUsesSummaryLine(t *testing.T) {
 	})...)
 	require.NoError(t, os.WriteFile(path, buf, 0600))
 
-	require.Equal(t, "Fix the login bug", ai.SessionTitle(path))
+	require.Equal(t, "Fix the login bug", deskconnd.AISessionTitle(path))
 }
 
 func TestSessionTitleFallsBackToFirstUserMessage(t *testing.T) {
@@ -114,5 +115,5 @@ func TestSessionTitleFallsBackToFirstUserMessage(t *testing.T) {
 	})
 	require.NoError(t, os.WriteFile(path, buf, 0600))
 
-	require.Equal(t, "please refactor the parser", ai.SessionTitle(path))
+	require.Equal(t, "please refactor the parser", deskconnd.AISessionTitle(path))
 }

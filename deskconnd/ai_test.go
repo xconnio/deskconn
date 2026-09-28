@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/ai"
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
 	"github.com/xconnio/deskconn/deskconnd"
@@ -91,7 +90,7 @@ func TestAISessionListHandlerReturnsLocalSessions(t *testing.T) {
 	sessions, err := deskconn.CallAISessionList(caller, path)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
-	require.Equal(t, ai.ToolClaude, sessions[0].Tool)
+	require.Equal(t, common.AIToolClaude, sessions[0].Tool)
 	require.Equal(t, "abc", sessions[0].SessionID)
 	require.Equal(t, "Fix the login bug", sessions[0].Title)
 }
@@ -121,13 +120,13 @@ func TestAISessionPullHandlerReturnsBundle(t *testing.T) {
 	bundles, err := deskconn.CallAISessionPull(caller, path, "", "")
 	require.NoError(t, err)
 	require.Len(t, bundles, 1)
-	require.Equal(t, ai.ToolClaude, bundles[0].Tool)
+	require.Equal(t, common.AIToolClaude, bundles[0].Tool)
 
 	// Extracting onto a different "machine" (a different home directory, standing in for a
 	// different username) must still land under that machine's own correctly re-encoded
 	// project directory, not the source's.
 	restoreHome := t.TempDir()
-	count, err := ai.ExtractTarball(bundles[0].Tarball, restoreHome, path)
+	count, err := deskconn.ExtractAITarball(bundles[0].Tarball, restoreHome, path)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 
@@ -149,7 +148,7 @@ func TestAISessionPullHandlerFiltersBySessionIDPrefix(t *testing.T) {
 	require.Len(t, bundles, 1)
 
 	restoreHome := t.TempDir()
-	count, err := ai.ExtractTarball(bundles[0].Tarball, restoreHome, path)
+	count, err := deskconn.ExtractAITarball(bundles[0].Tarball, restoreHome, path)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 

@@ -323,7 +323,7 @@ func imageMimeTypeByExt(path string) string {
 		return "image/gif"
 	case common.ExtBmp:
 		return "image/bmp"
-	case ".svg":
+	case extSVG:
 		return "image/svg+xml"
 	default:
 		return "image/jpeg"
