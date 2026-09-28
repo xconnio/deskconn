@@ -47,7 +47,9 @@ func RegisterBridge(session *xconn.Session, appSession *xconn.Session) error {
 	return nil
 }
 
-func EnsureCredentials() (*common.Credentials, error) {
+// EnsureCredentials returns the device's cloud credentials, waiting for credentials.json
+// to appear (i.e. for the device to be attached) or for ctx to be done.
+func EnsureCredentials(ctx context.Context) (*common.Credentials, error) {
 	credFilePath, err := common.CredentialsFilePath()
 	if err != nil {
 		return nil, err
@@ -66,14 +68,19 @@ func EnsureCredentials() (*common.Credentials, error) {
 
 		log.Println("Waiting for credentials file...")
 
-		for event := range watcher.Events {
-			if event.Name != credFilePath {
-				continue
-			}
-
-			if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
-				log.Println("Desktop successfully attached to cloud")
-				break
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return nil, fmt.Errorf("credentials watcher closed")
+				}
+				if event.Name == credFilePath && event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+					log.Println("Desktop successfully attached to cloud")
+					break wait
+				}
 			}
 		}
 	}

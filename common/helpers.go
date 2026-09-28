@@ -88,13 +88,15 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 	return authid, privKey, nil
 }
 
-func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*xconn.QUICSession, error) {
-	if IsDirectRealm(realm) {
-		device, err := directDeviceByRealm(cfgDirectory, realm)
+// ConnectDeviceRealmQUIC connects to realm's device: over yamux for the standalone target
+// the CLI was pointed at (see SetStandaloneTarget), otherwise through the cloud over QUIC.
+func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*DeviceConn, error) {
+	if target, ok := StandaloneTargetFor(realm); ok {
+		authenticator, err := xconnauth.NewCryptoSignAuthenticator(target.AuthID, target.PrivateKey, nil)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid private key: %w", err)
 		}
-		return ConnectDirectQUIC(ctx, device, cfgDirectory)
+		return ConnectYamux(ctx, target.URL, realm, authenticator)
 	}
 
 	authid, privKey, err := ReadCredentials(cfgDirectory)
@@ -107,10 +109,14 @@ func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*x
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
 
-	return xconn.ConnectQUIC(ctx, CloudQUICAddress(), realm, &xconn.QUICDialerConfig{
+	sess, err := xconn.ConnectQUIC(ctx, CloudQUICAddress(), realm, &xconn.QUICDialerConfig{
 		Authenticator: authenticator,
 		TLSConfig:     CloudQUICTLSConfig(),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return NewQUICDeviceConn(sess), nil
 }
 
 func ConnectWebrtcSession(session *xconn.Session, realm, authid, privateKey string,

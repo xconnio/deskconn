@@ -13,7 +13,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/xconn-go"
 )
 
 // RunPortForward is the client entry point for `deskconn port forward`. It
@@ -59,7 +58,7 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 	}
 }
 
-func acceptPortForwardLoopQUIC(ctx context.Context, ln net.Listener, quicSess *xconn.QUICSession,
+func acceptPortForwardLoopQUIC(ctx context.Context, ln net.Listener, quicSess *common.DeviceConn,
 	realm, remotePort string) error {
 	common.SafeGo(func() {
 		<-ctx.Done()
@@ -78,7 +77,7 @@ func acceptPortForwardLoopQUIC(ctx context.Context, ln net.Listener, quicSess *x
 	}
 }
 
-func forwardOneConnectionQUIC(quicSess *xconn.QUICSession, realm string, localConn net.Conn, remotePort string) {
+func forwardOneConnectionQUIC(quicSess *common.DeviceConn, realm string, localConn net.Conn, remotePort string) {
 	stream, err := quicSess.OpenStream()
 	if err != nil {
 		_ = localConn.Close()

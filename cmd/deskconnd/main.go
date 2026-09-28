@@ -2,23 +2,35 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconnd"
+	"github.com/xconnio/deskconn/xlink"
 	"github.com/xconnio/xconn-go"
 )
 
 func main() {
+	app := kingpin.New("deskconnd", "Deskconn daemon: the device's APIs and its connectivity (xlink)")
+	standalone := app.Flag("standalone", "Serve this device directly on --url to --key holders, "+
+		"instead of through the cloud").Bool()
+	standaloneURL := app.Flag("url", "Where to listen in standalone mode: tcp://host:port or unix:///path").
+		Default("tcp://0.0.0.0:18080").String()
+	standaloneKeys := app.Flag("key", "Public key (hex) allowed to connect in standalone mode; repeat for more "+
+		"(see `deskconn keygen`)").Strings()
+	kingpin.MustParse(app.Parse(os.Args[1:]))
+	if *standalone && len(*standaloneKeys) == 0 {
+		app.Fatalf("--standalone needs at least one --key")
+	}
+
 	cfgDirectory, err := common.CfgDirectory()
 	if err != nil {
 		log.Fatal(err)
@@ -72,7 +84,66 @@ func main() {
 	defer streamListener.Close()
 	common.SafeGo(func() { deskconnApis.ServeStreamRelay(streamListener) })
 
-	common.SafeGo(func() { runXlinkSession(ctx, cfgDirectory, deskconnApis, clientSessions) })
+	// xlink runs in this process: its app layer serves deskconn.sock (the CLI's local
+	// realm), and deskconnd registers every app-layer and CLI-facing procedure on it
+	// through an in-memory session.
+	appRouter, appListener, appSession := xlink.StartAppLayer(cfgDirectory)
+	defer appRouter.Close()
+	defer appListener.Close()
+
+	session, err := xconn.ConnectInMemory(appRouter, common.LocalRealm)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := deskconnApis.Register(session); err != nil {
+		log.Fatalf("failed to register app-layer procedures: %v", err)
+	}
+	if err := registerLocalProcedures(session, deskconnApis, clientSessions, cfgDirectory); err != nil {
+		log.Fatalf("failed to register CLI-facing procedures: %v", err)
+	}
+	log.Println("registered procedures with xlink")
+
+	xlinkDone := make(chan struct{})
+	common.SafeGo(func() {
+		defer close(xlinkDone)
+		if !*standalone {
+			xlink.Run(ctx, cfgDirectory, appSession)
+			return
+		}
+
+		// Standalone: serve the device realm on --url over yamux to --key holders, with no
+		// cloud account. Raw streams and WebRTC data channels are relayed to streamSockPath.
+		router := xlink.NewDeviceRouter(common.StandaloneRealm)
+		defer router.Close()
+		authenticator := xlink.NewKeyAuthenticator(*standaloneKeys)
+		listener, err := common.ListenYamux(*standaloneURL, router, authenticator)
+		if err != nil {
+			log.Fatalf("standalone: %v", err)
+		}
+		defer listener.Close()
+
+		localSession, err := xconn.ConnectInMemory(router, common.StandaloneRealm)
+		if err != nil {
+			log.Fatalf("standalone: %v", err)
+		}
+		if err := xlink.RegisterBridge(localSession, appSession); err != nil {
+			log.Fatalf("standalone: %v", err)
+		}
+		if err := xlink.SetupWebRTC(localSession, router, authenticator, streamSockPath); err != nil {
+			log.Fatalf("standalone: %v", err)
+		}
+		log.Printf("standalone mode: serving realm %s on %s (%s), %d key(s) authorized",
+			common.StandaloneRealm, *standaloneURL, listener.Addr(), len(*standaloneKeys))
+
+		for {
+			select {
+			case stream := <-listener.Streams():
+				common.SafeGo(func() { xlink.RelayQUICStream(stream.Conn, streamSockPath) })
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -80,6 +151,7 @@ func main() {
 	<-sigChan
 
 	cancel()
+	<-xlinkDone
 }
 
 // registerLocalProcedures registers the CLI-facing procedures on session.
@@ -136,59 +208,4 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Des
 		}
 	}
 	return nil
-}
-
-// runXlinkSession keeps a session on xlink's local realm alive, registering
-// every app-layer and CLI-facing procedure on it, reconnecting on failure.
-func runXlinkSession(ctx context.Context, cfgDirectory string, deskconnApis *deskconnd.Deskconn,
-	clientSessions *deskconnd.ClientSessions) {
-	retryDelay := 1 * time.Second
-	maxDelay := 30 * time.Second
-
-	localSockPath := filepath.Join(cfgDirectory, "deskconn.sock")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		session, err := xconn.ConnectAnonymous(ctx, fmt.Sprintf("unix://%s", localSockPath), common.LocalRealm)
-		if err != nil {
-			log.Printf("xlink session: failed to connect to xlink, will retry in %v: %v", retryDelay, err)
-			retryDelay = min(retryDelay*2, maxDelay)
-			time.Sleep(retryDelay)
-			continue
-		}
-
-		if err := deskconnApis.Register(session); err != nil {
-			log.Printf("xlink session: failed to register app-layer procedures, will retry in %v: %v",
-				retryDelay, err)
-			_ = session.Leave()
-			retryDelay = min(retryDelay*2, maxDelay)
-			time.Sleep(retryDelay)
-			continue
-		}
-
-		if err := registerLocalProcedures(session, deskconnApis, clientSessions, cfgDirectory); err != nil {
-			log.Printf("xlink session: failed to register CLI-facing procedures, will retry in %v: %v",
-				retryDelay, err)
-			_ = session.Leave()
-			retryDelay = min(retryDelay*2, maxDelay)
-			time.Sleep(retryDelay)
-			continue
-		}
-
-		log.Println("xlink session: registered procedures with xlink")
-		retryDelay = 1 * time.Second
-
-		select {
-		case <-session.Done():
-			log.Println("xlink session: disconnected from xlink, retrying...")
-		case <-ctx.Done():
-			_ = session.Leave()
-			return
-		}
-	}
 }

@@ -260,13 +260,7 @@ func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirect
 
 // upgradeToWebRTC negotiates a WebRTC session using quicSess for signaling. On success, it atomically
 // replaces the stored session, closes the QUIC connection, starts the reconnect loop.
-func (c *ClientSessions) upgradeToWebRTC(quicSess *xconn.QUICSession, realm, cfgDirectory string) {
-	// A direct device's QUIC connection is already peer to peer: nothing to upgrade.
-	if common.IsDirectRealm(realm) {
-		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
-		return
-	}
-
+func (c *ClientSessions) upgradeToWebRTC(quicSess *common.DeviceConn, realm, cfgDirectory string) {
 	authid, privKey, err := common.ReadCredentials(cfgDirectory)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)

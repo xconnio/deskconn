@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
+	wampauth "github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 	"github.com/xconnio/xconn-go/auth"
 )
@@ -100,6 +102,15 @@ func main() {
 
 	versionString := fmt.Sprintf("deskconn %s", version)
 	app := kingpin.New("deskconn", "Deskconn control CLI")
+	standaloneURL := app.Flag("url", "Connect directly to a standalone deskconnd at this URL "+
+		"(tcp://host:port or unix:///path) instead of a device on your account").Envar("DESKCONN_URL").String()
+	standaloneKey := app.Flag("private-key", "Private key (hex) to authenticate with --url; see `deskconn keygen`").
+		Envar("DESKCONN_PRIVATE_KEY").String()
+	standaloneAuthID := app.Flag("authid", "Authid to present with --url (default: current user)").
+		Envar("DESKCONN_AUTHID").String()
+
+	keygenCmd := app.Command("keygen", "Generate a key pair for standalone devices "+
+		"(public key for deskconnd --key, private key for --private-key)")
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
@@ -119,18 +130,14 @@ func main() {
 	lsFileCmd := fileCmd.Command("ls", "List files on a device")
 	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
-	lsFileModeFlag := lsFileCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	lsFileModeFlag := modeFlag(lsFileCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
 	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
-	mvModeFlag := mvCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	mvModeFlag := modeFlag(mvCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
 	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().
@@ -138,51 +145,38 @@ func main() {
 	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
-	cpModeFlag := cpCmd.Flag("mode",
+	cpModeFlag := modeFlag(cpCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC "+
-			"(default: try p2p, fall back to quic)",
-	).Enum(ModeQUIC, ModeP2P)
+			"(default: try p2p, fall back to quic)")
 	cpStreams := cpCmd.Flag("streams", "Number of parallel streams to use for the transfer (default 4)").
 		Short('s').Int()
 
 	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
 	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
-	rmModeFlag := rmCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	rmModeFlag := modeFlag(rmCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	catCmd := fileCmd.Command("cat", "Print the contents of a file on a device")
 	catTarget := catCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
-	catModeFlag := catCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	catModeFlag := modeFlag(catCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	editCmd := fileCmd.Command("edit", "Edit a text file on a device with $EDITOR and send only the diff")
 	editTarget := editCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
-	editModeFlag := editCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	editModeFlag := modeFlag(editCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	shellCmd := app.Command("shell", "Start interactive shell")
-	shellDeviceName := shellCmd.Arg("device", "ID, name or alias of device to shell").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
-	shellModeFlag := shellCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	shellDeviceName := deviceArg(shellCmd, "device", "ID, name or alias of device to shell", cfgDirectory)
+	shellModeFlag := modeFlag(shellCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 	shellForwardAgent := shellCmd.Flag("agent-forward",
 		"Forward the local SSH agent to the remote shell (like ssh -A). Only use with hosts you trust.",
 	).Short('A').Bool()
 
 	execCmd := app.Command("exec", "Run a command")
-	execDeviceName := execCmd.Arg("device", "ID, name or alias of device to run command").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	execDeviceName := deviceArg(execCmd, "device", "ID, name or alias of device to run command", cfgDirectory)
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
-	execModeFlag := execCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	execModeFlag := modeFlag(execCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	printCmd := app.Command("print", "Print operations")
 	printEnableFlag := printCmd.Flag("enable", "Enable receiving print jobs on this desktop").Bool()
@@ -195,46 +189,37 @@ func main() {
 	printTarget := printCmd.Arg("target", "Device and printer as machine:printer (e.g. m1:HP_LaserJet)").
 		HintAction(devicePathCompletions(cfgDirectory)).String()
 	printFilePath := printCmd.Arg("file_path", "Local file path").String()
-	printModeFlag := printCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	printModeFlag := modeFlag(printCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
-	portForwardDevice := portForwardCmd.Arg("device", "ID, name or alias of device").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	portForwardDevice := deviceArg(portForwardCmd, "device", "ID, name or alias of device", cfgDirectory)
 	portForwardPorts := portForwardCmd.Arg("ports", "Port mapping as localport:remoteport").String()
 	portForwardLocalFlag := portForwardCmd.Flag("local", "Local port to listen on").Short('l').String()
 	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote device to connect to").Short('r').String()
-	portForwardModeFlag := portForwardCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	portForwardModeFlag := modeFlag(portForwardCmd,
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	portReverseCmd := portCmd.Command("reverse", "Reverse-forward a remote port to a local port")
-	portReverseDevice := portReverseCmd.Arg("device", "ID, name or alias of device").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	portReverseDevice := deviceArg(portReverseCmd, "device", "ID, name or alias of device", cfgDirectory)
 	portReversePorts := portReverseCmd.Arg("ports", "Port mapping as remoteport:localport").String()
 	portReverseRemoteFlag := portReverseCmd.Flag("remote", "Port on the remote device to listen on").Short('r').String()
 	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
-	portReverseModeFlag := portReverseCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	portReverseModeFlag := modeFlag(portReverseCmd,
+		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	vpnCmd := app.Command("vpn", "Route internet traffic through a remote device, or serve as one")
 	vpnConnectCmd := vpnCmd.Command("connect", "Connect to a device and tunnel all traffic through it")
-	vpnConnectDevice := vpnConnectCmd.Arg("device", "ID, name or alias of device").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	vpnConnectDevice := deviceArg(vpnConnectCmd, "device", "ID, name or alias of device", cfgDirectory)
 	vpnStartCmd := vpnCmd.Command("start", "Let other devices route their traffic through this machine")
 	vpnStopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
 
 	pingCmd := app.Command("ping", "Ping a device and measure round-trip time")
-	pingDevice := pingCmd.Arg("device", "ID, name or alias of device").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	pingDevice := deviceArg(pingCmd, "device", "ID, name or alias of device", cfgDirectory)
 	pingCount := pingCmd.Flag("count", "Number of pings to send (0 = infinite)").Short('c').Default("0").Int()
 
 	connectCmd := app.Command("connect", "Establish a persistent connection to a device")
-	connectDevice := connectCmd.Arg("device", "ID, name or alias of device").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	connectDevice := deviceArg(connectCmd, "device", "ID, name or alias of device", cfgDirectory)
 
 	disconnectCmd := app.Command("disconnect", "Disconnect a persistent connection")
 	disconnectDevice := disconnectCmd.Arg("device", "ID, name or alias of device").
@@ -244,17 +229,6 @@ func main() {
 	lsCmd := app.Command("ls", "List devices")
 	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
 	lsDetailedFlag := lsCmd.Flag("detailed", "Show detailed output").Bool()
-
-	deviceCmd := app.Command("device", "Manage standalone devices reached directly, without the cloud")
-	deviceAddCmd := deviceCmd.Command("add", "Add a standalone device")
-	deviceAddName := deviceAddCmd.Arg("name", "Name for the device").Required().String()
-	deviceAddAddress := deviceAddCmd.Arg("address", "host[:port] of the device").Required().String()
-	deviceAddFingerprint := deviceAddCmd.Flag("fingerprint",
-		"Certificate fingerprint printed by the device's xlink").Required().String()
-	deviceRemoveCmd := deviceCmd.Command("remove", "Remove a standalone device")
-	deviceRemoveName := deviceRemoveCmd.Arg("name", "Name or alias of the device").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
-	deviceKeyCmd := deviceCmd.Command("key", "Show this machine's key to authorize on standalone devices")
 
 	whoamiCMD := app.Command("whoami", "Show current user")
 
@@ -272,24 +246,18 @@ func main() {
 	configEdit := configCmd.Command("edit", "Edit full config")
 
 	infoCmd := app.Command("info", "Show device resource usage")
-	infoDevice := infoCmd.Arg("device", "ID, name or alias of device").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
-	infoModeFlag := infoCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	infoDevice := deviceArg(infoCmd, "device", "ID, name or alias of device", cfgDirectory)
+	infoModeFlag := modeFlag(infoCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	logsCmd := app.Command("logs", "Stream logs from a device")
-	logsDevice := logsCmd.Arg("device", "ID, name or alias of device").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	logsDevice := deviceArg(logsCmd, "device", "ID, name or alias of device", cfgDirectory)
 	logsSource := logsCmd.Arg("source",
 		"Service name (e.g. nginx) or file path (e.g. /var/log/syslog); omit for system journal").String()
 	logsFollow := logsCmd.Flag("follow", "Follow log output").Short('f').Bool()
 	logsTail := logsCmd.Flag("tail", "Number of lines to show from the end (-1 = default)").Short('n').
 		Default("-1").Int64()
 	logsSince := logsCmd.Flag("since", "Show entries since duration ago (e.g. 1h, 30m)").String()
-	logsModeFlag := logsCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC",
-	).Enum(ModeQUIC, ModeP2P)
+	logsModeFlag := modeFlag(logsCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	screenshotCmd := app.Command("screenshot", "Screenshot settings")
 	screenshotEnableCmd := screenshotCmd.Command("enable", "Allow remote screenshot access")
@@ -320,9 +288,42 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *standaloneURL != "" {
+		if _, _, err := common.ParseYamuxURL(*standaloneURL); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if *standaloneKey == "" {
+			fmt.Fprintln(os.Stderr, "--url needs --private-key (or DESKCONN_PRIVATE_KEY); see `deskconn keygen`")
+			os.Exit(1)
+		}
+		if *standaloneAuthID == "" {
+			*standaloneAuthID = "deskconn"
+			if u, err := user.Current(); err == nil && u.Username != "" {
+				*standaloneAuthID = u.Username
+			}
+		}
+		common.SetStandaloneTarget(&common.StandaloneTarget{URL: *standaloneURL, AuthID: *standaloneAuthID,
+			PrivateKey: *standaloneKey})
+		switch parsedCmd {
+		case pingCmd.FullCommand(), connectCmd.FullCommand(), disconnectCmd.FullCommand(), lsCmd.FullCommand():
+			fmt.Fprintf(os.Stderr, "%s is not available with --url (it works on devices of your account)\n",
+				parsedCmd)
+			os.Exit(1)
+		}
+	}
+
 	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
 
 	switch parsedCmd {
+	case keygenCmd.FullCommand():
+		publicKey, privateKey, err := wampauth.GenerateCryptoSignKeyPair()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		fmt.Printf("public key:  %s\nprivate key: %s\n", publicKey, privateKey)
+
 	case selfVersionCmd.FullCommand():
 		fmt.Println(versionString)
 
@@ -1075,24 +1076,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
-	case deviceAddCmd.FullCommand():
-		if err := addDirectDevice(cfgDirectory, *deviceAddName, *deviceAddAddress, *deviceAddFingerprint); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-
-	case deviceRemoveCmd.FullCommand():
-		if err := deskconn.RemoveDirectDevice(cfgDirectory, *deviceRemoveName); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-
-	case deviceKeyCmd.FullCommand():
-		authid, publicKey, _, err := common.EnsureDirectKey(cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		fmt.Printf("%s:%s\n", authid, publicKey)
-
 	case whoamiCMD.FullCommand():
 		path := filepath.Join(cfgDirectory, "id_ed25519.pub")
 
@@ -1539,17 +1522,46 @@ func updateApp() error {
 		return err
 	}
 
-	for _, service := range []string{"xlink", "deskconnd"} {
-		fmt.Printf("Restarting %s service...\n", service)
-		cmd := exec.Command("systemctl", "--user", "restart", service)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to restart %s: %w", service, err)
-		}
+	if err := removeLegacyXlinkService(); err != nil {
+		return err
+	}
+
+	fmt.Println("Restarting deskconnd service...")
+	cmd := exec.Command("systemctl", "--user", "restart", "deskconnd")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to restart deskconnd: %w", err)
 	}
 
 	fmt.Printf("Updated deskconn from version %s to %s.\n", version, updateResp.LatestVersion)
+	return nil
+}
+
+// removeLegacyXlinkService stops and removes the separate xlink service and binary that
+// installs before deskconnd embedded xlink had; left running, it would compete with
+// deskconnd for deskconn.sock.
+func removeLegacyXlinkService() error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
+	serviceFile := filepath.Join(homeDir, ".config", "systemd", "user", "xlink.service")
+	if _, err := os.Stat(serviceFile); err == nil {
+		fmt.Println("Removing the old xlink service (now part of deskconnd)...")
+		_ = exec.Command("systemctl", "--user", "stop", "xlink").Run()    // nolint: gosec
+		_ = exec.Command("systemctl", "--user", "disable", "xlink").Run() // nolint: gosec
+		if err := os.Remove(serviceFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove xlink service file: %w", err)
+		}
+		_ = exec.Command("systemctl", "--user", "daemon-reload").Run() // nolint: gosec
+	}
+
+	xlinkBin := filepath.Join(homeDir, ".local", "lib", "exec", "xlink")
+	if err := os.Remove(xlinkBin); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove %s: %w", xlinkBin, err)
+	}
 	return nil
 }
 
@@ -1730,6 +1742,10 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		return fmt.Errorf("failed to get user home dir: %w", err)
 	}
 
+	if err := removeLegacyXlinkService(); err != nil {
+		return err
+	}
+
 	const serviceName = "deskconnd"
 	serviceFile := filepath.Join(homeDir, ".config", "systemd", "user", serviceName+".service")
 
@@ -1847,7 +1863,6 @@ func downloadAndInstallUpdate(downloadURL string) error {
 	}
 
 	foundDeskconn := false
-	foundXlink := false
 	foundDeskconnd := false
 	foundDeskconnVpnd := false
 
@@ -1885,12 +1900,6 @@ func downloadAndInstallUpdate(downloadURL string) error {
 				}
 			}
 			foundDeskconn = true
-		case "xlink":
-			fmt.Println("Installing xlink...")
-			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "xlink"), 0700); err != nil {
-				return err
-			}
-			foundXlink = true
 		case "deskconnd":
 			fmt.Println("Installing deskconnd...")
 			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "deskconnd"), 0700); err != nil {
@@ -1908,7 +1917,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		}
 	}
 
-	if !foundDeskconn || !foundXlink || !foundDeskconnd || !foundDeskconnVpnd {
+	if !foundDeskconn || !foundDeskconnd || !foundDeskconnVpnd {
 		return fmt.Errorf("update archive missing required binaries")
 	}
 
@@ -2195,32 +2204,47 @@ func logout(cfgDirectory string) error {
 	return deskconn.RemoveCredentialsFiles(cfgDirectory)
 }
 
-// addDirectDevice saves a standalone device after checking it is reachable with the
-// pinned fingerprint and that it accepts this machine's direct key.
-func addDirectDevice(cfgDirectory, name, address, fingerprint string) error {
-	device := common.Device{
-		Name:        name,
-		Realm:       common.DirectRealmPrefix + name,
-		Address:     deskconn.NormalizeDirectAddress(address),
-		Fingerprint: fingerprint,
+// standaloneRequested reports whether the CLI is pointed at a standalone device (--url or
+// DESKCONN_URL). It has to be known before the command line is parsed: device arguments
+// aren't defined then.
+func standaloneRequested() bool {
+	if os.Getenv("DESKCONN_URL") != "" {
+		return true
 	}
+	for _, arg := range os.Args[1:] {
+		if arg == "--" {
+			break
+		}
+		if arg == "--url" || strings.HasPrefix(arg, "--url=") {
+			return true
+		}
+	}
+	return false
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	sess, err := common.ConnectDirectQUIC(ctx, device, cfgDirectory)
-	if err != nil {
-		return fmt.Errorf("failed to connect to %s: %w", device.Address, err)
+// deviceArg defines cmd's device argument. With --url there is only one device, so the
+// argument isn't defined at all and the result is empty.
+func deviceArg(cmd *kingpin.CmdClause, name, help, cfgDirectory string) *string {
+	if standaloneRequested() {
+		return new(string)
 	}
-	_ = sess.Connection().Close()
+	return cmd.Arg(name, help).Required().HintAction(deviceCompletions(cfgDirectory)).String()
+}
 
-	if err := deskconn.AddDirectDevice(cfgDirectory, device); err != nil {
-		return err
+// modeFlag defines cmd's --mode flag. With --url it defaults to a direct connection: the
+// local daemon that some commands go through by default doesn't know the standalone device.
+func modeFlag(cmd *kingpin.CmdClause, help string) *string {
+	flag := cmd.Flag("mode", help)
+	if standaloneRequested() {
+		flag = flag.Default(ModeQUIC)
 	}
-	fmt.Printf("added %s (%s)\n", name, device.Address)
-	return nil
+	return flag.Enum(ModeQUIC, ModeP2P)
 }
 
 func deviceRealm(deviceName, cfgDirectory string) (string, error) {
+	if standaloneRequested() {
+		return common.StandaloneRealm, nil
+	}
 	devices, err := common.DevicesFromCfg(cfgDirectory)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

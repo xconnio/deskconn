@@ -182,12 +182,7 @@ func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory strin
 		return nil, err
 	}
 
-	// The WAMP session over WebRTC joins the realm the device actually serves.
-	sessionRealm := realm
-	if common.IsDirectRealm(realm) {
-		sessionRealm = common.StandaloneRealm
-	}
-	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, sessionRealm, authid, privKey, func() {})
+	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, realm, authid, privKey, func() {})
 	quicSess.Connection().Close()
 	if err != nil {
 		return nil, err
@@ -238,20 +233,8 @@ func fetchDevices(session *xconn.Session) ([]common.Device, error) {
 	return devices, nil
 }
 
-// CacheDevices replaces the cloud devices in config.yml, keeping direct devices.
+// CacheDevices replaces the devices in config.yml, keeping its other sections.
 func CacheDevices(cfgDirectory string, devices []common.Device) error {
-	return updateDevices(cfgDirectory, func(existing []common.Device) ([]common.Device, error) {
-		for _, d := range existing {
-			if d.Address != "" {
-				devices = append(devices, d)
-			}
-		}
-		return devices, nil
-	})
-}
-
-// updateDevices rewrites the devices in config.yml with update, keeping its other sections.
-func updateDevices(cfgDirectory string, update func([]common.Device) ([]common.Device, error)) error {
 	cfgPath := filepath.Join(cfgDirectory, "config.yml")
 
 	var config common.Config
@@ -263,9 +246,7 @@ func updateDevices(cfgDirectory string, update func([]common.Device) ([]common.D
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	if config.Devices, err = update(config.Devices); err != nil {
-		return err
-	}
+	config.Devices = devices
 	b, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
@@ -284,4 +265,14 @@ func CallFileOp(deviceSession *xconn.Session, procedure string, payload []byte) 
 	}
 
 	return common.EncryptedCall(deviceSession, procedure, payload, enc)
+}
+
+// clientCredentials returns the authid and private key this machine uses on realm's
+// device: the ones given for the standalone target (deskconn --url), otherwise the
+// cloud login's.
+func clientCredentials(realm, cfgDirectory string) (string, string, error) {
+	if target, ok := common.StandaloneTargetFor(realm); ok {
+		return target.AuthID, target.PrivateKey, nil
+	}
+	return common.ReadCredentials(cfgDirectory)
 }
