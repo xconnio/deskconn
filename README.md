@@ -102,18 +102,18 @@ work the same way.
 
 ```bash
 deskconn keygen
-# public key:  65160c38…
-# private key: 9f2d0b17…
+# Public Key:  65160c38…
+# Private Key: 9f2d0b17…
 ```
 
 ### 2. Start deskconnd in standalone mode on the device
 
 ```bash
-deskconnd --standalone --url tcp://0.0.0.0:18080 --key 65160c38… [--key <another public key> ...]
+deskconnd --standalone --url tcp://0.0.0.0:18080 --public-key 65160c38… [--public-key <another public key> ...]
 ```
 
 `--url` is `tcp://host:port` or `unix:///path/to.sock` (default `tcp://0.0.0.0:18080`). Clients holding one of the
-`--key`s can connect, whatever authid they present. To run it as the service, put the flags on `ExecStart` with
+`--public-key`s can connect, whatever authid they present. To run it as the service, put the flags on `ExecStart` with
 `systemctl --user edit deskconnd`.
 
 ### 3. Connect from the client
@@ -152,7 +152,7 @@ deskconn ping <device> [--count N]
 Standalone devices (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
-deskconn keygen                                        # key pair: public for deskconnd --key, private for --private-key
+deskconn keygen                                        # key pair: public for deskconnd --public-key, private for --private-key
 deskconn --url <tcp://host:port> --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_PRIVATE_KEY
 ```
 

@@ -20,15 +20,15 @@ import (
 
 func main() {
 	app := kingpin.New("deskconnd", "Deskconn daemon: the device's APIs and its connectivity (xlink)")
-	standalone := app.Flag("standalone", "Serve this device directly on --url to --key holders, "+
+	standalone := app.Flag("standalone", "Serve this device directly on --url to --public-key holders, "+
 		"instead of through the cloud").Bool()
 	standaloneURL := app.Flag("url", "Where to listen in standalone mode: tcp://host:port or unix:///path").
 		Default("tcp://0.0.0.0:18080").String()
-	standaloneKeys := app.Flag("key", "Public key (hex) allowed to connect in standalone mode; repeat for more "+
+	standaloneKeys := app.Flag("public-key", "Public key (hex) allowed to connect in standalone mode; repeat for more "+
 		"(see `deskconn keygen`)").Strings()
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 	if *standalone && len(*standaloneKeys) == 0 {
-		app.Fatalf("--standalone needs at least one --key")
+		app.Fatalf("--standalone needs at least one --public-key")
 	}
 
 	cfgDirectory, err := common.CfgDirectory()
@@ -111,7 +111,7 @@ func main() {
 			return
 		}
 
-		// Standalone: serve the device realm on --url over yamux to --key holders, with no
+		// Standalone: serve the device realm on --url over yamux to --public-key holders, with no
 		// cloud account. Raw streams and WebRTC data channels are relayed to streamSockPath.
 		router := xlink.NewDeviceRouter(common.StandaloneRealm)
 		defer router.Close()

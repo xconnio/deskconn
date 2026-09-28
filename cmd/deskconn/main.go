@@ -110,7 +110,7 @@ func main() {
 		Envar("DESKCONN_AUTHID").String()
 
 	keygenCmd := app.Command("keygen", "Generate a key pair for standalone devices "+
-		"(public key for deskconnd --key, private key for --private-key)")
+		"(public key for deskconnd --public-key, private key for --private-key)")
 
 	attachCmd := app.Command("attach", "Attach a device")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
@@ -322,7 +322,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		fmt.Printf("public key:  %s\nprivate key: %s\n", publicKey, privateKey)
+		fmt.Printf("Public Key:  %s\nPrivate Key: %s\n", publicKey, privateKey)
 
 	case selfVersionCmd.FullCommand():
 		fmt.Println(versionString)
