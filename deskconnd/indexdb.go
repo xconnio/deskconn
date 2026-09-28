@@ -19,6 +19,7 @@ const (
 	bucketMeta       = "meta"
 
 	metaKeyPDFThumbsBackfilled = "pdf_thumbs_backfilled"
+	metaKeyThumbnailDim        = "thumbnail_dim"
 )
 
 type indexDB struct {
@@ -119,6 +120,21 @@ func (d *indexDB) isPDFThumbnailsBackfilled() bool {
 func (d *indexDB) markPDFThumbnailsBackfilled() error {
 	return d.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte(bucketMeta)).Put([]byte(metaKeyPDFThumbsBackfilled), []byte(trueValue))
+	})
+}
+
+func (d *indexDB) thumbnailDim() string {
+	var dim string
+	_ = d.db.View(func(tx *bolt.Tx) error {
+		dim = string(tx.Bucket([]byte(bucketMeta)).Get([]byte(metaKeyThumbnailDim)))
+		return nil
+	})
+	return dim
+}
+
+func (d *indexDB) setThumbnailDim(dim string) error {
+	return d.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte(bucketMeta)).Put([]byte(metaKeyThumbnailDim), []byte(dim))
 	})
 }
 

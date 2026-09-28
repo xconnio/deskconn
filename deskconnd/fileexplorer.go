@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
@@ -277,7 +278,7 @@ func fileTypeFromInfo(info os.FileInfo) string {
 }
 
 const maxThumbnailSourceSize = 20 * 1024 * 1024 // 20 MB
-const thumbnailMaxDim = 160
+const thumbnailMaxDim = 480
 
 func isImageFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
@@ -316,7 +317,7 @@ func generateThumbnail(path string) string {
 	thumb := scaledImage(src, thumbnailMaxDim)
 
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: 75}); err != nil {
+	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: 85}); err != nil {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(buf.Bytes())
@@ -390,10 +391,21 @@ func scaledImage(src image.Image, maxDim int) image.Image {
 		dstH = 1
 	}
 
+	const samples = 4
 	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
 	for y := 0; y < dstH; y++ {
 		for x := 0; x < dstW; x++ {
-			dst.Set(x, y, src.At(b.Min.X+x*srcW/dstW, b.Min.Y+y*srcH/dstH))
+			var r, g, bl, a uint32
+			for sy := 0; sy < samples; sy++ {
+				py := b.Min.Y + (y*samples+sy)*srcH/(dstH*samples)
+				for sx := 0; sx < samples; sx++ {
+					px := b.Min.X + (x*samples+sx)*srcW/(dstW*samples)
+					cr, cg, cb, ca := src.At(px, py).RGBA()
+					r, g, bl, a = r+cr, g+cg, bl+cb, a+ca
+				}
+			}
+			n := uint32(samples * samples)
+			dst.SetRGBA(x, y, color.RGBA{uint8(r / n >> 8), uint8(g / n >> 8), uint8(bl / n >> 8), uint8(a / n >> 8)})
 		}
 	}
 	return dst
