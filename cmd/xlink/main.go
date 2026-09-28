@@ -18,7 +18,7 @@ func main() {
 	app := kingpin.New("xlink", "Serve the xlink device router on a URL to clients holding the given keys")
 	rawURL := app.Flag("url", "Where to listen: ws://host:port/path, rs://host:port, "+
 		"unix:///path/to.sock or unix+ws:///path/to.sock").Required().String()
-	keys := app.Flag("key", "Public key (hex) allowed to connect; repeat for more").Required().Strings()
+	keys := app.Flag("public-key", "Public key (hex) allowed to connect; repeat for more").Required().Strings()
 	realm := app.Flag("realm", "Realm to serve").Default(common.StandaloneRealm).String()
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
