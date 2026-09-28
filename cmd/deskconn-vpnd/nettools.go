@@ -1,10 +1,12 @@
-package iptun
+package main
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/xconnio/deskconn/common"
 )
 
 // runNetCmd runs a privileged network configuration command (ip/iptables)
@@ -16,53 +18,6 @@ func runNetCmd(name string, args ...string) error {
 		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-// DefaultRoute describes an IPv4 or IPv6 default route as reported by
-// "ip route show default". Gateway is empty for an on-link (gateway-less)
-// default route.
-type DefaultRoute struct {
-	Iface   string
-	Gateway string
-}
-
-// GetDefaultRoute returns the current default route for the given IP
-// version (4 or 6), taking the first entry if more than one is present.
-func GetDefaultRoute(ipVersion int) (*DefaultRoute, error) {
-	flag := "-4"
-	if ipVersion == 6 {
-		flag = "-6"
-	}
-
-	out, err := exec.Command("ip", flag, "route", "show", "default").Output()
-	if err != nil {
-		return nil, fmt.Errorf("ip %s route show default: %w", flag, err)
-	}
-
-	line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
-	if line == "" {
-		return nil, fmt.Errorf("no ipv%d default route found", ipVersion)
-	}
-
-	route := &DefaultRoute{}
-	fields := strings.Fields(line)
-	for i, f := range fields {
-		switch f {
-		case "via":
-			if i+1 < len(fields) {
-				route.Gateway = fields[i+1]
-			}
-		case "dev":
-			if i+1 < len(fields) {
-				route.Iface = fields[i+1]
-			}
-		}
-	}
-	if route.Iface == "" {
-		return nil, fmt.Errorf("could not parse default route: %q", line)
-	}
-
-	return route, nil
 }
 
 // AddHostRoute pins ip to gateway/iface (the machine's normal route, from
@@ -90,8 +45,8 @@ func DelHostRoute(ip string) error {
 // ReplaceDefaultRoute points the default route for ipVersion at iface (a
 // TUN device, so no gateway is needed) and returns the route it replaced,
 // if any, for RestoreDefaultRoute to put back.
-func ReplaceDefaultRoute(ipVersion int, iface string) (*DefaultRoute, error) {
-	prev, err := GetDefaultRoute(ipVersion)
+func ReplaceDefaultRoute(ipVersion int, iface string) (*common.DefaultRoute, error) {
+	prev, err := common.GetDefaultRoute(ipVersion)
 	if err != nil {
 		prev = nil // nothing to restore later; proceed anyway
 	}
@@ -110,7 +65,7 @@ func ReplaceDefaultRoute(ipVersion int, iface string) (*DefaultRoute, error) {
 // RestoreDefaultRoute restores the default route captured by
 // ReplaceDefaultRoute. A nil prev means there was no default route before,
 // so the tunnel's default route is simply removed.
-func RestoreDefaultRoute(ipVersion int, prev *DefaultRoute) error {
+func RestoreDefaultRoute(ipVersion int, prev *common.DefaultRoute) error {
 	flag := "-4"
 	if ipVersion == 6 {
 		flag = "-6"
@@ -131,8 +86,8 @@ func RestoreDefaultRoute(ipVersion int, prev *DefaultRoute) error {
 // BlockIPv6Default replaces any IPv6 default route with an unreachable
 // route, so a v4-only tunnel can't be bypassed by v6 traffic. hadDefault
 // reports whether there was an existing default route to restore later.
-func BlockIPv6Default() (hadDefault bool, prev *DefaultRoute, err error) {
-	prev, gerr := GetDefaultRoute(6)
+func BlockIPv6Default() (hadDefault bool, prev *common.DefaultRoute, err error) {
+	prev, gerr := common.GetDefaultRoute(6)
 	hadDefault = gerr == nil
 
 	if err := runNetCmd("ip", "-6", "route", "replace", "unreachable", "default", "metric", "1"); err != nil {
@@ -142,7 +97,7 @@ func BlockIPv6Default() (hadDefault bool, prev *DefaultRoute, err error) {
 }
 
 // RestoreIPv6Default undoes BlockIPv6Default.
-func RestoreIPv6Default(hadDefault bool, prev *DefaultRoute) error {
+func RestoreIPv6Default(hadDefault bool, prev *common.DefaultRoute) error {
 	if !hadDefault {
 		return runNetCmd("ip", "-6", "route", "del", "unreachable", "default", "metric", "1")
 	}

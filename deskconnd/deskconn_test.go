@@ -11,7 +11,6 @@ import (
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconnd"
-	"github.com/xconnio/deskconn/info"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -78,9 +77,9 @@ func TestDeviceInfoIncludesBattery(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dev, "status"), []byte("Full"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dev, "capacity"), []byte("100"), 0600))
 
-	old := info.PowerSupplyBasePath
-	defer func() { info.PowerSupplyBasePath = old }()
-	info.PowerSupplyBasePath = tmp
+	old := deskconnd.PowerSupplyBasePath
+	defer func() { deskconnd.PowerSupplyBasePath = old }()
+	deskconnd.PowerSupplyBasePath = tmp
 
 	callee, caller := setupRouterAndConnectSessions(t)
 
@@ -93,7 +92,7 @@ func TestDeviceInfoIncludesBattery(t *testing.T) {
 	rawData, err := callResp.ArgBytes(0)
 	require.NoError(t, err)
 
-	var deviceInfo info.DeviceInfo
+	var deviceInfo common.DeviceInfo
 	require.NoError(t, json.Unmarshal(rawData, &deviceInfo))
 	require.NotNil(t, deviceInfo.Battery)
 	require.Equal(t, "Full", deviceInfo.Battery.Status)

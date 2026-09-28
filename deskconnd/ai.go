@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/xconnio/deskconn/ai"
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/xconn-go"
 )
@@ -61,7 +60,7 @@ func (d *Deskconn) handleAISessionList(_ context.Context, inv *xconn.Invocation)
 		summaries = append(summaries, common.AISessionSummary{
 			Tool:      s.Tool,
 			SessionID: strings.TrimSuffix(filepath.Base(s.Path), ".jsonl"),
-			Title:     ai.SessionTitle(s.Path),
+			Title:     AISessionTitle(s.Path),
 			UpdatedAt: s.ModTime,
 			Size:      s.Size,
 		})
@@ -87,7 +86,7 @@ func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation)
 	}
 
 	if args.SessionID != "" {
-		var matches []ai.SessionFile
+		var matches []common.AISessionFile
 		for _, s := range sessions {
 			id := strings.TrimSuffix(filepath.Base(s.Path), ".jsonl")
 			if strings.HasPrefix(id, args.SessionID) {
@@ -104,7 +103,7 @@ func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation)
 		sessions = matches
 	}
 
-	byTool := make(map[string][]ai.SessionFile)
+	byTool := make(map[string][]common.AISessionFile)
 	for _, s := range sessions {
 		if args.Tool != "" && s.Tool != args.Tool {
 			continue
@@ -117,7 +116,7 @@ func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation)
 
 	var bundles []common.AISessionBundle
 	for tool, files := range byTool {
-		tarball, err := ai.BuildTarball(files)
+		tarball, err := BuildAITarball(files)
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
@@ -129,10 +128,10 @@ func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation)
 
 // aiLocalSessions discovers this device's current Claude Code sessions for the project at
 // path. Both sides of a call are expected to use the same absolute path for the same project.
-func aiLocalSessions(path string) ([]ai.SessionFile, error) {
+func aiLocalSessions(path string) ([]common.AISessionFile, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
-	return ai.DiscoverClaudeSessions(homeDir, path)
+	return common.DiscoverClaudeSessions(homeDir, path)
 }

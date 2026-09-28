@@ -1,6 +1,8 @@
-package iptun
+package common
 
-import "encoding/json"
+import (
+	"encoding/json"
+)
 
 // This file defines the wire protocol between deskconn-vpnd (root,
 // launched on demand via sudo -- see LaunchHelper) and whichever
@@ -11,103 +13,82 @@ import "encoding/json"
 // boundaries, so no length-prefixing is needed. open_tun's response also
 // carries the TUN fd as SCM_RIGHTS ancillary data alongside its JSON.
 
-type rpcOp string
+type VPNHelperOp string
 
-const (
-	opOpenTUN             rpcOp = "open_tun"
-	opConfigureTUN        rpcOp = "configure_tun"
-	opAddHostRoute        rpcOp = "add_host_route"
-	opDelHostRoute        rpcOp = "del_host_route"
-	opReplaceDefaultRoute rpcOp = "replace_default_route"
-	opRestoreDefaultRoute rpcOp = "restore_default_route"
-	opBlockIPv6Default    rpcOp = "block_ipv6_default"
-	opRestoreIPv6Default  rpcOp = "restore_ipv6_default"
-
-	// The remaining ops are only used by the exit-node (server) role.
-	opSetSysctl             rpcOp = "set_sysctl"
-	opRestoreSysctl         rpcOp = "restore_sysctl"
-	opAddMasquerade         rpcOp = "add_masquerade"
-	opDelMasquerade         rpcOp = "del_masquerade"
-	opAddForwardAccept      rpcOp = "add_forward_accept"
-	opDelForwardAccept      rpcOp = "del_forward_accept"
-	opAddForwardEstablished rpcOp = "add_forward_established"
-	opDelForwardEstablished rpcOp = "del_forward_established"
-)
-
-type rpcRequest struct {
-	Op   rpcOp           `json:"op"`
+type VPNHelperRequest struct {
+	Op   VPNHelperOp     `json:"op"`
 	Args json.RawMessage `json:"args,omitempty"`
 }
 
-type rpcResponse struct {
+type VPNHelperResponse struct {
 	OK    bool            `json:"ok"`
 	Error string          `json:"error,omitempty"`
 	Data  json.RawMessage `json:"data,omitempty"`
 }
 
-type openTUNArgs struct {
+type VPNOpenTUNArgs struct {
 	Name string `json:"name"`
 }
 
-type openTUNData struct {
+type VPNOpenTUNData struct {
 	Iface string `json:"iface"`
 }
 
-type configureTUNArgs struct {
+type VPNConfigureTUNArgs struct {
 	Iface string `json:"iface"`
 	CIDR  string `json:"cidr"`
 	MTU   int    `json:"mtu"`
 }
 
-type addHostRouteArgs struct {
+type VPNAddHostRouteArgs struct {
 	IP      string `json:"ip"`
 	Gateway string `json:"gateway"`
 	Iface   string `json:"iface"`
 }
 
-type delHostRouteArgs struct {
+type VPNDelHostRouteArgs struct {
 	IP string `json:"ip"`
 }
 
-type replaceDefaultRouteArgs struct {
+type VPNReplaceDefaultRouteArgs struct {
 	IPVersion int    `json:"ip_version"`
 	Iface     string `json:"iface"`
 }
 
-type replaceDefaultRouteData struct {
+type VPNReplaceDefaultRouteData struct {
 	Prev *DefaultRoute `json:"prev,omitempty"`
 }
 
-type restoreDefaultRouteArgs struct {
+type VPNRestoreDefaultRouteArgs struct {
 	IPVersion int           `json:"ip_version"`
 	Prev      *DefaultRoute `json:"prev,omitempty"`
 }
 
-type blockIPv6DefaultData struct {
+type VPNBlockIPv6DefaultData struct {
 	HadDefault bool          `json:"had_default"`
 	Prev       *DefaultRoute `json:"prev,omitempty"`
 }
 
-type restoreIPv6DefaultArgs struct {
+type VPNRestoreIPv6DefaultArgs struct {
 	HadDefault bool          `json:"had_default"`
 	Prev       *DefaultRoute `json:"prev,omitempty"`
 }
 
-type setSysctlArgs struct {
+type VPNSetSysctlArgs struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
-type setSysctlData struct {
+type VPNSetSysctlData struct {
 	Previous string `json:"previous"`
 }
 
-type masqueradeArgs struct {
+type VPNMasqueradeArgs struct {
 	Subnet string `json:"subnet"`
 	Oif    string `json:"oif"`
 }
 
-type forwardArgs struct {
+type VPNForwardArgs struct {
 	InIface  string `json:"in_iface"`
 	OutIface string `json:"out_iface"`
 }

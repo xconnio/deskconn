@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
-
-	"github.com/xconnio/deskconn/iptun"
 )
 
 // reexecEnvVar marks a process as already having gone through detachToNewSession, so it
@@ -73,7 +71,7 @@ func main() {
 		_ = conn.Close()
 	}()
 
-	server := &iptun.Server{}
+	server := &Server{}
 	server.Serve(conn)
 }
 

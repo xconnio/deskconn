@@ -1,4 +1,4 @@
-package info
+package deskconnd
 
 import (
 	"fmt"
@@ -18,7 +18,9 @@ var iconSizePriority = []string{ //nolint:gochecknoglobals
 	"256x256", "128x128", "96x96", "64x64", "48x48", "32x32", "scalable",
 }
 
-var iconExtPriority = []string{".png", ".svg", ".xpm"} //nolint:gochecknoglobals
+const extSVG = ".svg"
+
+var iconExtPriority = []string{".png", extSVG, ".xpm"} //nolint:gochecknoglobals
 
 func iconSearchDirs() []string {
 	dirs := []string{"/usr/share/icons", "/usr/share/pixmaps"}
@@ -133,7 +135,7 @@ func ReadIcon(name string) (string, []byte, error) {
 
 	mimeType := mime.TypeByExtension(filepath.Ext(path))
 	if mimeType == "" {
-		if filepath.Ext(path) == ".svg" {
+		if filepath.Ext(path) == extSVG {
 			mimeType = "image/svg+xml"
 		} else {
 			mimeType = "application/octet-stream"

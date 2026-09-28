@@ -13,7 +13,6 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/olekukonko/tablewriter"
 
-	"github.com/xconnio/deskconn/ai"
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
 	"github.com/xconnio/xconn-go"
@@ -249,7 +248,7 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 	for _, bundle := range bundles {
-		fileCount, err := ai.ExtractTarball(bundle.Tarball, homeDir, path)
+		fileCount, err := deskconn.ExtractAITarball(bundle.Tarball, homeDir, path)
 		if err != nil {
 			return fmt.Errorf("failed to restore %s session: %w", bundle.Tool, err)
 		}
@@ -268,7 +267,7 @@ func runAIResume(sessionID string, printOnly bool) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	sessions, err := ai.DiscoverClaudeSessions(homeDir, path)
+	sessions, err := common.DiscoverClaudeSessions(homeDir, path)
 	if err != nil {
 		return fmt.Errorf("failed to discover local sessions: %w", err)
 	}
@@ -276,7 +275,7 @@ func runAIResume(sessionID string, printOnly bool) error {
 		return errors.New("no local claude sessions found for this project; run `desk ai sync <machine>` first")
 	}
 
-	var matches []ai.SessionFile
+	var matches []common.AISessionFile
 	for _, s := range sessions {
 		id := strings.TrimSuffix(filepath.Base(s.Path), ".jsonl")
 		if strings.HasPrefix(id, sessionID) {

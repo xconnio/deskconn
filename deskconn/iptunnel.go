@@ -12,7 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/iptun"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
@@ -57,7 +56,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 // onReady, if non-nil, is called once the remote end confirms the tunnel
 // is actually up -- callers printing something like "tunnel up" should
 // wait for this rather than assume success as soon as the call is made.
-func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, helper *iptun.Client,
+func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, helper *common.VPNHelperClient,
 	onReady func()) error {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNClientTUNName)
 	if err != nil {
@@ -151,7 +150,7 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	// Pin the addresses that must keep working after the default route is replaced -- see
 	// pinTargets.
 	pinPeers := pinTargets(ctx, session)
-	if rt, rerr := iptun.GetDefaultRoute(4); rerr == nil {
+	if rt, rerr := common.GetDefaultRoute(4); rerr == nil {
 		for _, peerIP := range pinPeers {
 			if aerr := helper.AddHostRoute(peerIP, rt.Gateway, rt.Iface); aerr == nil {
 				ip := peerIP

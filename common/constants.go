@@ -357,3 +357,36 @@ const (
 	RelayBufferedHigh = 512 * 1024
 	RelayBufferedLow  = 256 * 1024
 )
+
+const (
+	AIToolClaude = "claude"
+
+	// AITitleScanLines caps how many leading lines of a claude session file are inspected for a title.
+	AITitleScanLines = 50
+
+	// AIMaxTitleLen truncates a session title for display.
+	AIMaxTitleLen = 70
+)
+
+const (
+	VPNOpOpenTUN             VPNHelperOp = "open_tun"
+	VPNOpConfigureTUN        VPNHelperOp = "configure_tun"
+	VPNOpAddHostRoute        VPNHelperOp = "add_host_route"
+	VPNOpDelHostRoute        VPNHelperOp = "del_host_route"
+	VPNOpReplaceDefaultRoute VPNHelperOp = "replace_default_route"
+	VPNOpRestoreDefaultRoute VPNHelperOp = "restore_default_route"
+	VPNOpBlockIPv6Default    VPNHelperOp = "block_ipv6_default"
+	VPNOpRestoreIPv6Default  VPNHelperOp = "restore_ipv6_default"
+
+	// The remaining ops are only used by the exit-node (server) role.
+	VPNOpSetSysctl             VPNHelperOp = "set_sysctl"
+	VPNOpRestoreSysctl         VPNHelperOp = "restore_sysctl"
+	VPNOpAddMasquerade         VPNHelperOp = "add_masquerade"
+	VPNOpDelMasquerade         VPNHelperOp = "del_masquerade"
+	VPNOpAddForwardAccept      VPNHelperOp = "add_forward_accept"
+	VPNOpDelForwardAccept      VPNHelperOp = "del_forward_accept"
+	VPNOpAddForwardEstablished VPNHelperOp = "add_forward_established"
+	VPNOpDelForwardEstablished VPNHelperOp = "del_forward_established"
+)
+
+const VPNHelperBufSize = 64 * 1024

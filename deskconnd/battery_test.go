@@ -1,4 +1,4 @@
-package info_test
+package deskconnd_test
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/info"
+	"github.com/xconnio/deskconn/deskconnd"
 )
 
 const statusKey = "status"
@@ -24,17 +24,17 @@ func mockPowerSupplyDir(t *testing.T, files map[string]string) {
 		require.NoError(t, os.WriteFile(filepath.Join(dev, name), []byte(content), 0600))
 	}
 
-	old := info.PowerSupplyBasePath
-	t.Cleanup(func() { info.PowerSupplyBasePath = old })
-	info.PowerSupplyBasePath = tmp
+	old := deskconnd.PowerSupplyBasePath
+	t.Cleanup(func() { deskconnd.PowerSupplyBasePath = old })
+	deskconnd.PowerSupplyBasePath = tmp
 }
 
 func TestBatteryNoDevice(t *testing.T) {
-	old := info.PowerSupplyBasePath
-	defer func() { info.PowerSupplyBasePath = old }()
-	info.PowerSupplyBasePath = t.TempDir()
+	old := deskconnd.PowerSupplyBasePath
+	defer func() { deskconnd.PowerSupplyBasePath = old }()
+	deskconnd.PowerSupplyBasePath = t.TempDir()
 
-	_, err := info.GetBatteryInfo()
+	_, err := deskconnd.GetBatteryInfo()
 	require.EqualError(t, err, "battery not available")
 }
 
@@ -53,7 +53,7 @@ func TestBatteryEnergyBased(t *testing.T) {
 		"power_now":          "11000000",
 	})
 
-	batteryInfo, err := info.GetBatteryInfo()
+	batteryInfo, err := deskconnd.GetBatteryInfo()
 	require.NoError(t, err)
 
 	require.True(t, batteryInfo.Present)
@@ -83,7 +83,7 @@ func TestBatteryChargeBased(t *testing.T) {
 		"current_now":        "1000000",
 	})
 
-	batteryInfo, err := info.GetBatteryInfo()
+	batteryInfo, err := deskconnd.GetBatteryInfo()
 	require.NoError(t, err)
 
 	require.Equal(t, "Charging", batteryInfo.Status)

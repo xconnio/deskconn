@@ -1,4 +1,4 @@
-package info
+package deskconnd
 
 import (
 	"bufio"
@@ -11,6 +11,9 @@ import (
 )
 
 const systemAppID = "system"
+
+// trueValue is how .desktop entries and the index metadata spell a true flag.
+const trueValue = "true"
 
 type AppInfo struct {
 	ID         string  `json:"id"`
@@ -137,9 +140,9 @@ func parseDesktopFile(path string) (desktopEntry, bool) {
 		case "Exec":
 			execLine = value
 		case "NoDisplay":
-			noDisplay = value == "true"
+			noDisplay = value == trueValue
 		case "Hidden":
-			hidden = value == "true"
+			hidden = value == trueValue
 		}
 	}
 

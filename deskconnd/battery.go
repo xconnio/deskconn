@@ -1,4 +1,4 @@
-package info
+package deskconnd
 
 import (
 	"fmt"
@@ -6,28 +6,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/xconnio/deskconn/common"
 )
 
 var PowerSupplyBasePath = "/sys/class/power_supply" //nolint: gochecknoglobals
-
-type BatteryInfo struct {
-	Present      bool    `json:"present"`
-	Percentage   int     `json:"percentage"`
-	Status       string  `json:"status"`
-	Technology   string  `json:"technology,omitempty"`
-	Manufacturer string  `json:"manufacturer,omitempty"`
-	Model        string  `json:"model,omitempty"`
-	CycleCount   int     `json:"cycle_count,omitempty"`
-	VoltageNow   float64 `json:"voltage_now"`
-	PowerNow     float64 `json:"power_now"`
-
-	EnergyNow        float64 `json:"energy_now"`
-	EnergyFull       float64 `json:"energy_full"`
-	EnergyFullDesign float64 `json:"energy_full_design"`
-	HealthPercent    float64 `json:"health_percent,omitempty"`
-
-	TimeRemainingMins int `json:"time_remaining_mins,omitempty"`
-}
 
 func findBatteryDevicePath() (string, bool) {
 	entries, err := os.ReadDir(PowerSupplyBasePath)
@@ -68,13 +51,13 @@ func readSysfsInt(path string) (int64, bool) {
 	return value, true
 }
 
-func GetBatteryInfo() (*BatteryInfo, error) {
+func GetBatteryInfo() (*common.BatteryInfo, error) {
 	devicePath, ok := findBatteryDevicePath()
 	if !ok {
 		return nil, fmt.Errorf("battery not available")
 	}
 
-	info := &BatteryInfo{Present: true, Status: "Unknown"}
+	info := &common.BatteryInfo{Present: true, Status: "Unknown"}
 
 	if present, ok := readSysfsInt(filepath.Join(devicePath, "present")); ok {
 		info.Present = present != 0
