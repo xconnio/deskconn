@@ -42,18 +42,16 @@ curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE"
 echo "Extracting archive..."
 tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
 
-if [ ! -f "$TMP_DIR/deskconn" ] || [ ! -f "$TMP_DIR/xlink" ] || [ ! -f "$TMP_DIR/deskconnd" ] || [ ! -f "$TMP_DIR/deskconn-vpnd" ]; then
-    echo "Release archive does not contain deskconn, xlink, deskconnd and deskconn-vpnd binaries."
+if [ ! -f "$TMP_DIR/deskconn" ] || [ ! -f "$TMP_DIR/deskconnd" ] || [ ! -f "$TMP_DIR/deskconn-vpnd" ]; then
+    echo "Release archive does not contain deskconn, deskconnd and deskconn-vpnd binaries."
     exit 1
 fi
 
 mv "$TMP_DIR/deskconn" "$BIN_DIR/deskconn"
-mv "$TMP_DIR/xlink" "$EXEC_DIR/xlink"
 mv "$TMP_DIR/deskconnd" "$EXEC_DIR/deskconnd"
 mv "$TMP_DIR/deskconn-vpnd" "$BIN_DIR/deskconn-vpnd"
 
 chmod 755 "$BIN_DIR/deskconn"
-chmod 700 "$EXEC_DIR/xlink"
 chmod 700 "$EXEC_DIR/deskconnd"
 chmod 755 "$BIN_DIR/deskconn-vpnd"
 
@@ -145,8 +143,7 @@ esac
 # server apart without them being exported explicitly. Capture them from the
 # installer's own environment: on a real desktop session they'll be set here;
 # on a headless server they won't, and deskconnd will register server-only
-# APIs (no screenshot/display RPCs). xlink itself never touches the display,
-# so this only needs to apply to deskconnd's unit.
+# APIs (no screenshot/display RPCs).
 DESKCONND_ENV_LINES="Environment=TERM=xterm-256color"
 if [ -n "${DISPLAY:-}" ]; then
     DESKCONND_ENV_LINES="$DESKCONND_ENV_LINES
@@ -161,30 +158,21 @@ echo "Setting up systemd user services..."
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 mkdir -p "$SYSTEMD_USER_DIR"
 
-cat > "$SYSTEMD_USER_DIR/xlink.service" <<EOL
-[Unit]
-Description=xlink connectivity daemon (NAT tunnels, remote-client auth, QUIC/WebRTC streams)
-After=network.target
+# deskconnd runs xlink (connectivity: cloud, LAN, remote-client auth, QUIC/WebRTC
+# streams) in-process. Earlier installs ran xlink as its own service: remove it,
+# or it would compete with deskconnd for deskconn.sock.
+if [ -f "$SYSTEMD_USER_DIR/xlink.service" ]; then
+    echo "Removing the old xlink service (now part of deskconnd)..."
+    systemctl --user stop xlink 2>/dev/null || true
+    systemctl --user disable xlink 2>/dev/null || true
+    rm -f "$SYSTEMD_USER_DIR/xlink.service"
+fi
+rm -f "$EXEC_DIR/xlink"
 
-[Service]
-ExecStart=$EXEC_DIR/xlink
-Restart=always
-RestartSec=5
-Environment=TERM=xterm-256color
-
-[Install]
-WantedBy=default.target
-EOL
-
-# Wants+After (not Requires) is deliberate: deskconnd and xlink each retry
-# their connection to the other with backoff and tolerate the other
-# restarting independently, so systemd doesn't need to (and shouldn't) tear
-# one down when the other stops -- see xlink/deskconnd's own reconnect loops.
 cat > "$SYSTEMD_USER_DIR/deskconnd.service" <<EOL
 [Unit]
-Description=deskconnd application daemon (shell, files, screen, printer, VPN control, ...)
-After=network.target xlink.service
-Wants=xlink.service
+Description=deskconnd daemon (connectivity, shell, files, screen, printer, VPN control, ...)
+After=network.target
 
 [Service]
 ExecStart=$EXEC_DIR/deskconnd
@@ -198,14 +186,12 @@ EOL
 
 systemctl --user daemon-reload
 
-for service_name in xlink deskconnd; do
-    if systemctl --user is-enabled --quiet "$service_name"; then
-        echo "Service $service_name exists. Restarting..."
-        systemctl --user restart "$service_name"
-    else
-        echo "Enabling and starting $service_name..."
-        systemctl --user enable "$service_name"
-        systemctl --user start "$service_name"
-    fi
-done
-echo "Systemd services xlink and deskconnd installed and started!"
+if systemctl --user is-enabled --quiet deskconnd; then
+    echo "Service deskconnd exists. Restarting..."
+    systemctl --user restart deskconnd
+else
+    echo "Enabling and starting deskconnd..."
+    systemctl --user enable deskconnd
+    systemctl --user start deskconnd
+fi
+echo "Systemd service deskconnd installed and started!"

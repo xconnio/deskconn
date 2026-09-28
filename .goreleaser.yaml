@@ -18,17 +18,6 @@ builds:
       - amd64
       - arm64
 
-  - id: xlink
-    main: ./cmd/xlink
-    binary: xlink
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-
   - id: deskconnd
     main: ./cmd/deskconnd
     binary: deskconnd
@@ -55,7 +44,6 @@ archives:
   - id: release-bundle
     ids:
       - deskconn
-      - xlink
       - deskconnd
       - deskconn-vpnd
     formats:

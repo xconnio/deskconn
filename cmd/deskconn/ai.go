@@ -40,20 +40,16 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	aiCmd := app.Command("ai", "Sync and resume Claude Code CLI sessions directly with another device")
 
 	lsCmd := aiCmd.Command("ls", "List Claude Code sessions available on another device")
-	lsMachine := lsCmd.Arg("machine", "Device to list sessions on").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
-	lsMode := lsCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session",
-	).Enum(ModeQUIC, ModeP2P)
+	lsMachine := deviceArg(lsCmd, "machine", "Device to list sessions on", cfgDirectory)
+	lsMode := modeFlag(lsCmd,
+		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
 	syncCmd := aiCmd.Command("sync", "Pull claude sessions from another device onto this one")
-	syncMachine := syncCmd.Arg("machine", "Device to pull sessions from").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	syncMachine := deviceArg(syncCmd, "machine", "Device to pull sessions from", cfgDirectory)
 	syncSessionID := syncCmd.Arg("session-id",
 		"Only pull the session matching this id (or a unique prefix of one); default pulls all").String()
-	syncMode := syncCmd.Flag("mode",
-		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session",
-	).Enum(ModeQUIC, ModeP2P)
+	syncMode := modeFlag(syncCmd,
+		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
 	resumeCmd := aiCmd.Command("resume", "Resume a Claude Code session by id (see `ai ls`)")
 	resumeSessionID := resumeCmd.Arg("session-id", "Session id (or a unique prefix of one) to resume").Required().String()
@@ -62,9 +58,8 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	resumeRemote := resumeCmd.Flag("remote",
 		"Run claude directly on this device instead of resuming a locally synced session").
 		HintAction(deviceCompletions(cfgDirectory)).String()
-	resumeMode := resumeCmd.Flag("mode",
-		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, default uses daemon persistent session",
-	).Enum(ModeQUIC, ModeP2P)
+	resumeMode := modeFlag(resumeCmd,
+		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
 	return &aiCommands{
 		ls:              lsCmd,

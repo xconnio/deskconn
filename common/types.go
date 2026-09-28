@@ -13,10 +13,6 @@ type Device struct {
 	Realm        string       `json:"realm" yaml:"realm"`
 	Alias        string       `yaml:"alias"`
 	Connected    bool         `yaml:"-" json:"-"`
-
-	// Address and Fingerprint are set for direct (standalone) devices only.
-	Address     string `yaml:"address,omitempty" json:"-"`
-	Fingerprint string `yaml:"fingerprint,omitempty" json:"-"`
 }
 
 type PrintingConfig struct {
@@ -27,22 +23,29 @@ type ScreenshotConfig struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 }
 
-// StandaloneConfig runs xlink without the cloud: it serves the device realm
-// directly over QUIC to the listed keys.
-type StandaloneConfig struct {
-	Enabled    bool                  `yaml:"enabled,omitempty"`
-	Listen     string                `yaml:"listen,omitempty"`
-	Principals []StandalonePrincipal `yaml:"principals,omitempty"`
-}
-
-type StandalonePrincipal struct {
-	AuthID         string   `yaml:"authid"`
-	AuthorizedKeys []string `yaml:"authorized_keys"`
-}
-
 type Config struct {
 	Devices    []Device         `yaml:"devices"`
 	Printing   PrintingConfig   `yaml:"printing,omitempty"`
 	Screenshot ScreenshotConfig `yaml:"screenshot,omitempty"`
-	Standalone StandaloneConfig `yaml:"standalone,omitempty"`
+}
+
+// StandaloneTarget is a standalone device the CLI connects to directly (deskconn --url),
+// instead of a device from the cloud account.
+type StandaloneTarget struct {
+	URL        string // tcp://host:port or unix:///path
+	AuthID     string
+	PrivateKey string // hex ed25519 seed
+}
+
+var standaloneTarget *StandaloneTarget //nolint:gochecknoglobals // set once from the CLI's flags
+
+// SetStandaloneTarget makes StandaloneRealm resolve to target for this process.
+func SetStandaloneTarget(target *StandaloneTarget) { standaloneTarget = target }
+
+// StandaloneTargetFor returns the standalone target if realm refers to it.
+func StandaloneTargetFor(realm string) (*StandaloneTarget, bool) {
+	if standaloneTarget == nil || realm != StandaloneRealm {
+		return nil, false
+	}
+	return standaloneTarget, true
 }

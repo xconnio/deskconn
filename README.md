@@ -94,78 +94,41 @@ deskconn shell <device> --mode routed   # force cloud router
 
 ## Standalone mode (no cloud)
 
-A device with a reachable IP (for example a cloud server) can be used without an account or the cloud router. Its
-`xlink` serves the device directly over QUIC (UDP) to a fixed list of keys, and clients connect to it by address.
-Shell, exec, file operations, port and agent forwarding, logs, P2P and VPN all work the same way.
+`deskconnd` can serve a device directly, without an account or the cloud router, to a fixed list of keys. One command
+starts it; clients point the CLI at its URL. Shell, exec, file operations, port and agent forwarding, logs and P2P
+work the same way.
 
-### 1. Get the client's key
-
-On each machine that should have access:
+### 1. Generate a key pair
 
 ```bash
-deskconn device key
-# alice:65160c38…
+deskconn keygen
+# public key:  65160c38…
+# private key: 9f2d0b17…
 ```
 
-### 2. Enable standalone mode on the device
-
-Either with environment variables on the `xlink` service:
+### 2. Start deskconnd in standalone mode on the device
 
 ```bash
-systemctl --user edit xlink
+deskconnd --standalone --url tcp://0.0.0.0:18080 --key 65160c38… [--key <another public key> ...]
 ```
 
-```ini
-[Service]
-Environment=DESKCONN_STANDALONE=1
-Environment=DESKCONN_STANDALONE_KEYS=alice:65160c38…,bob:9a1f…
-```
+`--url` is `tcp://host:port` or `unix:///path/to.sock` (default `tcp://0.0.0.0:18080`). Clients holding one of the
+`--key`s can connect, whatever authid they present. To run it as the service, put the flags on `ExecStart` with
+`systemctl --user edit deskconnd`.
 
-or in `~/.deskconn/config.yml`:
-
-```yaml
-standalone:
-  enabled: true
-  listen: 0.0.0.0:18080   # optional, this is the default
-  principals:
-    - authid: alice
-      authorized_keys: [65160c38…]
-```
-
-Keys from both places are combined. Then restart the services and read the certificate fingerprint:
+### 3. Connect from the client
 
 ```bash
-systemctl --user restart xlink deskconnd
-journalctl --user -u xlink | grep fingerprint
-# … add on a client with: deskconn device add <name> <public-ip>:18080 --fingerprint sha256:…
+export DESKCONN_URL=tcp://203.0.113.5:18080 DESKCONN_PRIVATE_KEY=9f2d0b17…
+deskconn shell
+deskconn exec -- uname -a
+deskconn file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
+deskconn file cat :/etc/hostname
+deskconn port forward 8080:80
 ```
 
-Allow **UDP** port 18080 through the device's firewall or cloud security group.
-
-| Variable                     | Meaning                                                |
-|------------------------------|--------------------------------------------------------|
-| `DESKCONN_STANDALONE`        | `1`/`true` to enable, `0`/`false` to disable           |
-| `DESKCONN_STANDALONE_LISTEN` | `host:port` to listen on (default `0.0.0.0:18080`)     |
-| `DESKCONN_STANDALONE_KEYS`   | Comma-separated `authid:pubkey` entries to authorize   |
-
-### 3. Add the device on the client
-
-```bash
-deskconn device add web1 203.0.113.5 --fingerprint sha256:…
-deskconn shell web1
-```
-
-`device add` connects once to check the fingerprint and that the device accepts your key, then saves the device. The
-port defaults to 18080.
-
-### Security
-
-- The client pins the device's certificate fingerprint and refuses to connect if it changes. The certificate is
-  created on first start (`~/.deskconn/standalone.crt`) and kept across restarts; if it is replaced, re-add the device
-  with the new fingerprint.
-- Access is exactly the configured key list. To revoke a key, remove it and restart `xlink`.
-- The client's key for standalone devices (`~/.deskconn/direct_ed25519`) is separate from the cloud login key: it
-  does not expire and is kept on logout.
+The same works with flags: `deskconn --url tcp://203.0.113.5:18080 --private-key 9f2d0b17… shell`. With `--url`,
+commands take no device argument. `ping`, `connect`, `disconnect` and `ls` work on devices of your account only.
 
 ## CLI reference
 
@@ -189,9 +152,8 @@ deskconn ping <device> [--count N]
 Standalone devices (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
-deskconn device add    <name> <host[:port]> --fingerprint <sha256:…>
-deskconn device remove <name>
-deskconn device key                         # this machine's key to authorize on a device
+deskconn keygen                                        # key pair: public for deskconnd --key, private for --private-key
+deskconn --url <tcp://host:port> --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_PRIVATE_KEY
 ```
 
 ### Shell & exec
@@ -288,9 +250,7 @@ All credentials and configuration are stored under `~/.deskconn/`:
 | `credentials.json`      | Device attach credentials (realm, authid, keypair) used by `deskconnd` |
 | `id_ed25519`            | CLI private key, username, and key expiry                              |
 | `id_ed25519.pub`        | CLI public key, username, and account name                             |
-| `config.yml`            | Device list and aliases, standalone mode settings                      |
-| `direct_ed25519`        | CLI private key and authid for standalone devices                      |
-| `standalone.crt`/`.key` | Certificate a standalone device presents to clients                    |
+| `config.yml`            | Device list and aliases                                                |
 | `principals.json`       | Local CryptoSign principals (used by the local WAMP router)            |
 | `turn_credentials.json` | Cached TURN server credentials for WebRTC                              |
 | `deskconn.sock`         | Unix socket for local CLI–daemon communication                         |

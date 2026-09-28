@@ -131,13 +131,6 @@ const (
 	MachineIDPath                    = "/etc/machine-id"
 )
 
-const (
-	// DirectRealmPrefix marks the realm of a device reached directly (standalone
-	// xlink) instead of through the cloud. The part after it is the device name;
-	// it is only a local lookup key, the device itself serves StandaloneRealm.
-	DirectRealmPrefix = "direct."
-)
-
 const ProcedureFileCat = "io.xconn.deskconn.deskconnd.file.cat"
 
 const (

@@ -11,6 +11,7 @@ import (
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/wampproto-go"
+	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
@@ -60,8 +61,9 @@ func StartAppLayer(cfgDirectory string) (*xconn.Router, *xconn.Listener, *xconn.
 }
 
 // SetupWebRTC answers WebRTC offers made on session (signaling for P2P), attaching the
-// resulting WAMP-over-WebRTC sessions to router and relaying their raw channels to deskconnd.
-func SetupWebRTC(session *xconn.Session, router *xconn.Router, authenticator *Authenticator,
+// resulting WAMP-over-WebRTC sessions to router and, when xlinkStreamSock is set, relaying
+// their raw channels to deskconnd.
+func SetupWebRTC(session *xconn.Session, router *xconn.Router, authenticator auth.ServerAuthenticator,
 	xlinkStreamSock string) error {
 	webRtcManager := xconnwebrtc.NewWebRTCHandler()
 	if err := webRtcManager.Setup(&xconnwebrtc.ProviderConfig{
@@ -79,7 +81,9 @@ func SetupWebRTC(session *xconn.Session, router *xconn.Router, authenticator *Au
 		return err
 	}
 
-	webRtcManager.OnDataChannel(handleAuxDataChannel(xlinkStreamSock))
+	if xlinkStreamSock != "" {
+		webRtcManager.OnDataChannel(handleAuxDataChannel(xlinkStreamSock))
+	}
 	return nil
 }
 
