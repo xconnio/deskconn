@@ -11,7 +11,10 @@ import (
 )
 
 const (
-	helperBinaryName = "deskconn-vpnd"
+	// VPNHelperName is the program name deskconn runs as its privileged VPN
+	// helper under: main dispatches on argv[0], snap-style, and
+	// LaunchVPNHelper invokes deskconn through a symlink by this name.
+	VPNHelperName = "vpnd"
 
 	// helperReadyTimeout bounds how long we wait for the helper's socket to
 	// come up -- generous, since it covers the operator actually typing
@@ -20,22 +23,23 @@ const (
 	helperPollInterval = 200 * time.Millisecond
 )
 
-// LaunchVPNHelper starts deskconn-vpnd under sudo -- prompting for a password
+// LaunchVPNHelper starts vpnd (this same executable, run through a
+// symlink named VPNHelperName) under sudo -- prompting for a password
 // on this process's terminal, once per tunnel -- and waits for its socket
 // to come up. Connect to the returned path with DialClient, from this
 // process or (proxy mode) handed to deskconnd to dial instead; the helper
 // serves exactly one connection and unwinds once it closes.
 //
-// deskconn-vpnd re-execs itself into a detached child and exits almost
+// vpnd re-execs itself into a detached child and exits almost
 // immediately (see detachToNewSession), so wait mostly just reaps that
 // launcher and cleans up the temp dir -- it's not a signal that the
 // detached helper has actually finished; that safety comes from awaited
 // RPCs before a caller closes its connection, not from this. Call wait
 // from a defer, after the tunnel is done.
 func LaunchVPNHelper(ctx context.Context, cfgDirectory string) (socketPath string, wait func() error, err error) {
-	helperPath, err := findHelperBinary()
+	exe, err := os.Executable()
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("find own executable for %s: %w", VPNHelperName, err)
 	}
 
 	dir, err := os.MkdirTemp(cfgDirectory, "vpnhelper-")
@@ -44,6 +48,15 @@ func LaunchVPNHelper(ctx context.Context, cfgDirectory string) (socketPath strin
 	}
 	socketPath = filepath.Join(dir, "helper.sock")
 
+	// sudo passes the path it's given through as argv[0], so the symlink's name is what
+	// tells deskconn to run as the helper. It lives in this launch's private dir, so it
+	// needs nothing installed and goes away with the dir.
+	helperPath := filepath.Join(dir, VPNHelperName)
+	if err := os.Symlink(exe, helperPath); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("link %s: %w", VPNHelperName, err)
+	}
+
 	cmd := exec.Command("sudo", helperPath, "--socket", socketPath) //nolint:gosec
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -51,7 +64,7 @@ func LaunchVPNHelper(ctx context.Context, cfgDirectory string) (socketPath strin
 
 	if err := cmd.Start(); err != nil {
 		_ = os.RemoveAll(dir)
-		return "", nil, fmt.Errorf("start %s: %w", helperBinaryName, err)
+		return "", nil, fmt.Errorf("start %s: %w", VPNHelperName, err)
 	}
 
 	// procExit's done is closed, not sent-to, so both waitForSocket and wait can each read the
@@ -72,19 +85,19 @@ func LaunchVPNHelper(ctx context.Context, cfgDirectory string) (socketPath strin
 
 	wait = func() error {
 		// reapTimeout is just a safety net in case the launcher is somehow still running; it
-		// doesn't affect the detached deskconn-vpnd child either way.
+		// doesn't affect the detached vpnd child either way.
 		const reapTimeout = 10 * time.Second
 		select {
 		case <-exited.done:
 			_ = os.RemoveAll(dir)
 			var exitErr *exec.ExitError
 			if exited.err != nil && !errors.As(exited.err, &exitErr) {
-				return fmt.Errorf("wait for %s: %w", helperBinaryName, exited.err)
+				return fmt.Errorf("wait for %s: %w", VPNHelperName, exited.err)
 			}
 			return nil
 		case <-time.After(reapTimeout):
 			_ = os.RemoveAll(dir)
-			return fmt.Errorf("timed out reaping %s launcher process (non-fatal)", helperBinaryName)
+			return fmt.Errorf("timed out reaping %s launcher process (non-fatal)", VPNHelperName)
 		}
 	}
 	return socketPath, wait, nil
@@ -116,33 +129,14 @@ func waitForSocket(ctx context.Context, socketPath string, exited *procExit) err
 			// A clean exit here just means the launcher re-exec'd and handed off (see
 			// detachToNewSession) -- keep polling. Only a non-zero exit is an actual failure.
 			if exited.err != nil {
-				return fmt.Errorf("%s exited before it was ready: %w", helperBinaryName, exited.err)
+				return fmt.Errorf("%s exited before it was ready: %w", VPNHelperName, exited.err)
 			}
 			exitedDone = nil
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline:
-			return fmt.Errorf("timed out waiting for %s to start (sudo password not entered in time?)", helperBinaryName)
+			return fmt.Errorf("timed out waiting for %s to start (sudo password not entered in time?)", VPNHelperName)
 		case <-ticker.C:
 		}
 	}
-}
-
-// findHelperBinary looks for deskconn-vpnd next to this process's own
-// executable first (how install.sh lays binaries out), falling back to
-// PATH.
-func findHelperBinary() (string, error) {
-	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), helperBinaryName)
-		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-			return candidate, nil
-		}
-	}
-
-	if path, err := exec.LookPath(helperBinaryName); err == nil {
-		return path, nil
-	}
-
-	return "", fmt.Errorf("%s not found (expected next to this binary or on PATH); "+
-		"is deskconn installed via install.sh?", helperBinaryName)
 }

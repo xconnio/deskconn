@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// VPNHelperClient talks to a deskconn-vpnd process (see LaunchHelper) over a
+// VPNHelperClient talks to a vpnd process (see deskconn.LaunchVPNHelper) over a
 // unixpacket socket.
 type VPNHelperClient struct {
 	conn *net.UnixConn
