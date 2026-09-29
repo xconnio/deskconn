@@ -139,7 +139,7 @@ func (d *Deskconn) ArmVPNServing(helper *common.VPNHelperClient) error {
 
 // DisarmVPNServing stops accepting new inbound VPN tunnels, tears down
 // whichever one is currently active, if any, and closes the helper
-// connection -- causing deskconn-vpnd to unwind and exit. Reports whether
+// connection -- causing vpnd to unwind and exit. Reports whether
 // serving was actually armed.
 func (d *Deskconn) DisarmVPNServing() bool {
 	d.vpn.mu.Lock()

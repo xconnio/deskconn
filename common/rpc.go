@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 )
 
-// This file defines the wire protocol between deskconn-vpnd (root,
+// This file defines the wire protocol between vpnd (root,
 // launched on demand via sudo -- see LaunchHelper) and whichever
 // unprivileged process needs privileged networking done on its behalf.
 //

@@ -95,6 +95,11 @@ const (
 )
 
 func main() {
+	if args, ok := vpndArgs(os.Args); ok {
+		runVPNd(args)
+		return
+	}
+
 	cfgDirectory, err := common.CfgDirectory()
 	if err != nil {
 		log.Fatal(err)
@@ -1766,6 +1771,7 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 
 	paths := []string{
 		filepath.Join(binDir, "deskconn"),
+		filepath.Join(binDir, vpndProgName),
 		filepath.Join(execDir, "deskconnd"),
 		filepath.Join(bashCompDir, "deskconn"),
 		filepath.Join(zshCompDir, "_deskconn"),
@@ -1864,7 +1870,6 @@ func downloadAndInstallUpdate(downloadURL string) error {
 
 	foundDeskconn := false
 	foundDeskconnd := false
-	foundDeskconnVpnd := false
 
 	for {
 		header, err := tarReader.Next()
@@ -1887,10 +1892,13 @@ func downloadAndInstallUpdate(downloadURL string) error {
 			if err := installBinaryFromReader(tarReader, deskconnPath, 0755); err != nil {
 				return err
 			}
-			deskPath := filepath.Join(binDir, "desk")
-			_ = os.Remove(deskPath)
-			if err := os.Symlink(deskconnPath, deskPath); err != nil {
-				return fmt.Errorf("failed to create desk symlink: %w", err)
+			// "desk" is the CLI under a shorter name; "vpnd" is the privileged VPN helper.
+			for _, link := range []string{"desk", vpndProgName} {
+				linkPath := filepath.Join(binDir, link)
+				_ = os.Remove(linkPath)
+				if err := os.Symlink(deskconnPath, linkPath); err != nil {
+					return fmt.Errorf("failed to create %s symlink: %w", link, err)
+				}
 			}
 			for _, s := range aliasScripts() {
 				scriptPath := filepath.Join(binDir, s.name)
@@ -1906,18 +1914,10 @@ func downloadAndInstallUpdate(downloadURL string) error {
 				return err
 			}
 			foundDeskconnd = true
-		case "deskconn-vpnd":
-			fmt.Println("Installing deskconn-vpnd...")
-			// Next to deskconn itself, matching install.sh -- iptun.LaunchHelper looks for it
-			// there first.
-			if err := installBinaryFromReader(tarReader, filepath.Join(binDir, "deskconn-vpnd"), 0755); err != nil {
-				return err
-			}
-			foundDeskconnVpnd = true
 		}
 	}
 
-	if !foundDeskconn || !foundDeskconnd || !foundDeskconnVpnd {
+	if !foundDeskconn || !foundDeskconnd {
 		return fmt.Errorf("update archive missing required binaries")
 	}
 

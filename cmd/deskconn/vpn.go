@@ -18,7 +18,7 @@ import (
 // prompt is coming -- called only once whatever this command needs is
 // confirmed reachable, so a failure fails fast without prompting first.
 func launchHelper(ctx context.Context, cfgDirectory string) (string, func() error, error) {
-	fmt.Println("A password is needed to grant deskconn-vpnd the network access this requires.")
+	fmt.Println("A password is needed to grant vpnd the network access this requires.")
 	return deskconn.LaunchVPNHelper(ctx, cfgDirectory)
 }
 
@@ -43,7 +43,7 @@ func closeSessionWithTimeout(session *xconnwebrtc.WebRTCSession) {
 // runVPNConnect routes this machine's internet traffic through device: it
 // dials it directly (P2P) and runs the tunnel here, so on Ctrl-C we wait
 // for its own teardown to actually finish before exiting. This process
-// also launches deskconn-vpnd (see iptun.LaunchHelper), since it's the one
+// also launches vpnd (see deskconn.LaunchVPNHelper), since it's the one
 // with a terminal for sudo to prompt on.
 func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 	fmt.Printf("Connecting to %q...\n", device)
@@ -108,12 +108,12 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 
 // runVPNStart arms this machine to let other devices route their traffic
 // through it, then returns right away -- serving continues in the
-// background (deskconnd + deskconn-vpnd) until "deskconn vpn stop" or the
+// background (deskconnd + vpnd) until "deskconn vpn stop" or the
 // daemon shuts down. deskconnd has no capability or terminal of its own
-// for this, so this CLI process launches deskconn-vpnd (the only blocking
+// for this, so this CLI process launches vpnd (the only blocking
 // part, briefly, for the sudo prompt) and hands deskconnd its socket.
 //
-// deskconn-vpnd is deliberately left running, not reaped here -- it cleans
+// vpnd is deliberately left running, not reaped here -- it cleans
 // up its own temp directory on exit regardless of how it's later stopped.
 func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 	ctx, cancel := context.WithCancel(cliCtx)

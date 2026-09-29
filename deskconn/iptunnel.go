@@ -49,7 +49,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 // change it made before returning. It doesn't own session itself (never
 // closes it), since session may be shared with other features.
 //
-// All privileged networking goes through helper (a deskconn-vpnd
+// All privileged networking goes through helper (a vpnd
 // connection, see iptun.LaunchHelper) rather than being done directly, so
 // neither the CLI nor xlink needs any capability grant of its own.
 //
@@ -60,7 +60,7 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	onReady func()) error {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNClientTUNName)
 	if err != nil {
-		return fmt.Errorf("failed to create tun device via deskconn-vpnd: %w", err)
+		return fmt.Errorf("failed to create tun device via vpnd: %w", err)
 	}
 
 	var teardown []func()
