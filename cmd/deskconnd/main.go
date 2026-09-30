@@ -36,6 +36,13 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// xlink runs in this process: its app layer serves deskconn.sock (the CLI's local
+	// realm), and deskconnd registers every app-layer and CLI-facing procedure on it
+	// through an in-memory session.
+	appRouter, appListener, appSession := xlink.StartAppLayer(cfgDirectory)
+	defer appRouter.Close()
+	defer appListener.Close()
+
 	clientSessions := deskconnd.NewClientSessions()
 
 	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
@@ -97,13 +104,6 @@ func main() {
 		log.Fatal(err)
 	}
 	common.SafeGo(func() { deskconnd.ServeStreamProxy(proxyListener, clientSessions, cfgDirectory) })
-
-	// xlink runs in this process: its app layer serves deskconn.sock (the CLI's local
-	// realm), and deskconnd registers every app-layer and CLI-facing procedure on it
-	// through an in-memory session.
-	appRouter, appListener, appSession := xlink.StartAppLayer(cfgDirectory)
-	defer appRouter.Close()
-	defer appListener.Close()
 
 	session, err := xconn.ConnectInMemory(appRouter, common.LocalRealm)
 	if err != nil {
