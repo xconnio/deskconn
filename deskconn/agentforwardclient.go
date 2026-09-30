@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/xconn-go"
 )
 
 // RunAgentForward is the client entry point for `deskconn shell -A`. It
@@ -32,14 +33,26 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return runAgentForwardP2P(ctx, p2pSess, authID, agentSock, ready)
+		return runAgentForwardP2P(ctx, P2PChannels(p2pSess), authID, agentSock, ready)
 	case modeQUIC:
 		return runAgentForwardQUIC(ctx, realm, cfgDirectory, authID, agentSock, ready)
 	default:
+		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
+		if err == nil {
+			defer func() { _ = daemon.Close() }()
+			if daemon.P2P() {
+				return runAgentForwardP2P(ctx, daemon, authID, agentSock, ready)
+			}
+			return runAgentForwardOnStream(ctx, daemon, realm, authID, agentSock, ready)
+		}
+		if !errors.Is(err, ErrDaemonUnavailable) {
+			ready <- err
+			return err
+		}
 		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
-			return runAgentForwardP2P(ctx, p2pSess, authID, agentSock, ready)
+			return runAgentForwardP2P(ctx, P2PChannels(p2pSess), authID, agentSock, ready)
 		}
 		fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
 		return runAgentForwardQUIC(ctx, realm, cfgDirectory, authID, agentSock, ready)
@@ -53,8 +66,13 @@ func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, authID, agent
 		return err
 	}
 	defer func() { _ = quicSess.Connection().Close() }()
+	return runAgentForwardOnStream(ctx, quicSess, realm, authID, agentSock, ready)
+}
 
-	stream, err := quicSess.OpenStream()
+// runAgentForwardOnStream runs the agent-forward session on a raw stream opened on sess.
+func runAgentForwardOnStream(ctx context.Context, sess xconn.MultiplexedSession,
+	realm, authID, agentSock string, ready chan<- error) error {
+	stream, err := sess.OpenStream()
 	if err != nil {
 		ready <- err
 		return err
@@ -114,9 +132,9 @@ func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, authID, agent
 	return runAgentForwardClientLoop(ctx, readNext, writer, sendKey, agentSock)
 }
 
-func runAgentForwardP2P(ctx context.Context, p2pSess P2PChannelOpener,
+func runAgentForwardP2P(ctx context.Context, p2pSess ChannelOpener,
 	authID, agentSock string, ready chan<- error) error {
-	channel, err := openP2PChannel(p2pSess, common.AgentForwardChannelLabel)
+	channel, err := p2pSess.OpenMessageChannel(common.AgentForwardChannelLabel)
 	if err != nil {
 		ready <- err
 		return err

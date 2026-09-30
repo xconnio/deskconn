@@ -63,6 +63,8 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 		if invErr != nil {
 			return invErr
 		}
+		realm, _ := inv.ArgString(0)
+		defer clientSessions.holdSession(realm, deviceSession)()
 
 		enc, ok := km.fetch(deviceSession.ID())
 		if !ok {
@@ -233,6 +235,8 @@ func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.
 		if invErr != nil {
 			return invErr
 		}
+		realm, _ := inv.ArgString(0)
+		defer clientSessions.holdSession(realm, deviceSession)()
 
 		callResp := deviceSession.Call(common.ProcedureFileCat).
 			ProgressReceiver(func(pr *xconn.ProgressResult) {

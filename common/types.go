@@ -49,3 +49,19 @@ func StandaloneTargetFor(realm string) (*StandaloneTarget, bool) {
 	}
 	return standaloneTarget, true
 }
+
+// StreamProxyRequest is what the CLI sends on deskconnd's stream proxy socket. With an
+// empty Kind it only asks which transport the persistent connection to Realm's device
+// has; otherwise it opens a raw QUIC stream, or a data channel named Label, on it.
+type StreamProxyRequest struct {
+	Realm string    `json:"realm"`
+	Kind  RelayKind `json:"kind,omitempty"`
+	Label string    `json:"label,omitempty"`
+}
+
+// StreamProxyResponse answers a StreamProxyRequest. After a successful open, the rest of
+// the connection is the stream itself.
+type StreamProxyResponse struct {
+	Kind  RelayKind `json:"kind,omitempty"`
+	Error string    `json:"error,omitempty"`
+}

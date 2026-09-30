@@ -446,14 +446,26 @@ func main() {
 					return
 				}
 				defer func() { _ = p2pSess.Close() }()
-				if err := deskconn.UploadFilesP2P(p2pSess, *cpSrc, dstPath, *cpRecursive, *cpStreams); err != nil {
+				if err := deskconn.UploadFilesP2P(deskconn.P2PChannels(p2pSess), *cpSrc, dstPath,
+					*cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			default:
+				daemon, err := deskconn.DialDaemonStreams(context.Background(), realm, cfgDirectory)
+				if !errors.Is(err, deskconn.ErrDaemonUnavailable) {
+					if err == nil {
+						err = deskconn.UploadFilesDaemon(daemon, *cpSrc, dstPath, *cpRecursive, *cpStreams)
+					}
+					if err != nil {
+						fmt.Fprintln(os.Stderr, err)
+					}
+					return
+				}
 				p2pSess, p2pErr := deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
 				if p2pErr == nil {
 					defer func() { _ = p2pSess.Close() }()
-					if err := deskconn.UploadFilesP2P(p2pSess, *cpSrc, dstPath, *cpRecursive, *cpStreams); err != nil {
+					if err := deskconn.UploadFilesP2P(deskconn.P2PChannels(p2pSess), *cpSrc, dstPath,
+						*cpRecursive, *cpStreams); err != nil {
 						fmt.Fprintln(os.Stderr, err)
 					}
 					return
@@ -496,14 +508,25 @@ func main() {
 					return
 				}
 				defer func() { _ = p2pSess.Close() }()
-				if err := deskconn.DownloadFilesP2P(p2pSess, srcPath, *cpDst, *cpRecursive, *cpStreams); err != nil {
+				if err := deskconn.DownloadFilesP2P(deskconn.P2PChannels(p2pSess), srcPath, *cpDst,
+					*cpRecursive, *cpStreams); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			default:
+				daemon, err := deskconn.DialDaemonStreams(context.Background(), realm, cfgDirectory)
+				if !errors.Is(err, deskconn.ErrDaemonUnavailable) {
+					if err == nil {
+						err = deskconn.DownloadFilesDaemon(daemon, srcPath, *cpDst, *cpRecursive, *cpStreams)
+					}
+					if err != nil {
+						fmt.Fprintln(os.Stderr, err)
+					}
+					return
+				}
 				p2pSess, p2pErr := deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
 				if p2pErr == nil {
 					defer func() { _ = p2pSess.Close() }()
-					if err := deskconn.DownloadFilesP2P(p2pSess, srcPath, *cpDst, *cpRecursive,
+					if err := deskconn.DownloadFilesP2P(deskconn.P2PChannels(p2pSess), srcPath, *cpDst, *cpRecursive,
 						*cpStreams); err != nil {
 						fmt.Fprintln(os.Stderr, err)
 					}
