@@ -2,6 +2,7 @@ package deskconnd
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,27 +33,35 @@ func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessio
 
 // proxyKeyCache caches the client-role SessionKeys ProxyFileOpHandler
 // derives per outbound device session, so repeated proxied calls to the
-// same device don't re-run the key exchange every time.
+// same device don't re-run the key exchange every time. It's keyed by the
+// session itself: session IDs aren't unique across devices.
 type proxyKeyCache struct {
 	mu   sync.Mutex
-	keys map[uint64]*common.SessionKeys
+	keys map[*xconn.Session]*common.SessionKeys
 }
 
 func newProxyKeyCache() *proxyKeyCache {
-	return &proxyKeyCache{keys: make(map[uint64]*common.SessionKeys)}
+	return &proxyKeyCache{keys: make(map[*xconn.Session]*common.SessionKeys)}
 }
 
-func (c *proxyKeyCache) fetch(sessionID uint64) (*common.SessionKeys, bool) {
+func (c *proxyKeyCache) fetch(session *xconn.Session) (*common.SessionKeys, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	enc, ok := c.keys[sessionID]
+	enc, ok := c.keys[session]
 	return enc, ok
 }
 
-func (c *proxyKeyCache) store(sessionID uint64, enc *common.SessionKeys) {
+func (c *proxyKeyCache) store(session *xconn.Session, enc *common.SessionKeys) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.keys[sessionID] = enc
+	c.keys[session] = enc
+}
+
+// keysRejected reports whether the device refused a call because it doesn't have the
+// keys it was encrypted with, e.g. after another client's key exchange replaced them.
+func keysRejected(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "no session keys found") || strings.Contains(msg, "failed to decrypt")
 }
 
 func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
@@ -66,21 +75,29 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 		realm, _ := inv.ArgString(0)
 		defer clientSessions.holdSession(realm, deviceSession)()
 
-		enc, ok := km.fetch(deviceSession.ID())
-		if !ok {
-			var err error
-			enc, err = common.ClientKeyExchange(deviceSession)
-			if err != nil {
-				return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		enc, cached := km.fetch(deviceSession)
+		for {
+			if enc == nil {
+				var err error
+				enc, err = common.ClientKeyExchange(deviceSession)
+				if err != nil {
+					return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+				}
+				km.store(deviceSession, enc)
 			}
-			km.store(deviceSession.ID(), enc)
-		}
 
-		result, err := common.EncryptedCall(deviceSession, procedure, payload, enc)
-		if err != nil {
+			result, err := common.EncryptedCall(deviceSession, procedure, payload, enc)
+			if err == nil {
+				return xconn.NewInvocationResult(result)
+			}
+			// Cached keys the device no longer has: exchange again and retry once. The
+			// device rejected the request before running it, so nothing is repeated.
+			if cached && keysRejected(err) {
+				enc, cached = nil, false
+				continue
+			}
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
-		return xconn.NewInvocationResult(result)
 	}
 }
 
