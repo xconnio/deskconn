@@ -2,7 +2,6 @@ package xlink
 
 import (
 	"encoding/json"
-	"io"
 	"net"
 	"path/filepath"
 
@@ -145,13 +144,9 @@ func RelayQUICStream(stream net.Conn, xlinkStreamSock string) {
 		return
 	}
 
-	done := make(chan struct{})
-	common.SafeGo(func() {
-		_, _ = io.Copy(conn, stream)
-		close(done)
-	})
-	_, _ = io.Copy(stream, conn)
-	<-done
+	// Ends, closing both, as soon as either side does: deskconnd closing its end is how
+	// a session finishes, and the client only learns of it when the stream closes.
+	common.SpliceConns(conn, stream)
 }
 
 // handleAuxDataChannel is the callback wired to the WebRTC provider's
