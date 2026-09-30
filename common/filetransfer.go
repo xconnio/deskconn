@@ -202,7 +202,13 @@ func RecvPriority[T any](ch <-chan T, closed <-chan struct{}, timeout time.Durat
 	case v := <-ch:
 		return v, nil
 	case <-closed:
-		return zero, io.ErrClosedPipe
+		// Whatever arrived before the close still comes first.
+		select {
+		case v := <-ch:
+			return v, nil
+		default:
+			return zero, io.ErrClosedPipe
+		}
 	case <-time.After(timeout):
 		return zero, fmt.Errorf("timed out waiting for response")
 	}

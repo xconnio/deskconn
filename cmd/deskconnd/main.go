@@ -84,6 +84,20 @@ func main() {
 	defer streamListener.Close()
 	common.SafeGo(func() { deskconnApis.ServeStreamRelay(streamListener) })
 
+	// Stream proxy listener: the CLI's raw streams on the persistent device connections.
+	proxySockPath := filepath.Join(cfgDirectory, common.StreamProxySocket)
+	_ = os.Remove(proxySockPath)
+	proxyListener, err := net.Listen("unix", proxySockPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer proxyListener.Close()
+	// Owner only: connecting gives access to the user's devices.
+	if err := os.Chmod(proxySockPath, 0600); err != nil {
+		log.Fatal(err)
+	}
+	common.SafeGo(func() { deskconnd.ServeStreamProxy(proxyListener, clientSessions, cfgDirectory) })
+
 	// xlink runs in this process: its app layer serves deskconn.sock (the CLI's local
 	// realm), and deskconnd registers every app-layer and CLI-facing procedure on it
 	// through an in-memory session.

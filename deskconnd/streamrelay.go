@@ -44,7 +44,7 @@ func (d *Deskconn) handleRelayConn(conn net.Conn) {
 	// feature's first message -- its ephemeral public key -- is real
 	// payload, relayed as the first frame.
 	if header.Label == common.VPNChannelLabel {
-		d.handleVPNChannel(NewRelayChannel(conn))
+		d.handleVPNChannel(common.NewRelayChannel(conn))
 		return
 	}
 
@@ -53,7 +53,7 @@ func (d *Deskconn) handleRelayConn(conn net.Conn) {
 		conn.Close()
 		return
 	}
-	channel := NewRelayChannel(conn)
+	channel := common.NewRelayChannel(conn)
 
 	switch header.Label {
 	case common.ShellChannelLabel:

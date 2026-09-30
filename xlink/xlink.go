@@ -206,7 +206,7 @@ func handleAuxDataChannel(xlinkStreamSock string) func(sessionID string, channel
 			if relayFirstMessage {
 				fm = firstMessage
 			}
-			RelayWebRTCChannel(channel, conn, fm)
+			common.RelayWebRTCChannel(channel, conn, fm)
 		})
 	}
 }

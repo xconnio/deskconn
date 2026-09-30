@@ -2,18 +2,22 @@ package deskconn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/xconn-go"
 )
 
 // RunLogs is the client entry point for `deskconn logs`. It validates since
 // up front, opens one raw stream/channel, sends the one-time log
 // request, then writes every received chunk straight to stdout until the
-// device finishes or ctx is canceled.
+// device finishes or ctx is canceled. mode picks "quic"/"p2p" directly, or
+// "" uses deskconnd's persistent connection, falling back (without deskconnd)
+// to trying P2P first, then QUIC.
 func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 	follow bool, tailN int64, since string) error {
 	if since != "" {
@@ -29,14 +33,25 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return runLogsP2P(ctx, p2pSess, source, follow, tailN, since)
+		return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since)
 	case modeQUIC:
 		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since)
 	default:
+		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
+		if err == nil {
+			defer func() { _ = daemon.Close() }()
+			if daemon.P2P() {
+				return runLogsP2P(ctx, daemon, source, follow, tailN, since)
+			}
+			return runLogsOnStream(ctx, daemon, realm, source, follow, tailN, since)
+		}
+		if !errors.Is(err, ErrDaemonUnavailable) {
+			return err
+		}
 		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
-			return runLogsP2P(ctx, p2pSess, source, follow, tailN, since)
+			return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since)
 		}
 		fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
 		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since)
@@ -50,8 +65,13 @@ func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 		return err
 	}
 	defer func() { _ = quicSess.Connection().Close() }()
+	return runLogsOnStream(ctx, quicSess, realm, source, follow, tailN, since)
+}
 
-	stream, err := quicSess.OpenStream()
+// runLogsOnStream runs the log request on a raw stream opened on sess.
+func runLogsOnStream(ctx context.Context, sess xconn.MultiplexedSession, realm, source string,
+	follow bool, tailN int64, since string) error {
+	stream, err := sess.OpenStream()
 	if err != nil {
 		return err
 	}
@@ -124,9 +144,9 @@ func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 	}
 }
 
-func runLogsP2P(ctx context.Context, p2pSess P2PChannelOpener, source string,
+func runLogsP2P(ctx context.Context, p2pSess ChannelOpener, source string,
 	follow bool, tailN int64, since string) error {
-	channel, err := openP2PChannel(p2pSess, common.LogChannelLabel)
+	channel, err := p2pSess.OpenMessageChannel(common.LogChannelLabel)
 	if err != nil {
 		return err
 	}

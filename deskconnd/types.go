@@ -2,6 +2,7 @@ package deskconnd
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -11,6 +12,61 @@ import (
 	"github.com/xconnio/xconn-go"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
+
+// quicConn is a device's QUIC connection plus a count of the operations running on it.
+// Once retired (its session upgraded to P2P) it closes as soon as that count is zero.
+type quicConn struct {
+	*common.DeviceConn
+	closeConn func() error
+
+	mu      sync.Mutex
+	users   int
+	retired bool
+	closed  bool
+}
+
+func newQUICConn(conn *common.DeviceConn) *quicConn {
+	return &quicConn{DeviceConn: conn, closeConn: conn.Connection().Close}
+}
+
+// acquire reports whether the connection can still be used, and counts the caller as a
+// user until it calls release.
+func (q *quicConn) acquire() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return false
+	}
+	q.users++
+	return true
+}
+
+func (q *quicConn) release() {
+	q.mu.Lock()
+	q.users--
+	q.mu.Unlock()
+	q.closeIf(false)
+}
+
+func (q *quicConn) retire() {
+	q.mu.Lock()
+	q.retired = true
+	q.mu.Unlock()
+	q.closeIf(false)
+}
+
+// closeIf closes the connection if force is set, or if it's retired and unused.
+func (q *quicConn) closeIf(force bool) {
+	q.mu.Lock()
+	closeNow := !q.closed && (force || (q.retired && q.users == 0))
+	if closeNow {
+		q.closed = true
+	}
+	q.mu.Unlock()
+	if closeNow {
+		_ = q.closeConn()
+	}
+}
 
 type deviceSession struct {
 	session     *xconn.Session
@@ -25,6 +81,10 @@ type deviceSession struct {
 	// session's presence.
 	webrtcSession *xconnwebrtc.WebRTCSession
 
+	// quic is the connection the entry was established on. After a P2P upgrade it's
+	// retired: only operations that started on it still use it.
+	quic *quicConn
+
 	upgradeSubs []chan *xconn.Session
 	sync.Mutex
 }
@@ -36,6 +96,17 @@ func (ds *deviceSession) subscribeUpgrade() <-chan *xconn.Session {
 	ds.upgradeSubs = append(ds.upgradeSubs, ch)
 	ds.Unlock()
 	return ch
+}
+
+// closeTransports closes a dropped entry's connections: its QUIC connection, unless its
+// successor keeps the same one, and its PeerConnection (leaving the session doesn't).
+func (ds *deviceSession) closeTransports(keepQUIC *quicConn) {
+	if ds.quic != nil && ds.quic != keepQUIC {
+		ds.quic.closeIf(true)
+	}
+	if ds.webrtcSession != nil {
+		_ = ds.webrtcSession.Connection().Close()
+	}
 }
 
 // notifyReplaced delivers newSession to every subscriber registered via subscribeUpgrade and
@@ -101,7 +172,18 @@ func (c *ClientSessions) SessionContext(realm string) (context.Context, bool) {
 // long-lived proxied call sharing this device connection can independently re-issue itself
 // on the new session.
 func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session,
-	webrtcSession *xconnwebrtc.WebRTCSession, ctx context.Context, cancel context.CancelFunc) {
+	webrtcSession *xconnwebrtc.WebRTCSession, quic *common.DeviceConn, ctx context.Context,
+	cancel context.CancelFunc) {
+	var conn *quicConn
+	if quic != nil {
+		conn = newQUICConn(quic)
+	}
+	c.storeDeviceSession(realm, session, webrtcSession, conn, ctx, cancel)
+}
+
+func (c *ClientSessions) storeDeviceSession(realm string, session *xconn.Session,
+	webrtcSession *xconnwebrtc.WebRTCSession, quic *quicConn, ctx context.Context,
+	cancel context.CancelFunc) {
 	c.Lock()
 	old, hadOld := c.sessions[realm]
 	if hadOld {
@@ -110,6 +192,7 @@ func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session
 	c.sessions[realm] = &deviceSession{
 		session:       session,
 		webrtcSession: webrtcSession,
+		quic:          quic,
 		connectedAt:   time.Now(),
 		ctx:           ctx,
 		cancel:        cancel,
@@ -117,6 +200,7 @@ func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session
 	c.Unlock()
 
 	if hadOld {
+		old.closeTransports(quic)
 		old.notifyReplaced(session)
 	}
 }
@@ -133,11 +217,16 @@ func (c *ClientSessions) DeviceSessions() map[string]int64 {
 
 func (c *ClientSessions) DeleteDeviceSession(realm string) {
 	c.Lock()
-	if session, ok := c.sessions[realm]; ok {
+	session, ok := c.sessions[realm]
+	if ok {
 		session.cancel()
 		delete(c.sessions, realm)
 	}
 	c.Unlock()
+
+	if ok {
+		session.closeTransports(nil)
+	}
 }
 
 func (c *ClientSessions) Disconnect(realm string) {
@@ -152,6 +241,7 @@ func (c *ClientSessions) Disconnect(realm string) {
 
 	if ok {
 		_ = session.session.Leave()
+		session.closeTransports(nil)
 	}
 }
 
@@ -167,6 +257,7 @@ func (c *ClientSessions) DisconnectAll() {
 	for _, entry := range sessions {
 		entry.cancel()
 		_ = entry.session.Leave()
+		entry.closeTransports(nil)
 	}
 }
 
@@ -222,17 +313,19 @@ func (c *ClientSessions) ensureDeviceSession(ctx context.Context, realm, cfgDire
 // so nobody who subscribed to it is left waiting on a channel that would otherwise never fire.
 func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirectory string,
 	staleEntry *deviceSession, subscribe bool) (*xconn.Session, <-chan *xconn.Session, error) {
-	quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+	deviceConn, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		if staleEntry != nil {
 			staleEntry.notifyReplaced(nil)
 		}
 		return nil, nil, err
 	}
+	quicSess := newQUICConn(deviceConn)
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
 	entry := &deviceSession{
 		session:     quicSess.Session,
+		quic:        quicSess,
 		connectedAt: time.Now(),
 		ctx:         sessCtx,
 		cancel:      cancel,
@@ -240,11 +333,16 @@ func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirect
 
 	c.Lock()
 	delete(c.disconnected, realm)
-	if old, ok := c.sessions[realm]; ok {
+	old, hadOld := c.sessions[realm]
+	if hadOld {
 		old.cancel()
 	}
 	c.sessions[realm] = entry
 	c.Unlock()
+
+	if hadOld {
+		old.closeTransports(quicSess)
+	}
 
 	if staleEntry != nil {
 		staleEntry.notifyReplaced(quicSess.Session)
@@ -259,8 +357,8 @@ func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirect
 }
 
 // upgradeToWebRTC negotiates a WebRTC session using quicSess for signaling. On success, it atomically
-// replaces the stored session, closes the QUIC connection, starts the reconnect loop.
-func (c *ClientSessions) upgradeToWebRTC(quicSess *common.DeviceConn, realm, cfgDirectory string) {
+// replaces the stored session, retires the QUIC connection, starts the reconnect loop.
+func (c *ClientSessions) upgradeToWebRTC(quicSess *quicConn, realm, cfgDirectory string) {
 	authid, privKey, err := common.ReadCredentials(cfgDirectory)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)
@@ -280,10 +378,12 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *common.DeviceConn, realm, cfg
 	if c.isDisconnected(realm) {
 		cancel()
 		_ = webrtcSess.Leave()
+		_ = webrtcSess.Connection().Close()
 		return
 	}
 
-	c.StoreDeviceSession(realm, webrtcSess.Session, webrtcSess, sessCtx, cancel)
+	c.storeDeviceSession(realm, webrtcSess.Session, webrtcSess, quicSess, sessCtx, cancel)
+	quicSess.retire()
 	log.Printf("p2p upgrade %s: upgraded to WebRTC", realm)
 
 	common.SafeGo(func() { c.reconnectLoop(webrtcSess.Session, nil, realm, cfgDirectory) }) //nolint
@@ -306,7 +406,7 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 	maxDelay := 30 * time.Second
 	for c.LoggedIn() && !c.isDisconnected(realm) {
 		c.DeleteDeviceSession(realm)
-		newSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+		deviceConn, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			log.Printf("failed to connect cloud: %v", err)
 			retryDelay *= 2
@@ -317,11 +417,41 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 			continue
 		}
 		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-		c.StoreDeviceSession(realm, newSess.Session, nil, sessCtx, cancel)
+		newSess := newQUICConn(deviceConn)
+		c.storeDeviceSession(realm, newSess.Session, nil, newSess, sessCtx, cancel)
 		log.Printf("reconnect %s: reconnected via QUIC", realm)
 		common.SafeGo(func() { c.upgradeToWebRTC(newSess, realm, cfgDirectory) }) //nolint
 		return
 	}
+}
+
+// deviceTransports returns what raw streams to realm's device can be opened on, connecting
+// first if needed: quic (retired, possibly closed, once rtc is set) and rtc.
+func (c *ClientSessions) deviceTransports(ctx context.Context, realm,
+	cfgDirectory string) (quic *quicConn, rtc *xconnwebrtc.WebRTCSession, err error) {
+	if _, err := c.EnsureDeviceSession(ctx, realm, cfgDirectory); err != nil {
+		return nil, nil, err
+	}
+
+	c.Lock()
+	defer c.Unlock()
+	ds, ok := c.sessions[realm]
+	if !ok {
+		return nil, nil, fmt.Errorf("connection to %s was lost", realm)
+	}
+	return ds.quic, ds.webrtcSession, nil
+}
+
+// holdSession keeps the QUIC connection session runs on, if it does, open until the returned
+// func is called, so a call in flight when the P2P upgrade lands isn't cut off.
+func (c *ClientSessions) holdSession(realm string, session *xconn.Session) func() {
+	c.Lock()
+	defer c.Unlock()
+	ds, ok := c.sessions[realm]
+	if ok && ds.session == session && ds.quic != nil && ds.webrtcSession == nil && ds.quic.acquire() {
+		return ds.quic.release
+	}
+	return func() {}
 }
 
 func (c *ClientSessions) LoggedIn() bool {
@@ -346,5 +476,6 @@ func (c *ClientSessions) Logout() {
 	for _, session := range sessions {
 		session.cancel()
 		_ = session.session.Leave()
+		session.closeTransports(nil)
 	}
 }

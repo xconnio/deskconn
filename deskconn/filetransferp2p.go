@@ -6,8 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/pion/webrtc/v4"
 
@@ -18,36 +16,33 @@ import (
 // to open a raw data channel on it. Depending on the interface rather than
 // the concrete type also lets tests drive this code against a bare
 // *webrtc.PeerConnection, with no WAMP handshake required.
-type P2PChannelOpener interface {
-	OpenChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
+type P2PChannelOpener = common.DataChannelOpener
+
+// ChannelOpener opens data channels to a device: on a P2P session of its own (see
+// P2PChannels) or on deskconnd's persistent connection (see DaemonStreams).
+type ChannelOpener interface {
+	OpenMessageChannel(label string) (common.MessageChannel, error)
 }
 
-// openP2PChannel opens a fresh, reliable, ordered raw data channel on
-// sess's shared PeerConnection and waits for it to open.
-func openP2PChannel(sess P2PChannelOpener, label string) (*webrtc.DataChannel, error) {
-	channel, err := sess.OpenChannel(label, nil)
+// P2PChannels opens channels directly on sess.
+func P2PChannels(sess P2PChannelOpener) ChannelOpener { return p2pChannels{sess: sess} }
+
+type p2pChannels struct{ sess P2PChannelOpener }
+
+func (p p2pChannels) OpenMessageChannel(label string) (common.MessageChannel, error) {
+	channel, err := common.OpenDataChannel(p.sess, label)
 	if err != nil {
 		return nil, err
 	}
+	return channel, nil
+}
 
-	closedCh := make(chan struct{})
-	var closedOnce sync.Once
-	signalClosed := func() { closedOnce.Do(func() { close(closedCh) }) }
-	channel.OnClose(signalClosed)
-	channel.OnError(func(error) { signalClosed() })
-
-	openCh := make(chan struct{})
-	channel.OnOpen(func() { close(openCh) })
-
-	select {
-	case <-openCh:
-		return channel, nil
-	case <-closedCh:
-		return nil, fmt.Errorf("remote closed the file-stream channel before it opened")
-	case <-time.After(common.P2PRequestTimeout):
-		_ = channel.Close()
-		return nil, fmt.Errorf("timed out opening file-stream channel")
+// Close closes sess, if it can be.
+func (p p2pChannels) Close() error {
+	if closer, ok := p.sess.(io.Closer); ok {
+		return closer.Close()
 	}
+	return nil
 }
 
 func responseErr(resp common.FSResponse) error {
@@ -61,8 +56,8 @@ func responseErr(resp common.FSResponse) error {
 // p2pClientKeyExchange), sends one encrypted request, and waits for the one
 // encrypted response it expects back -- the pattern used by the list and
 // init control ops, which carry no binary payload.
-func p2pRequest(sess P2PChannelOpener, label string, req common.FSRequest) (*common.FSResponse, error) {
-	channel, err := openP2PChannel(sess, label)
+func p2pRequest(sess ChannelOpener, label string, req common.FSRequest) (*common.FSResponse, error) {
+	channel, err := sess.OpenMessageChannel(label)
 	if err != nil {
 		return nil, err
 	}
@@ -106,9 +101,9 @@ func p2pRequest(sess P2PChannelOpener, label string, req common.FSRequest) (*com
 // p2pReadWorker opens one data channel on sess's shared PeerConnection and
 // owns it for the lifetime of the goroutine running it, reusing it across
 // every job pulled from jobs.
-func p2pReadWorker(sess P2PChannelOpener, rootArg string, jobs <-chan transferChunk, localPath string,
+func p2pReadWorker(sess ChannelOpener, rootArg string, jobs <-chan transferChunk, localPath string,
 	localIsDir bool, sourceRoot string, progress *common.TransferProgress) error {
-	channel, err := openP2PChannel(sess, "filestream-read")
+	channel, err := sess.OpenMessageChannel("filestream-read")
 	if err != nil {
 		return err
 	}
@@ -137,10 +132,7 @@ func p2pReadWorker(sess P2PChannelOpener, rootArg string, jobs <-chan transferCh
 				}
 			}
 		case common.P2PMsgData:
-			select {
-			case dataCh <- plaintext:
-			case <-closed:
-			}
+			common.DeliverUnlessClosed(dataCh, plaintext, closed)
 		}
 	})
 
@@ -153,7 +145,7 @@ func p2pReadWorker(sess P2PChannelOpener, rootArg string, jobs <-chan transferCh
 	return nil
 }
 
-func p2pReadOneChunk(channel *webrtc.DataChannel, closed <-chan struct{}, ackCh chan common.FSResponse,
+func p2pReadOneChunk(channel common.MessageChannel, closed <-chan struct{}, ackCh chan common.FSResponse,
 	dataCh chan []byte, sendKey []byte, rootArg string, chunk transferChunk, localPath string, localIsDir bool,
 	sourceRoot string,
 	progress *common.TransferProgress) error {
@@ -200,9 +192,9 @@ func p2pReadOneChunk(channel *webrtc.DataChannel, closed <-chan struct{}, ackCh 
 // p2pWriteWorker is the upload counterpart to p2pReadWorker: it opens one
 // data channel on sess's shared PeerConnection and owns it for the lifetime
 // of the goroutine running it, reusing it across every job pulled from jobs.
-func p2pWriteWorker(sess P2PChannelOpener, rootArg string, jobs <-chan transferChunk, localBase string,
+func p2pWriteWorker(sess ChannelOpener, rootArg string, jobs <-chan transferChunk, localBase string,
 	sourceIsDir, targetIsDirHint bool, progress *common.TransferProgress) error {
-	channel, err := openP2PChannel(sess, "filestream-write")
+	channel, err := sess.OpenMessageChannel("filestream-write")
 	if err != nil {
 		return err
 	}
@@ -238,7 +230,7 @@ func p2pWriteWorker(sess P2PChannelOpener, rootArg string, jobs <-chan transferC
 	return nil
 }
 
-func p2pWriteOneChunk(channel *webrtc.DataChannel, closed, sendReady <-chan struct{}, ackCh chan common.FSResponse,
+func p2pWriteOneChunk(channel common.MessageChannel, closed, sendReady <-chan struct{}, ackCh chan common.FSResponse,
 	sendKey []byte, rootArg string, chunk transferChunk, localBase string, sourceIsDir, targetIsDirHint bool,
 	progress *common.TransferProgress) error {
 	req := common.FSRequest{
@@ -300,7 +292,7 @@ func p2pWriteOneChunk(channel *webrtc.DataChannel, closed, sendReady <-chan stru
 // default). Opening additional channels on an already-connected
 // PeerConnection needs no new ICE/DTLS handshake, so every worker's channel
 // comes up immediately once sess itself is connected.
-func DownloadFilesP2P(sess P2PChannelOpener, remotePath, localPath string, recursive bool, numWorkers int) error {
+func DownloadFilesP2P(sess ChannelOpener, remotePath, localPath string, recursive bool, numWorkers int) error {
 	return downloadFiles(remotePath, localPath, recursive, numWorkers,
 		func(req common.FSRequest) (*common.FSResponse, error) {
 			return p2pRequest(sess, "filestream-list", req)
@@ -319,7 +311,7 @@ func DownloadFilesP2P(sess P2PChannelOpener, remotePath, localPath string, recur
 // additional channels on an already-connected PeerConnection needs no new
 // ICE/DTLS handshake, so every worker's channel comes up immediately once
 // sess itself is connected.
-func UploadFilesP2P(sess P2PChannelOpener, localPath, remotePath string, recursive bool, numWorkers int) error {
+func UploadFilesP2P(sess ChannelOpener, localPath, remotePath string, recursive bool, numWorkers int) error {
 	localBase := filepath.Dir(localPath)
 	return uploadFiles(localPath, remotePath, recursive, numWorkers,
 		func(req common.FSRequest) (*common.FSResponse, error) {

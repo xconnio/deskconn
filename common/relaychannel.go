@@ -1,31 +1,28 @@
-package deskconnd
+package common
 
 import (
 	"net"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
-
-	"github.com/xconnio/deskconn/common"
 )
 
-// RelayChannel implements MessageChannel over a local connection to
-// deskconnd's stream-relay listener, standing in for the real
-// *webrtc.DataChannel. The backpressure methods are no-ops here: real
-// backpressure is already enforced on xlink's side (see
-// RelayWebRTCChannel), and Send/SendText block on conn's own OS write
-// buffer instead.
+// RelayChannel implements MessageChannel over a local connection carrying
+// RelayFrames, standing in for a *webrtc.DataChannel that another process
+// holds (see RelayWebRTCChannel). The backpressure methods are no-ops: that
+// process enforces it, and Send/SendText block on conn's own write buffer.
 type RelayChannel struct {
 	conn net.Conn
 
 	writeMu sync.Mutex
 
-	startOnce sync.Once
+	handlerMu sync.Mutex
 	onMessage func(msg webrtc.DataChannelMessage)
-
-	closeOnce sync.Once
 	onClose   func()
 	onError   func(err error)
+
+	startOnce sync.Once
+	closeOnce sync.Once
 }
 
 func NewRelayChannel(conn net.Conn) *RelayChannel {
@@ -34,24 +31,33 @@ func NewRelayChannel(conn net.Conn) *RelayChannel {
 
 func (c *RelayChannel) readLoop() {
 	for {
-		data, isText, err := common.ReadRelayFrame(c.conn)
+		data, isText, err := ReadRelayFrame(c.conn)
 		if err != nil {
-			if c.onError != nil {
-				c.onError(err)
+			c.handlerMu.Lock()
+			onError := c.onError
+			c.handlerMu.Unlock()
+			if onError != nil {
+				onError(err)
 			}
 			c.signalClosed()
 			return
 		}
-		if c.onMessage != nil {
-			c.onMessage(webrtc.DataChannelMessage{Data: data, IsString: isText})
+		c.handlerMu.Lock()
+		onMessage := c.onMessage
+		c.handlerMu.Unlock()
+		if onMessage != nil {
+			onMessage(webrtc.DataChannelMessage{Data: data, IsString: isText})
 		}
 	}
 }
 
 func (c *RelayChannel) signalClosed() {
 	c.closeOnce.Do(func() {
-		if c.onClose != nil {
-			c.onClose()
+		c.handlerMu.Lock()
+		onClose := c.onClose
+		c.handlerMu.Unlock()
+		if onClose != nil {
+			onClose()
 		}
 	})
 }
@@ -59,25 +65,36 @@ func (c *RelayChannel) signalClosed() {
 func (c *RelayChannel) Send(data []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	return common.WriteRelayFrame(c.conn, data, false)
+	return WriteRelayFrame(c.conn, data, false)
 }
 
 func (c *RelayChannel) SendText(s string) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	return common.WriteRelayFrame(c.conn, []byte(s), true)
+	return WriteRelayFrame(c.conn, []byte(s), true)
 }
 
 // OnMessage registers the handler and, the first time it's called, starts
 // reading -- deferred until here so no frame can be delivered before a
 // handler is registered.
 func (c *RelayChannel) OnMessage(f func(msg webrtc.DataChannelMessage)) {
+	c.handlerMu.Lock()
 	c.onMessage = f
-	c.startOnce.Do(func() { common.SafeGo(c.readLoop) })
+	c.handlerMu.Unlock()
+	c.startOnce.Do(func() { SafeGo(c.readLoop) })
 }
 
-func (c *RelayChannel) OnClose(f func())      { c.onClose = f }
-func (c *RelayChannel) OnError(f func(error)) { c.onError = f }
+func (c *RelayChannel) OnClose(f func()) {
+	c.handlerMu.Lock()
+	c.onClose = f
+	c.handlerMu.Unlock()
+}
+
+func (c *RelayChannel) OnError(f func(error)) {
+	c.handlerMu.Lock()
+	c.onError = f
+	c.handlerMu.Unlock()
+}
 
 func (c *RelayChannel) Close() error {
 	c.signalClosed()

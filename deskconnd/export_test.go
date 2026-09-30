@@ -129,3 +129,21 @@ func (t *FakeShellTransport) Written() [][]byte {
 	defer t.mu.Unlock()
 	return append([][]byte(nil), t.written...)
 }
+
+// QUICConn exposes quicConn's lifecycle; closeConn stands in for the connection.
+type QUICConn = quicConn
+
+func NewQUICConn(closeConn func() error) *QUICConn { return &quicConn{closeConn: closeConn} }
+
+func (q *quicConn) Acquire() bool { return q.acquire() }
+func (q *quicConn) Release()      { q.release() }
+func (q *quicConn) Retire()       { q.retire() }
+func (q *quicConn) Close()        { q.closeIf(true) }
+
+// RetireQUIC retires realm's QUIC connection, as a P2P upgrade does.
+func (c *ClientSessions) RetireQUIC(realm string) {
+	c.Lock()
+	quic := c.sessions[realm].quic
+	c.Unlock()
+	quic.retire()
+}

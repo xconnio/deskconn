@@ -351,6 +351,21 @@ const (
 	RelayBufferedLow  = 256 * 1024
 )
 
+// StreamProxySocket is deskconnd's stream proxy socket, in the config directory.
+const StreamProxySocket = "deskconn-streams.sock"
+
+// StreamProxyConnectTimeout bounds connecting to the device for a stream proxy request.
+const StreamProxyConnectTimeout = 30 * time.Second
+
+// Socket and channel buffer sizes for the stream proxy, chosen so a proxied stream
+// buffers about as much as a direct one in each direction.
+const (
+	StreamProxyUpstreamBuffer   = 64 * 1024 // CLI -> deskconnd
+	StreamProxyDownstreamBuffer = 2 << 20   // deskconnd -> CLI
+	StreamProxyBufferedHigh     = 256 * 1024
+	StreamProxyBufferedLow      = 128 * 1024
+)
+
 const (
 	AIToolClaude = "claude"
 

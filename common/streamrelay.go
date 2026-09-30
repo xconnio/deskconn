@@ -4,7 +4,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -103,4 +105,166 @@ func WebrtcBackpressure(channel MessageChannel) (closed <-chan struct{}, sendRea
 	})
 
 	return closedCh, readyCh
+}
+
+// RelayWebRTCChannel splices channel's messages to/from conn as RelayFrames
+// in both directions, respecting the real channel's send backpressure. If
+// firstMessage is non-nil, it's relayed as the first frame.
+func RelayWebRTCChannel(channel MessageChannel, conn net.Conn, firstMessage []byte) {
+	RelayWebRTCChannelBuffered(channel, conn, firstMessage, RelayBufferedHigh, RelayBufferedLow)
+}
+
+// RelayWebRTCChannelBuffered is RelayWebRTCChannel with its own send buffer limits.
+func RelayWebRTCChannelBuffered(channel MessageChannel, conn net.Conn, firstMessage []byte, high, low uint64) {
+	defer conn.Close()
+
+	if firstMessage != nil {
+		if err := WriteRelayFrame(conn, firstMessage, true); err != nil {
+			_ = channel.Close()
+			return
+		}
+	}
+
+	closed := make(chan struct{})
+	var closeOnce sync.Once
+	signalClosed := func() { closeOnce.Do(func() { close(closed) }) }
+	channel.OnClose(signalClosed)
+	channel.OnError(func(error) { signalClosed() })
+
+	msgCh := make(chan webrtc.DataChannelMessage, 32)
+	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
+		DeliverUnlessClosed(msgCh, msg, closed)
+	})
+
+	// channel -> conn
+	SafeGo(func() {
+		for {
+			select {
+			case msg := <-msgCh:
+				if err := WriteRelayFrame(conn, msg.Data, msg.IsString); err != nil {
+					_ = channel.Close()
+					return
+				}
+			case <-closed:
+				// Relay what arrived before the close, then close conn too.
+				for {
+					select {
+					case msg := <-msgCh:
+						if WriteRelayFrame(conn, msg.Data, msg.IsString) != nil {
+							_ = conn.Close()
+							return
+						}
+					default:
+						_ = conn.Close()
+						return
+					}
+				}
+			}
+		}
+	})
+
+	// conn -> channel, pausing whenever the real channel's own send buffer is
+	// already full rather than queuing unboundedly on top of it.
+	sendReady := make(chan struct{}, 1)
+	channel.SetBufferedAmountLowThreshold(low)
+	channel.OnBufferedAmountLow(func() {
+		select {
+		case sendReady <- struct{}{}:
+		default:
+		}
+	})
+
+	for {
+		data, isText, err := ReadRelayFrame(conn)
+		if err != nil {
+			_ = channel.Close()
+			return
+		}
+
+		for channel.BufferedAmount()+uint64(len(data)) > high {
+			select {
+			case <-sendReady:
+			case <-closed:
+				return
+			}
+		}
+
+		if isText {
+			err = channel.SendText(string(data))
+		} else {
+			err = channel.Send(data)
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// DeliverUnlessClosed sends v on ch, giving up only if ch is full and closed has ended. A
+// plain select on both could drop a message that arrives just as its channel closes.
+func DeliverUnlessClosed[T any](ch chan<- T, v T, closed <-chan struct{}) {
+	select {
+	case ch <- v:
+		return
+	default:
+	}
+	select {
+	case ch <- v:
+	case <-closed:
+	}
+}
+
+// DataChannelOpener is what's needed of a P2P session to open a data channel on it.
+type DataChannelOpener interface {
+	OpenChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
+}
+
+// OpenDataChannel opens a reliable, ordered data channel on sess and waits for it to open.
+func OpenDataChannel(sess DataChannelOpener, label string) (*webrtc.DataChannel, error) {
+	channel, err := sess.OpenChannel(label, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	closedCh := make(chan struct{})
+	var closedOnce sync.Once
+	signalClosed := func() { closedOnce.Do(func() { close(closedCh) }) }
+	channel.OnClose(signalClosed)
+	channel.OnError(func(error) { signalClosed() })
+
+	openCh := make(chan struct{})
+	channel.OnOpen(func() { close(openCh) })
+
+	select {
+	case <-openCh:
+		return channel, nil
+	case <-closedCh:
+		return nil, fmt.Errorf("remote closed the %q channel before it opened", label)
+	case <-time.After(P2PRequestTimeout):
+		_ = channel.Close()
+		return nil, fmt.Errorf("timed out opening the %q channel", label)
+	}
+}
+
+// SpliceConns copies between a and b until either side ends, then closes both.
+func SpliceConns(a, b net.Conn) {
+	var closeOnce sync.Once
+	closeBoth := func() {
+		closeOnce.Do(func() {
+			_ = a.Close()
+			_ = b.Close()
+			// Closing a multiplexed stream only ends its write side: don't wait for the peer.
+			_ = a.SetReadDeadline(time.Now())
+			_ = b.SetReadDeadline(time.Now())
+		})
+	}
+	done := make(chan struct{})
+	SafeGo(func() {
+		_, _ = io.Copy(a, b)
+		closeBoth()
+		close(done)
+	})
+	_, _ = io.Copy(b, a)
+	closeBoth()
+	<-done
 }

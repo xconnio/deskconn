@@ -38,10 +38,17 @@ func (c *p2pTestConnection) OpenChannel(label string, options *webrtc.DataChanne
 // (*Deskconn).HandleAuxDataChannel -- the exact same production entry point
 // cmd/deskconnd/main.go registers via webRtcManager.OnDataChannel, not a
 // lower-level handler reached only in tests. It returns the offerer side as
-// a P2PChannelOpener; every DownloadFilesP2P/UploadFilesP2P call in these
+// a ChannelOpener; every DownloadFilesP2P/UploadFilesP2P call in these
 // tests reuses this single PeerConnection for its control call and every
 // parallel worker's channel, matching production.
-func newP2PTestConnection(t *testing.T) deskconn.P2PChannelOpener {
+func newP2PTestConnection(t *testing.T) deskconn.ChannelOpener {
+	t.Helper()
+	return deskconn.P2PChannels(newP2PTestPeerConnection(t))
+}
+
+// newP2PTestPeerConnection is newP2PTestConnection's offerer, before it's
+// wrapped to open channels directly.
+func newP2PTestPeerConnection(t *testing.T) deskconn.P2PChannelOpener {
 	t.Helper()
 
 	offererPC, err := webrtc.NewPeerConnection(webrtc.Configuration{})
@@ -54,7 +61,7 @@ func newP2PTestConnection(t *testing.T) deskconn.P2PChannelOpener {
 	})
 
 	// At least one data channel must exist before the offer to bootstrap the
-	// SCTP association; every channel opened afterward (by openP2PChannel)
+	// SCTP association; every channel opened afterward (by common.OpenDataChannel)
 	// rides that same association with no renegotiation needed.
 	_, err = offererPC.CreateDataChannel("bootstrap", nil)
 	require.NoError(t, err)
