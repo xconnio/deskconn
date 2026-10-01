@@ -6,11 +6,15 @@ import (
 	"os"
 )
 
+// cloudQUICAddress is the default cloud router. Self-hosted builds override it with
+// -ldflags "-X github.com/xconnio/deskconn/common.cloudQUICAddress=host:port".
+var cloudQUICAddress = "api.deskconn.com:8081" //nolint:gochecknoglobals // set at build time via -ldflags
+
 func CloudQUICAddress() string {
 	if v, ok := os.LookupEnv("DESKCONN_CLOUD_QUIC_ADDRESS"); ok {
 		return v
 	}
-	return "api.deskconn.com:8081"
+	return cloudQUICAddress
 }
 
 func CloudQUICTLSConfig() *tls.Config {
