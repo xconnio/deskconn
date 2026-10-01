@@ -130,6 +130,56 @@ deskconn port forward 8080:80
 The same works with flags: `deskconn --url tcp://203.0.113.5:18080 --private-key 9f2d0b17… shell`. With `--url`,
 commands take no device argument. `ping`, `connect`, `disconnect` and `ls` work on devices of your account only.
 
+## Self-hosting
+
+Run your own cloud (router, account service, web app and database) locally with
+[deskconn-docker](https://github.com/xconnio/deskconn-docker), then build `deskconn` and `deskconnd` pointed at it.
+
+### 1. Start the stack
+
+```bash
+git clone https://github.com/xconnio/deskconn-docker
+cd deskconn-docker
+make setup
+make run
+```
+
+### 2. Build the binaries against it
+
+```bash
+make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081   # builds bin/deskconn and bin/deskconnd
+```
+
+`CLOUD_QUIC_ADDRESS` is the router's QUIC address, baked in as the default. For a stack on another machine, use its
+`host:port`. Local addresses (`127.0.0.1`, `localhost`, `::1`) skip TLS verification, because the local router uses a
+self-signed certificate; any other host needs a router certificate the client trusts.
+
+Setting `DESKCONN_CLOUD_QUIC_ADDRESS` at runtime overrides the built-in address without rebuilding:
+
+```bash
+DESKCONN_CLOUD_QUIC_ADDRESS=127.0.0.1:8081 deskconn ls
+```
+
+### 3. Create an account and attach
+
+Sign up at http://localhost:3000/register. The stack prints one-time passwords to its logs instead of emailing them:
+
+```bash
+docker compose logs -f account-service   # in deskconn-docker
+```
+
+Then follow [Getting started](#getting-started) from step 2 with the binaries from `bin/`, and run the daemon in the
+foreground:
+
+```bash
+systemctl --user stop deskconnd   # if the official release is installed; it shares ~/.deskconn
+bin/deskconn attach --username <email> --password <password>
+bin/deskconnd
+```
+
+Don't run `deskconn self update` on these builds: it installs the official release, which connects to
+`api.deskconn.com`.
+
 ## CLI reference
 
 ### Account
@@ -229,10 +279,10 @@ make build-deskconnd   # builds bin/deskconnd
 make build-deskconn    # builds bin/deskconn
 ```
 
-Override the cloud endpoint for local development:
+Override the cloud router for local development (see [Self-hosting](#self-hosting)):
 
 ```bash
-export DESKCONN_CLOUD_URI=ws://localhost:8080/ws
+export DESKCONN_CLOUD_QUIC_ADDRESS=127.0.0.1:8081
 ```
 
 ### Test
