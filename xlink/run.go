@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -44,11 +43,10 @@ func runDeviceSession(parent context.Context, cfgDirectory, host string, appSess
 		log.Fatal(err)
 	}
 
-	machineID, err := os.ReadFile(common.MachineIDPath)
+	machineIDStr, err := common.MachineID()
 	if err != nil {
 		log.Fatalln("failed to read machine-id: ", err)
 	}
-	machineIDStr := strings.TrimSpace(string(machineID))
 
 	// xlinkStreamSock is where deskconnd listens for relayed raw streams.
 	xlinkStreamSock := filepath.Join(cfgDirectory, "xlink-streams.sock")

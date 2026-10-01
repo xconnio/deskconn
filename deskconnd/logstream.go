@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -203,7 +204,7 @@ func streamLogsRaw(send logSender, sendKey []byte, done <-chan struct{}, ctrl co
 		}
 	}
 
-	if strings.HasPrefix(ctrl.Source, "/") {
+	if filepath.IsAbs(ctrl.Source) {
 		streamFileLogsRaw(send, sendKey, done, ctrl.Source, ctrl.Follow, ctrl.TailN)
 	} else {
 		streamJournalLogsRaw(send, sendKey, done, ctrl.Source, ctrl.Follow, ctrl.TailN, ctrl.Since)

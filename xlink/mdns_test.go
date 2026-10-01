@@ -2,22 +2,19 @@ package xlink_test
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/grandcat/zeroconf"
 	"github.com/stretchr/testify/require"
 
+	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/xlink"
 )
 
 func TestAdvertiseService(t *testing.T) {
-	raw, err := os.ReadFile("/etc/machine-id")
+	machineID, err := common.MachineID()
 	require.NoError(t, err)
-
-	machineID := strings.TrimSpace(string(raw))
 	require.NotEmpty(t, machineID)
 
 	// Advertise service

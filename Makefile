@@ -29,3 +29,12 @@ build-deskconn:
 
 run-deskconn:
 	go run github.com/xconnio/deskconn/cmd/deskconn
+
+.PHONY: install
+ifeq ($(OS),Windows_NT)
+install:
+	powershell -ExecutionPolicy Bypass -File install.ps1
+else
+install:
+	sh install.sh
+endif

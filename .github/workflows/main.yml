@@ -29,6 +29,8 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+          skip-pkg-cache: true
+          skip-build-cache: true
 
       - name: Check that code is formatted via go fmt tool
         run: |

@@ -199,8 +199,8 @@ func resolveBrowsePath(homeDir, pathArg string) (string, error) {
 		return filepath.Clean(homeDir), nil
 	}
 
-	if filepath.IsAbs(pathArg) {
-		return filepath.Clean(pathArg), nil
+	if isRootedPath(pathArg) {
+		return cleanRootedPath(pathArg), nil
 	}
 
 	resolvedPath := filepath.Clean(filepath.Join(homeDir, pathArg))
@@ -418,15 +418,15 @@ func resolveOperationPath(homeDir, pathArg string) (string, error) {
 	}
 
 	var resolved string
-	if filepath.IsAbs(pathArg) {
-		resolved = filepath.Clean(pathArg)
+	if isRootedPath(pathArg) {
+		resolved = cleanRootedPath(pathArg)
 	} else {
 		resolved = filepath.Clean(filepath.Join(homeDir, pathArg))
 	}
 
 	rel, err := filepath.Rel(homeDir, resolved)
 	if err != nil {
-		return "", err
+		return "", errFilePathEscapesHome
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", errFilePathEscapesHome
