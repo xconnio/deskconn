@@ -457,11 +457,11 @@ func awaitDaemonP2P(ctx context.Context, realm, cfgDirectory string) (*DaemonStr
 }
 
 func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
-	authID, _, err := clientCredentials(realm, cfgDirectory)
+	authenticator, err := clientAuthenticator(realm, cfgDirectory)
 	if err != nil {
 		return err
 	}
-	return runStreamCommand(ctx, mode, realm, cfgDirectory, common.ShellControlMsg{AuthID: authID})
+	return runStreamCommand(ctx, mode, realm, cfgDirectory, common.ShellControlMsg{AuthID: authenticator.AuthID()})
 }
 
 // RunExec is the client entry point for anything that runs one command on a

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -20,15 +22,21 @@ import (
 
 func main() {
 	app := kingpin.New("deskconnd", "Deskconn daemon: the device's APIs and its connectivity (xlink)")
-	standalone := app.Flag("standalone", "Serve this device directly on --url to --public-key holders, "+
-		"instead of through the cloud").Bool()
+	standalone := app.Flag("standalone", "Serve this device directly on --url to --public-key holders and "+
+		"--user accounts, instead of through the cloud").Bool()
 	standaloneURL := app.Flag("url", "Where to listen in standalone mode: tcp://host:port or unix:///path").
 		Default("tcp://0.0.0.0:18080").String()
 	standaloneKeys := app.Flag("public-key", "Public key (hex) allowed to connect in standalone mode; repeat for more "+
 		"(see `desk keygen`)").Strings()
+	standaloneUsers := app.Flag("user", "username:password allowed to connect in standalone mode; repeat for "+
+		"more").Envar("DESKCONND_USERS").Strings()
 	kingpin.MustParse(app.Parse(os.Args[1:]))
-	if *standalone && len(*standaloneKeys) == 0 {
-		app.Fatalf("--standalone needs at least one --public-key")
+	standalonePasswords, err := parseUsers(*standaloneUsers)
+	if err != nil {
+		app.Fatalf("%v", err)
+	}
+	if *standalone && len(*standaloneKeys) == 0 && len(standalonePasswords) == 0 {
+		app.Fatalf("--standalone needs at least one --public-key or --user")
 	}
 
 	cfgDirectory, err := common.CfgDirectory()
@@ -125,11 +133,11 @@ func main() {
 			return
 		}
 
-		// Standalone: serve the device realm on --url over yamux to --public-key holders, with no
-		// cloud account. Raw streams and WebRTC data channels are relayed to streamSockPath.
+		// Standalone: serve the device realm on --url over yamux to --public-key holders and
+		// --user accounts, with no cloud account. Raw streams and WebRTC data channels are relayed to streamSockPath.
 		router := xlink.NewDeviceRouter(common.StandaloneRealm)
 		defer router.Close()
-		authenticator := xlink.NewKeyAuthenticator(*standaloneKeys)
+		authenticator := xlink.NewStandaloneAuthenticator(*standaloneKeys, standalonePasswords)
 		listener, err := common.ListenYamux(*standaloneURL, router, authenticator)
 		if err != nil {
 			log.Fatalf("standalone: %v", err)
@@ -146,8 +154,8 @@ func main() {
 		if err := xlink.SetupWebRTC(localSession, router, authenticator, streamSockPath); err != nil {
 			log.Fatalf("standalone: %v", err)
 		}
-		log.Printf("standalone mode: serving realm %s on %s (%s), %d key(s) authorized",
-			common.StandaloneRealm, *standaloneURL, listener.Addr(), len(*standaloneKeys))
+		log.Printf("standalone mode: serving realm %s on %s (%s), %d key(s) and %d user(s) authorized",
+			common.StandaloneRealm, *standaloneURL, listener.Addr(), len(*standaloneKeys), len(standalonePasswords))
 
 		for {
 			select {
@@ -166,6 +174,22 @@ func main() {
 
 	cancel()
 	<-xlinkDone
+}
+
+// parseUsers parses --user values (username:password) into a username -> password map.
+func parseUsers(users []string) (map[string]string, error) {
+	passwords := make(map[string]string, len(users))
+	for _, u := range users {
+		username, password, ok := strings.Cut(u, ":")
+		if !ok || username == "" || password == "" {
+			return nil, fmt.Errorf("invalid --user: want username:password")
+		}
+		if _, dup := passwords[username]; dup {
+			return nil, fmt.Errorf("duplicate --user %q", username)
+		}
+		passwords[username] = password
+	}
+	return passwords, nil
 }
 
 // registerLocalProcedures registers the CLI-facing procedures on session.

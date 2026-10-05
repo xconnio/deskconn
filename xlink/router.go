@@ -23,7 +23,7 @@ func ServeRouter(rawURL, realm string, keys []string) (addr net.Addr, stop func(
 	}
 
 	router := NewDeviceRouter(realm)
-	authenticator := NewKeyAuthenticator(keys)
+	authenticator := NewStandaloneAuthenticator(keys, nil)
 	server := xconn.NewServer(router, authenticator, &xconn.ServerConfig{})
 
 	var listener *xconn.Listener
@@ -60,28 +60,54 @@ func ServeRouter(rawURL, realm string, keys []string) (addr net.Addr, stop func(
 	return listener.Addr(), stop, nil
 }
 
-// keyAuthRole is the role every client of a keyAuthenticator gets.
-const keyAuthRole = "owner"
+// standaloneAuthRole is the role every client of a standaloneAuthenticator gets.
+const standaloneAuthRole = "owner"
 
-// keyAuthenticator accepts cryptosign clients holding one of a fixed set of public keys,
-// whatever authid they present.
-type keyAuthenticator struct{ keys map[string]bool }
+// standaloneAuthenticator accepts cryptosign clients holding one of a fixed set of public
+// keys, whatever authid they present, and wampcra clients with a fixed set of
+// username/password pairs.
+type standaloneAuthenticator struct {
+	keys      map[string]bool
+	passwords map[string]string // username -> password
+}
 
-// NewKeyAuthenticator returns a keyAuthenticator for keys.
-func NewKeyAuthenticator(keys []string) auth.ServerAuthenticator {
-	a := &keyAuthenticator{keys: make(map[string]bool, len(keys))}
+// NewStandaloneAuthenticator returns a standaloneAuthenticator for keys and passwords
+// (username -> password).
+func NewStandaloneAuthenticator(keys []string, passwords map[string]string) auth.ServerAuthenticator {
+	a := &standaloneAuthenticator{keys: make(map[string]bool, len(keys)), passwords: passwords}
 	for _, k := range keys {
 		a.keys[k] = true
 	}
 	return a
 }
 
-func (a *keyAuthenticator) Methods() []auth.Method { return []auth.Method{auth.MethodCryptoSign} }
-
-func (a *keyAuthenticator) Authenticate(request auth.Request) (auth.Response, error) {
-	r, ok := request.(*auth.RequestCryptoSign)
-	if !ok || !a.keys[r.PublicKey()] {
-		return nil, fmt.Errorf("unknown publickey")
+func (a *standaloneAuthenticator) Methods() []auth.Method {
+	var methods []auth.Method
+	if len(a.keys) > 0 {
+		methods = append(methods, auth.MethodCryptoSign)
 	}
-	return auth.NewResponse(r.AuthID(), keyAuthRole, 0)
+	if len(a.passwords) > 0 {
+		methods = append(methods, auth.WAMPCRA)
+	}
+	return methods
+}
+
+func (a *standaloneAuthenticator) Authenticate(request auth.Request) (auth.Response, error) {
+	switch r := request.(type) {
+	case *auth.RequestCryptoSign:
+		if !a.keys[r.PublicKey()] {
+			return nil, fmt.Errorf("unknown publickey")
+		}
+		return auth.NewResponse(r.AuthID(), standaloneAuthRole, 0)
+	default:
+		if request.AuthMethod() != auth.WAMPCRA {
+			return nil, fmt.Errorf("unsupported authmethod %s", request.AuthMethod())
+		}
+		password, ok := a.passwords[request.AuthID()]
+		if !ok {
+			return nil, fmt.Errorf("unknown authid %s", request.AuthID())
+		}
+		// The acceptor verifies the client's signature over the challenge with password.
+		return auth.NewCRAResponse(request.AuthID(), standaloneAuthRole, password, 0), nil
+	}
 }

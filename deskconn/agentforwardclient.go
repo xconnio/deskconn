@@ -19,11 +19,12 @@ import (
 // forwarding, signals ready once the device acks, and for every external
 // connection the device reports, dials agentSock  and relays.
 func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock string, ready chan<- error) error {
-	authID, _, err := clientCredentials(realm, cfgDirectory)
+	authenticator, err := clientAuthenticator(realm, cfgDirectory)
 	if err != nil {
 		ready <- err
 		return err
 	}
+	authID := authenticator.AuthID()
 
 	switch mode {
 	case modeP2P:
