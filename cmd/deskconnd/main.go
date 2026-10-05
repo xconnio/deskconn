@@ -25,7 +25,7 @@ func main() {
 	standaloneURL := app.Flag("url", "Where to listen in standalone mode: tcp://host:port or unix:///path").
 		Default("tcp://0.0.0.0:18080").String()
 	standaloneKeys := app.Flag("public-key", "Public key (hex) allowed to connect in standalone mode; repeat for more "+
-		"(see `deskconn keygen`)").Strings()
+		"(see `desk keygen`)").Strings()
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 	if *standalone && len(*standaloneKeys) == 0 {
 		app.Fatalf("--standalone needs at least one --public-key")

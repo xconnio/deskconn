@@ -17,7 +17,7 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-// RunPortForward is the client entry point for `deskconn port forward`. It
+// RunPortForward is the client entry point for `desk port forward`. It
 // listens on localPort and, for each accepted local connection, opens a
 // fresh raw stream/channel and asks the device to dial remotePort, then
 // relays. mode picks "quic"/"p2p" directly, or "" uses deskconnd's persistent
@@ -195,7 +195,7 @@ func completePortForwardHandshake(conn shellConn, sendKey, receiveKey []byte, re
 	return true
 }
 
-// RunPortReverse is the client entry point for `deskconn port reverse`. It
+// RunPortReverse is the client entry point for `desk port reverse`. It
 // opens one session-level raw stream/channel, asks the device to listen on
 // remotePort, and for every external connection the device reports, dials
 // localhost:localPort and relays. Same mode/fallback policy as

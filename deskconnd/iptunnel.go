@@ -14,7 +14,7 @@ import (
 )
 
 // vpnServer tracks whether this Deskconn is currently willing to act as a
-// VPN exit node (helper set by ArmVPNServing -- see "deskconn vpn start"),
+// VPN exit node (helper set by ArmVPNServing -- see "desk vpn start"),
 // and the single tunnel it allows at a time once it is.
 type vpnServer struct {
 	mu     sync.Mutex
@@ -49,7 +49,7 @@ func (d *Deskconn) handleVPNChannel(channel common.MessageChannel) {
 	if d.vpn.closed || d.vpn.helper == nil {
 		d.vpn.mu.Unlock()
 		log.Warnln("iptunnel: rejecting VPN channel, this machine isn't currently serving " +
-			"(run \"deskconn vpn start\" to allow it)")
+			"(run \"desk vpn start\" to allow it)")
 		_ = channel.Close()
 		return
 	}
@@ -123,7 +123,7 @@ func (d *Deskconn) CloseVPNTunnel() {
 
 // ArmVPNServing arms d to accept inbound VPN tunnel requests using helper,
 // then returns immediately (doesn't block for the serving session's
-// duration, so "deskconn vpn start" can return control to its caller right
+// duration, so "desk vpn start" can return control to its caller right
 // away). Stays armed, serving tunnels one at a time, until
 // DisarmVPNServing or CloseVPNTunnel.
 func (d *Deskconn) ArmVPNServing(helper *common.VPNHelperClient) error {

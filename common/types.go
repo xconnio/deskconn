@@ -29,7 +29,7 @@ type Config struct {
 	Screenshot ScreenshotConfig `yaml:"screenshot,omitempty"`
 }
 
-// StandaloneTarget is a standalone device the CLI connects to directly (deskconn --url),
+// StandaloneTarget is a standalone device the CLI connects to directly (desk --url),
 // instead of a device from the cloud account.
 type StandaloneTarget struct {
 	URL        string // tcp://host:port or unix:///path

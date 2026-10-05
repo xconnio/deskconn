@@ -36,7 +36,7 @@ AccountService -->|Response| App
 flowchart TD
 
 User[User]
-DeskconnCLI[deskconn-cli]
+DeskconnCLI[desk-cli]
 AccountService[Account Service]
 CloudDB[(Cloud Database)]
 CloudRouter[cloud-router]
@@ -64,7 +64,7 @@ Deskconnd -->|Register Procedures| CloudRouter
 
 ```mermaid
 sequenceDiagram
-    participant C as deskconn-cli
+    participant C as desk-cli
     participant D as deskconnd
     participant Dev as Device
 
@@ -96,7 +96,7 @@ when `deskconnd` isn't running.
 
 ```mermaid
 sequenceDiagram
-    participant C as deskconn-cli
+    participant C as desk-cli
     participant D as deskconnd
     participant Dev as Device
 

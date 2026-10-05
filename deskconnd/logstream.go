@@ -46,7 +46,7 @@ func sendLogData(send logSender, sendKey []byte, data []byte) bool {
 	return send(env) == nil
 }
 
-// handleQUICLogsStream serves one `deskconn logs` session over a raw QUIC
+// handleQUICLogsStream serves one `desk logs` session over a raw QUIC
 // stream: key exchange, read the client's one-time request, then stream
 // log data until done or the client disconnects.
 func (d *Deskconn) handleQUICLogsStream(stream net.Conn) {
@@ -118,7 +118,7 @@ func (d *Deskconn) handleQUICLogsStream(stream net.Conn) {
 	streamLogsRaw(send, sendKey, done, ctrl)
 }
 
-// HandleLogsChannel serves one `deskconn logs` session over a raw WebRTC
+// HandleLogsChannel serves one `desk logs` session over a raw WebRTC
 // data channel, mirroring handleQUICLogsStream.
 func (d *Deskconn) HandleLogsChannel(_ string, channel common.MessageChannel, firstMessage []byte) {
 	common.SafeGo(func() { d.serveLogsChannel(channel, firstMessage) })

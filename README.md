@@ -14,7 +14,7 @@ The Deskconn ecosystem consists of five pieces. This repository contains the two
 | Component                                                                                                                               | Role                                                                                                                          |
 |-----------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
 | [deskconnd](https://github.com/xconnio/deskconn)                                                                                        | Desktop daemon. Registers and exposes desktop APIs over WAMP. Runs as a systemd user service.                                 |
-| [deskconn](https://github.com/xconnio/deskconn)                                                                                         | Control CLI. Attach desktops, manage files, open shells, forward ports, and more.                                             |
+| [desk](https://github.com/xconnio/deskconn)                                                                                             | Control CLI. Attach desktops, manage files, open shells, forward ports, and more.                                             |
 | [deskconn-router](https://github.com/xconnio/deskconn-router)                                                                           | Cloud WAMP router. The central hub — every component (CLI, daemon, account service, web app, mobile app) connects through it. |
 | [deskconn-account-service](https://github.com/xconnio/deskconn-account-service)                                                         | Manages user accounts, organizations, and per-device CryptoSign principals.                                                   |
 | [deskconn-web-app](https://github.com/xconnio/deskconn-web-app) / [deskconn-mobile-app](https://github.com/xconnio/deskconn-mobile-app) | Web and mobile interfaces.                                                                                                    |
@@ -22,7 +22,7 @@ The Deskconn ecosystem consists of five pieces. This repository contains the two
 ### How a command reaches your desktop
 
 ```
-deskconn CLI
+desk CLI
     │  (Unix socket — ~/.deskconn/deskconn.sock)
     ▼
 deskconnd (local proxy)
@@ -37,7 +37,7 @@ completes.
 
 ### Authentication
 
-All cloud connections use CryptoSign (Ed25519). `deskconn login` generates a keypair, registers the public key with the
+All cloud connections use CryptoSign (Ed25519). `desk login` generates a keypair, registers the public key with the
 account service, and stores the private key in `~/.deskconn/id_ed25519`.
 
 ## Installation
@@ -46,7 +46,7 @@ account service, and stores the private key in `~/.deskconn/id_ed25519`.
 curl -fsSL https://get.deskconn.com | sh
 ```
 
-This installs `deskconn` and `deskconnd` to `~/.local/bin` and registers `deskconnd` as a systemd user service that
+This installs `desk` and `deskconnd` to `~/.local/bin` and registers `deskconnd` as a systemd user service that
 starts automatically.
 
 ## Getting started
@@ -58,9 +58,9 @@ Sign up at [deskconn.com](https://deskconn.com) or via the mobile app.
 ### 2. Attach the desktop to the cloud
 
 ```bash
-deskconn attach --username <email> --password <password>
+desk attach --username <email> --password <password>
 # or read the password from stdin
-echo "$PASSWORD" | deskconn attach --username <email> --password-stdin
+echo "$PASSWORD" | desk attach --username <email> --password-stdin
 ```
 
 This creates a realm for the desktop under your account and writes credentials to `~/.deskconn/credentials.json`. The
@@ -69,27 +69,27 @@ daemon picks these up automatically and connects to the cloud router.
 ### 3. Log in from the CLI
 
 ```bash
-deskconn login --username <username> --password <password>
+desk login --username <username> --password <password>
 ```
 
-You'll then be prompted for the one-time password emailed to you. Once verified, deskconn generates an Ed25519
+You'll then be prompted for the one-time password emailed to you. Once verified, desk generates an Ed25519
 keypair, registers it with the account service, and stores it locally. You only need to do this once per machine;
 the key is valid for 30 days and is renewed on the next login.
 
 ### 4. List your devices
 
 ```bash
-deskconn ls
-deskconn ls --refresh    # fetch the current list from the cloud
-deskconn ls --detailed   # show realm, ID, and organisation
+desk ls
+desk ls --refresh    # fetch the current list from the cloud
+desk ls --detailed   # show realm, ID, and organisation
 ```
 
 ### 5. Open a shell
 
 ```bash
-deskconn shell <device>
-deskconn shell <device> --mode p2p      # force WebRTC
-deskconn shell <device> --mode routed   # force cloud router
+desk shell <device>
+desk shell <device> --mode p2p      # force WebRTC
+desk shell <device> --mode routed   # force cloud router
 ```
 
 ## Standalone mode (no cloud)
@@ -101,7 +101,7 @@ work the same way.
 ### 1. Generate a key pair
 
 ```bash
-deskconn keygen
+desk keygen
 # Public Key:  65160c38…
 # Private Key: 9f2d0b17…
 ```
@@ -120,20 +120,20 @@ deskconnd --standalone --url tcp://0.0.0.0:18080 --public-key 65160c38… [--pub
 
 ```bash
 export DESKCONN_URL=tcp://203.0.113.5:18080 DESKCONN_PRIVATE_KEY=9f2d0b17…
-deskconn shell
-deskconn exec -- uname -a
-deskconn file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
-deskconn file cat :/etc/hostname
-deskconn port forward 8080:80
+desk shell
+desk exec -- uname -a
+desk file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
+desk file cat :/etc/hostname
+desk port forward 8080:80
 ```
 
-The same works with flags: `deskconn --url tcp://203.0.113.5:18080 --private-key 9f2d0b17… shell`. With `--url`,
+The same works with flags: `desk --url tcp://203.0.113.5:18080 --private-key 9f2d0b17… shell`. With `--url`,
 commands take no device argument. `ping`, `connect`, `disconnect` and `ls` work on devices of your account only.
 
 ## Self-hosting
 
 Run your own cloud (router, account service, web app and database) locally with
-[deskconn-docker](https://github.com/xconnio/deskconn-docker), then build `deskconn` and `deskconnd` pointed at it.
+[deskconn-docker](https://github.com/xconnio/deskconn-docker), then build `desk` and `deskconnd` pointed at it.
 
 ### 1. Start the stack
 
@@ -147,7 +147,7 @@ make run
 ### 2. Build the binaries against it
 
 ```bash
-make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081   # builds bin/deskconn and bin/deskconnd
+make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081   # builds bin/desk and bin/deskconnd
 ```
 
 `CLOUD_QUIC_ADDRESS` is the router's QUIC address, baked in as the default. For a stack on another machine, use its
@@ -157,7 +157,7 @@ self-signed certificate; any other host needs a router certificate the client tr
 Setting `DESKCONN_CLOUD_QUIC_ADDRESS` at runtime overrides the built-in address without rebuilding:
 
 ```bash
-DESKCONN_CLOUD_QUIC_ADDRESS=127.0.0.1:8081 deskconn ls
+DESKCONN_CLOUD_QUIC_ADDRESS=127.0.0.1:8081 desk ls
 ```
 
 ### 3. Create an account and attach
@@ -173,11 +173,11 @@ foreground:
 
 ```bash
 systemctl --user stop deskconnd   # if the official release is installed; it shares ~/.deskconn
-bin/deskconn attach --username <email> --password <password>
+bin/desk attach --username <email> --password <password>
 bin/deskconnd
 ```
 
-Don't run `deskconn self update` on these builds: it installs the official release, which connects to
+Don't run `desk self update` on these builds: it installs the official release, which connects to
 `api.deskconn.com`.
 
 ## CLI reference
@@ -185,35 +185,35 @@ Don't run `deskconn self update` on these builds: it installs the official relea
 ### Account
 
 ```
-deskconn login    [--username] [--password] [--password-stdin]
-deskconn logout
-deskconn whoami
-deskconn attach   [--name] [--username] [--password] [--password-stdin]
-deskconn detach   [--username] [--password] [--password-stdin]
+desk login    [--username] [--password] [--password-stdin]
+desk logout
+desk whoami
+desk attach   [--name] [--username] [--password] [--password-stdin]
+desk detach   [--username] [--password] [--password-stdin]
 ```
 
 ### Devices
 
 ```
-deskconn ls [--refresh] [--detailed]
-deskconn ping <device> [--count N]
+desk ls [--refresh] [--detailed]
+desk ping <device> [--count N]
 ```
 
 Standalone devices (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
-deskconn keygen                                        # key pair: public for deskconnd --public-key, private for --private-key
-deskconn --url <tcp://host:port> --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_PRIVATE_KEY
+desk keygen                                        # key pair: public for deskconnd --public-key, private for --private-key
+desk --url <tcp://host:port> --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_PRIVATE_KEY
 ```
 
 ### Shell & exec
 
 ```
-deskconn shell <device> [--mode p2p|routed] [-A]
-deskconn exec  <device> <command...> [--p2p]
+desk shell <device> [--mode p2p|routed] [-A]
+desk exec  <device> <command...> [--p2p]
 ```
 
-`dsh <device>` is a shortcut for `deskconn shell <device>`.
+`dsh <device>` is a shortcut for `desk shell <device>`.
 
 `-A`/`--agent-forward` forwards your local `ssh-agent` to the shell, like `ssh -A`, so tools run there (`git`,
 `ssh`, ...) can authenticate with your local keys without copying them to the device. As with `ssh -A`, only use it
@@ -225,49 +225,49 @@ agent to sign on your behalf.
 All file commands accept `device:path` for remote paths and a bare `/path` for local paths.
 
 ```
-deskconn file ls  <device:path> [--mode p2p|routed]
-deskconn file mv  <src> <dst>   [--mode p2p|routed]
-deskconn file cp  <src> <dst>   [-r] [--mode p2p|routed]
-deskconn file rm  <target>      [--mode p2p|routed]
-deskconn file cat <device:path> [--mode p2p|routed]
+desk file ls  <device:path> [--mode p2p|routed]
+desk file mv  <src> <dst>   [--mode p2p|routed]
+desk file cp  <src> <dst>   [-r] [--mode p2p|routed]
+desk file rm  <target>      [--mode p2p|routed]
+desk file cat <device:path> [--mode p2p|routed]
 ```
 
-`dcp <src> <dst>` is a shortcut for `deskconn file cp <src> <dst>`.
+`dcp <src> <dst>` is a shortcut for `desk file cp <src> <dst>`.
 
 ### Port forwarding
 
 ```
 # Forward local:remote — traffic on localhost:LOCAL goes to REMOTE on the device
-deskconn port forward <device> [-l LOCAL] [-r REMOTE] [--p2p]
+desk port forward <device> [-l LOCAL] [-r REMOTE] [--p2p]
 
 # Reverse — the device listens on REMOTE and forwards to localhost:LOCAL
-deskconn port reverse <device> [-r REMOTE] [-l LOCAL] [--p2p]
+desk port reverse <device> [-r REMOTE] [-l LOCAL] [--p2p]
 ```
 
 ### Printing
 
 ```
-deskconn print --enable [--host-printers]   # allow this desktop to receive print jobs
-deskconn print --disable
-deskconn print --status
-deskconn print --ls <device>                # list printers on a device
-deskconn print <device:printer> <file>      # send a print job
+desk print --enable [--host-printers]   # allow this desktop to receive print jobs
+desk print --disable
+desk print --status
+desk print --ls <device>                # list printers on a device
+desk print <device:printer> <file>      # send a print job
 ```
 
 ### Configuration
 
 ```
-deskconn config show
-deskconn config set <device> alias <value>
-deskconn config unset <device> alias
-deskconn config edit
+desk config show
+desk config set <device> alias <value>
+desk config unset <device> alias
+desk config edit
 ```
 
 ### Self-update
 
 ```
-deskconn self version
-deskconn self update
+desk self version
+desk self update
 ```
 
 ## Development
@@ -276,7 +276,7 @@ deskconn self update
 
 ```bash
 make build-deskconnd   # builds bin/deskconnd
-make build-deskconn    # builds bin/deskconn
+make build-desk        # builds bin/desk
 ```
 
 Override the cloud router for local development (see [Self-hosting](#self-hosting)):

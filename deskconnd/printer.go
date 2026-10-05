@@ -36,7 +36,7 @@ func (p *Printer) handleListPrinters(ctx context.Context, _ *xconn.Invocation) *
 	}
 	if mode != common.PrintModeHost {
 		return xconn.NewInvocationError(common.ErrOperationFailed,
-			"printer hosting disabled; run `deskconn print enable --host-printers` to enable")
+			"printer hosting disabled; run `desk print enable --host-printers` to enable")
 	}
 
 	infos, err := p.cups.PrintersInfo(ctx)
@@ -60,7 +60,7 @@ func (p *Printer) handlePrint() xconn.InvocationHandler {
 		}
 		if mode == common.PrintModeDisabled {
 			return xconn.NewInvocationError(common.ErrOperationFailed,
-				"printing disabled; run `deskconn print enable` to enable")
+				"printing disabled; run `desk print enable` to enable")
 		}
 
 		printer, err := inv.ArgString(0)

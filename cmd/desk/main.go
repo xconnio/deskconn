@@ -39,13 +39,13 @@ import (
 var version = "v0.1.0-alpha"
 
 // cliAliasScript describes a short subcommand-specific wrapper installed
-// alongside deskconn, e.g. "dsh" running "deskconn shell".
+// alongside desk, e.g. "dsh" running "desk shell".
 type cliAliasScript struct {
 	name       string
 	subcommand []string
 }
 
-// aliasScripts lists the wrapper scripts installed next to the deskconn binary.
+// aliasScripts lists the wrapper scripts installed next to the desk binary.
 func aliasScripts() []cliAliasScript {
 	return []cliAliasScript{
 		{name: aliasProgShell, subcommand: []string{subcommandShell}},
@@ -53,7 +53,7 @@ func aliasScripts() []cliAliasScript {
 	}
 }
 
-// aliasWrapperScript renders a POSIX sh wrapper that runs deskconn with
+// aliasWrapperScript renders a POSIX sh wrapper that runs desk with
 // subcommand fixed, forwarding the rest of argv untouched. It also forwards
 // live completion requests ("--completion-bash", the first arg per
 // kingpin's generated completion script) so tab-completion still works.
@@ -62,20 +62,29 @@ func aliasWrapperScript(subcommand []string) string {
 	return fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "%[1]s" ]; then
     shift
-    exec deskconn %[1]s %[2]s "$@"
+    exec desk %[1]s %[2]s "$@"
 fi
-exec deskconn %[2]s "$@"
+exec desk %[2]s "$@"
 `, completionBashFlag, args)
 }
 
-// cliAliases lists every extra binary name installed alongside deskconn:
-// "desk" is a plain symlink, the rest are wrapper scripts from aliasScripts.
+// cliAliases lists the wrapper scripts' names installed alongside desk.
 func cliAliases() []string {
-	names := []string{"desk"}
+	names := make([]string, 0, len(aliasScripts()))
 	for _, s := range aliasScripts() {
 		names = append(names, s.name)
 	}
 	return names
+}
+
+// legacyCLIPaths lists files left behind by installs from before the CLI was renamed
+// from deskconn to desk: the binary itself and its shell completions.
+func legacyCLIPaths(binDir, bashCompDir, zshCompDir string) []string {
+	return []string{
+		filepath.Join(binDir, "deskconn"),
+		filepath.Join(bashCompDir, "deskconn"),
+		filepath.Join(zshCompDir, "_deskconn"),
+	}
 }
 
 const (
@@ -105,11 +114,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	versionString := fmt.Sprintf("deskconn %s", version)
-	app := kingpin.New("deskconn", "Deskconn control CLI")
+	versionString := fmt.Sprintf("desk %s", version)
+	app := kingpin.New("desk", "Deskconn control CLI")
 	standaloneURL := app.Flag("url", "Connect directly to a standalone deskconnd at this URL "+
 		"(tcp://host:port or unix:///path) instead of a device on your account").Envar("DESKCONN_URL").String()
-	standaloneKey := app.Flag("private-key", "Private key (hex) to authenticate with --url; see `deskconn keygen`").
+	standaloneKey := app.Flag("private-key", "Private key (hex) to authenticate with --url; see `desk keygen`").
 		Envar("DESKCONN_PRIVATE_KEY").String()
 	standaloneAuthID := app.Flag("authid", "Authid to present with --url (default: current user)").
 		Envar("DESKCONN_AUTHID").String()
@@ -239,7 +248,7 @@ func main() {
 
 	logoutCmd := app.Command("logout", "Logout")
 
-	configCmd := app.Command("config", "Manage deskconn configuration")
+	configCmd := app.Command("config", "Manage desk configuration")
 	configShow := configCmd.Command("show", "Show config")
 	configSet := configCmd.Command("set", "Set device alias")
 	configSetDevice := configSet.Arg("device", "ID, name or alias of device").Required().String()
@@ -268,10 +277,10 @@ func main() {
 	screenshotEnableCmd := screenshotCmd.Command("enable", "Allow remote screenshot access")
 	screenshotDisableCmd := screenshotCmd.Command("disable", "Deny remote screenshot access")
 
-	selfCmd := app.Command("self", "Manage the installed deskconn CLI.")
-	selfVersionCmd := selfCmd.Command("version", "Show the installed deskconn version")
+	selfCmd := app.Command("self", "Manage the installed desk CLI.")
+	selfVersionCmd := selfCmd.Command("version", "Show the installed desk version")
 	selfUpdateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
-	selfRemoveCmd := selfCmd.Command("remove", "Remove deskconn from this machine")
+	selfRemoveCmd := selfCmd.Command("remove", "Remove desk from this machine")
 	selfRemoveYes := selfRemoveCmd.Flag("yes", "Do not prompt for confirmation").Short('y').Bool()
 
 	aiCmds := registerAICommands(app, cfgDirectory)
@@ -299,7 +308,7 @@ func main() {
 			os.Exit(1)
 		}
 		if *standaloneKey == "" {
-			fmt.Fprintln(os.Stderr, "--url needs --private-key (or DESKCONN_PRIVATE_KEY); see `deskconn keygen`")
+			fmt.Fprintln(os.Stderr, "--url needs --private-key (or DESKCONN_PRIVATE_KEY); see `desk keygen`")
 			os.Exit(1)
 		}
 		if *standaloneAuthID == "" {
@@ -1540,7 +1549,7 @@ func updateApp() error {
 	}
 
 	if updateResp.DownloadURL == "" {
-		fmt.Printf("You're already on version %s of deskconn (the latest version).\n", version)
+		fmt.Printf("You're already on version %s of desk (the latest version).\n", version)
 		return nil
 	}
 
@@ -1562,7 +1571,7 @@ func updateApp() error {
 		return fmt.Errorf("failed to restart deskconnd: %w", err)
 	}
 
-	fmt.Printf("Updated deskconn from version %s to %s.\n", version, updateResp.LatestVersion)
+	fmt.Printf("Updated desk from version %s to %s.\n", version, updateResp.LatestVersion)
 	return nil
 }
 
@@ -1604,7 +1613,7 @@ func latestAppUpdate() (appUpdateResponse, error) {
 		return appUpdateResponse{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "deskconn-self-update")
+	req.Header.Set("User-Agent", "desk-self-update")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1653,7 +1662,7 @@ func latestAppUpdate() (appUpdateResponse, error) {
 
 const pathInstallerBlock = "\n# Added by deskconn installer\nexport PATH=\"$HOME/.local/bin:$PATH\"\n"
 
-// agentForwardReadyTimeout bounds how long "deskconn shell -A" waits for the remote agent
+// agentForwardReadyTimeout bounds how long "desk shell -A" waits for the remote agent
 // forwarding listener to come up before giving up and starting a normal (unforwarded) shell.
 const agentForwardReadyTimeout = 5 * time.Second
 
@@ -1750,7 +1759,7 @@ func detachIfAttached() error {
 
 func removeApp(cfgDirectory string, skipConfirm bool) error {
 	if !skipConfirm {
-		confirmed, err := confirmPrompt("Are you sure you want to remove deskconn and all configuration, "+
+		confirmed, err := confirmPrompt("Are you sure you want to remove desk and all configuration, "+
 			"credentials and device list? (y/N): ", false)
 		if err != nil {
 			return err
@@ -1793,12 +1802,13 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 	zshCompDir := filepath.Join(homeDir, ".local", "share", "zsh", "site-functions")
 
 	paths := []string{
-		filepath.Join(binDir, "deskconn"),
+		filepath.Join(binDir, "desk"),
 		filepath.Join(binDir, vpndProgName),
 		filepath.Join(execDir, "deskconnd"),
-		filepath.Join(bashCompDir, "deskconn"),
-		filepath.Join(zshCompDir, "_deskconn"),
+		filepath.Join(bashCompDir, "desk"),
+		filepath.Join(zshCompDir, "_desk"),
 	}
+	paths = append(paths, legacyCLIPaths(binDir, bashCompDir, zshCompDir)...)
 	for _, alias := range cliAliases() {
 		paths = append(paths,
 			filepath.Join(binDir, alias),
@@ -1807,7 +1817,7 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		)
 	}
 
-	fmt.Println("Removing deskconn binaries and shell completions...")
+	fmt.Println("Removing desk binaries and shell completions...")
 	for _, p := range paths {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove %s: %w", p, err)
@@ -1820,12 +1830,12 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		}
 	}
 
-	fmt.Println("Removing deskconn configuration, credentials and device list...")
+	fmt.Println("Removing desk configuration, credentials and device list...")
 	if err := os.RemoveAll(cfgDirectory); err != nil {
 		return fmt.Errorf("failed to remove config directory: %w", err)
 	}
 
-	fmt.Println("deskconn has been removed.")
+	fmt.Println("desk has been removed.")
 	return nil
 }
 
@@ -1891,7 +1901,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		return fmt.Errorf("failed to create exec dir: %w", err)
 	}
 
-	foundDeskconn := false
+	foundDesk := false
 	foundDeskconnd := false
 
 	for {
@@ -1909,19 +1919,17 @@ func downloadAndInstallUpdate(downloadURL string) error {
 
 		name := filepath.Base(header.Name)
 		switch name {
-		case "deskconn":
-			fmt.Println("Installing deskconn...")
-			deskconnPath := filepath.Join(binDir, "deskconn")
-			if err := installBinaryFromReader(tarReader, deskconnPath, 0755); err != nil {
+		case "desk":
+			fmt.Println("Installing desk...")
+			deskPath := filepath.Join(binDir, "desk")
+			if err := installBinaryFromReader(tarReader, deskPath, 0755); err != nil {
 				return err
 			}
-			// "desk" is the CLI under a shorter name; "vpnd" is the privileged VPN helper.
-			for _, link := range []string{"desk", vpndProgName} {
-				linkPath := filepath.Join(binDir, link)
-				_ = os.Remove(linkPath)
-				if err := os.Symlink(deskconnPath, linkPath); err != nil {
-					return fmt.Errorf("failed to create %s symlink: %w", link, err)
-				}
+			// desk runs as the privileged VPN helper when invoked as "vpnd".
+			linkPath := filepath.Join(binDir, vpndProgName)
+			_ = os.Remove(linkPath)
+			if err := os.Symlink(deskPath, linkPath); err != nil {
+				return fmt.Errorf("failed to create %s symlink: %w", vpndProgName, err)
 			}
 			for _, s := range aliasScripts() {
 				scriptPath := filepath.Join(binDir, s.name)
@@ -1930,7 +1938,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 					return fmt.Errorf("failed to write %s wrapper: %w", s.name, err)
 				}
 			}
-			foundDeskconn = true
+			foundDesk = true
 		case "deskconnd":
 			fmt.Println("Installing deskconnd...")
 			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "deskconnd"), 0700); err != nil {
@@ -1940,19 +1948,26 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		}
 	}
 
-	if !foundDeskconn || !foundDeskconnd {
+	if !foundDesk || !foundDeskconnd {
 		return fmt.Errorf("update archive missing required binaries")
 	}
 
-	deskconnBin := filepath.Join(binDir, "deskconn")
-	if err := installCompletions(deskconnBin); err != nil {
+	if err := installCompletions(filepath.Join(binDir, "desk")); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to update shell completions: %v\n", err)
+	}
+
+	bashCompDir := filepath.Join(homeDir, ".local", "share", "bash-completion", "completions")
+	zshCompDir := filepath.Join(homeDir, ".local", "share", "zsh", "site-functions")
+	for _, p := range legacyCLIPaths(binDir, bashCompDir, zshCompDir) {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "warning: failed to remove %s: %v\n", p, err)
+		}
 	}
 
 	return nil
 }
 
-func installCompletions(deskconnBin string) error {
+func installCompletions(deskBin string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home dir: %w", err)
@@ -1967,32 +1982,32 @@ func installCompletions(deskconnBin string) error {
 		}
 	}
 
-	bashOut, err := exec.Command(deskconnBin, "--completion-script-bash").Output() // nolint: gosec
+	bashOut, err := exec.Command(deskBin, "--completion-script-bash").Output() // nolint: gosec
 	if err != nil {
 		return fmt.Errorf("generating bash completion: %w", err)
 	}
 	bashScript := fixBashCompletionSpacing(fixBashCompletionWordBreaks(string(bashOut)))
-	if err := os.WriteFile(filepath.Join(bashDir, "deskconn"), []byte(bashScript), 0644); err != nil { // nolint: gosec
+	if err := os.WriteFile(filepath.Join(bashDir, "desk"), []byte(bashScript), 0644); err != nil { // nolint: gosec
 		return fmt.Errorf("writing bash completion: %w", err)
 	}
 
-	zshOut, err := exec.Command(deskconnBin, "--completion-script-zsh").Output() // nolint: gosec
+	zshOut, err := exec.Command(deskBin, "--completion-script-zsh").Output() // nolint: gosec
 	if err != nil {
 		return fmt.Errorf("generating zsh completion: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(zshDir, "_deskconn"), zshOut, 0644); err != nil { // nolint: gosec
+	if err := os.WriteFile(filepath.Join(zshDir, "_desk"), zshOut, 0644); err != nil { // nolint: gosec
 		return fmt.Errorf("writing zsh completion: %w", err)
 	}
 
 	for _, alias := range cliAliases() {
 		aliasBash := strings.Replace(bashScript,
-			"complete -F _deskconn_bash_autocomplete -o default deskconn",
-			"complete -F _deskconn_bash_autocomplete -o default "+alias, 1)
+			"complete -F _desk_bash_autocomplete -o default desk",
+			"complete -F _desk_bash_autocomplete -o default "+alias, 1)
 		if err := os.WriteFile(filepath.Join(bashDir, alias), []byte(aliasBash), 0644); err != nil { // nolint: gosec
 			return fmt.Errorf("writing %s bash completion: %w", alias, err)
 		}
 
-		aliasZsh := "#compdef " + alias + "\n_deskconn \"$@\"\n"
+		aliasZsh := "#compdef " + alias + "\n_desk \"$@\"\n"
 		if err := os.WriteFile(filepath.Join(zshDir, "_"+alias), []byte(aliasZsh), 0644); err != nil { // nolint: gosec
 			return fmt.Errorf("writing %s zsh completion: %w", alias, err)
 		}
@@ -2004,7 +2019,7 @@ func installCompletions(deskconnBin string) error {
 // fixBashCompletionWordBreaks clears ':' from COMP_WORDBREAKS so bash
 // completes "device:path" as one word instead of splitting at the colon.
 func fixBashCompletionWordBreaks(script string) string {
-	const marker = "_deskconn_bash_autocomplete() {\n"
+	const marker = "_desk_bash_autocomplete() {\n"
 	return strings.Replace(script, marker, marker+"    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}\n", 1)
 }
 
