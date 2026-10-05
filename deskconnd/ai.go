@@ -55,18 +55,7 @@ func (d *Deskconn) handleAISessionList(_ context.Context, inv *xconn.Invocation)
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
 
-	var summaries []common.AISessionSummary
-	for _, s := range sessions {
-		summaries = append(summaries, common.AISessionSummary{
-			Tool:      s.Tool,
-			SessionID: strings.TrimSuffix(filepath.Base(s.Path), ".jsonl"),
-			Title:     AISessionTitle(s.Path),
-			UpdatedAt: s.ModTime,
-			Size:      s.Size,
-		})
-	}
-
-	return aiEncryptResult(enc, summaries)
+	return aiEncryptResult(enc, common.SummarizeAISessions(sessions))
 }
 
 func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
