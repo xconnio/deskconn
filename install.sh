@@ -42,20 +42,22 @@ curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE"
 echo "Extracting archive..."
 tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
 
-if [ ! -f "$TMP_DIR/deskconn" ] || [ ! -f "$TMP_DIR/deskconnd" ]; then
-    echo "Release archive does not contain deskconn and deskconnd binaries."
+if [ ! -f "$TMP_DIR/desk" ] || [ ! -f "$TMP_DIR/deskconnd" ]; then
+    echo "Release archive does not contain desk and deskconnd binaries."
     exit 1
 fi
 
-mv "$TMP_DIR/deskconn" "$BIN_DIR/deskconn"
+# Before the rename the CLI was installed as "deskconn" (with "desk" a symlink to it).
+rm -f "$BIN_DIR/desk" "$BIN_DIR/deskconn"
+
+mv "$TMP_DIR/desk" "$BIN_DIR/desk"
 mv "$TMP_DIR/deskconnd" "$EXEC_DIR/deskconnd"
 
-chmod 755 "$BIN_DIR/deskconn"
+chmod 755 "$BIN_DIR/desk"
 chmod 700 "$EXEC_DIR/deskconnd"
 
-ln -sf "$BIN_DIR/deskconn" "$BIN_DIR/desk"
-# deskconn runs as the privileged VPN helper when invoked by this name.
-ln -sf "$BIN_DIR/deskconn" "$BIN_DIR/vpnd"
+# desk runs as the privileged VPN helper when invoked by this name.
+ln -sf "$BIN_DIR/desk" "$BIN_DIR/vpnd"
 
 # dsh/dcp are shortcuts for a fixed subcommand. Forwarding "--completion-bash" keeps
 # tab-completion working when invoked as "dsh"/"dcp".
@@ -65,9 +67,9 @@ write_alias_script() {
 #!/bin/sh
 if [ "\$1" = "--completion-bash" ]; then
     shift
-    exec deskconn --completion-bash $subcommand "\$@"
+    exec desk --completion-bash $subcommand "\$@"
 fi
-exec deskconn $subcommand "\$@"
+exec desk $subcommand "\$@"
 EOF
     chmod 755 "$BIN_DIR/$name"
 }
@@ -79,10 +81,11 @@ BASH_COMP_DIR="$HOME/.local/share/bash-completion/completions"
 ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
 
 mkdir -p "$BASH_COMP_DIR" "$ZSH_COMP_DIR"
+rm -f "$BASH_COMP_DIR/deskconn" "$ZSH_COMP_DIR/_deskconn"
 
-"$BIN_DIR/deskconn" --completion-script-bash > "$BASH_COMP_DIR/deskconn"
+"$BIN_DIR/desk" --completion-script-bash > "$BASH_COMP_DIR/desk"
 # ':' is in COMP_WORDBREAKS by default, which splits "device:path" at the colon.
-sed -i '/_deskconn_bash_autocomplete() {/a\    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}' "$BASH_COMP_DIR/deskconn"
+sed -i '/_desk_bash_autocomplete() {/a\    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}' "$BASH_COMP_DIR/desk"
 
 # Make path completions behave like "cd": show only the last path segment
 # in the menu, and don't add a trailing space after directories/"device:".
@@ -98,22 +101,22 @@ cat > "$AWK_SCRIPT" << 'AWKEOF'
     }
 }
 AWKEOF
-awk -f "$AWK_SCRIPT" "$BASH_COMP_DIR/deskconn" > "$BASH_COMP_DIR/deskconn.tmp"
-mv "$BASH_COMP_DIR/deskconn.tmp" "$BASH_COMP_DIR/deskconn"
+awk -f "$AWK_SCRIPT" "$BASH_COMP_DIR/desk" > "$BASH_COMP_DIR/desk.tmp"
+mv "$BASH_COMP_DIR/desk.tmp" "$BASH_COMP_DIR/desk"
 rm -f "$AWK_SCRIPT"
 
-for alias_name in desk dsh dcp; do
-    sed "s/complete -F _deskconn_bash_autocomplete -o default deskconn/complete -F _deskconn_bash_autocomplete -o default $alias_name/" \
-        "$BASH_COMP_DIR/deskconn" > "$BASH_COMP_DIR/$alias_name"
+for alias_name in dsh dcp; do
+    sed "s/complete -F _desk_bash_autocomplete -o default desk/complete -F _desk_bash_autocomplete -o default $alias_name/" \
+        "$BASH_COMP_DIR/desk" > "$BASH_COMP_DIR/$alias_name"
 done
 
-"$BIN_DIR/deskconn" --completion-script-zsh > "$ZSH_COMP_DIR/_deskconn"
-for alias_name in desk dsh dcp; do
-    printf '#compdef %s\n_deskconn "$@"\n' "$alias_name" > "$ZSH_COMP_DIR/_$alias_name"
+"$BIN_DIR/desk" --completion-script-zsh > "$ZSH_COMP_DIR/_desk"
+for alias_name in dsh dcp; do
+    printf '#compdef %s\n_desk "$@"\n' "$alias_name" > "$ZSH_COMP_DIR/_$alias_name"
 done
 
 echo "Installed shell completions"
-echo "Installed deskconn $VERSION"
+echo "Installed desk $VERSION"
 
 # Add BIN_DIR to PATH in shell config files if not already present
 add_to_path() {

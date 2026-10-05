@@ -12,7 +12,7 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-// RunLogs is the client entry point for `deskconn logs`. It validates since
+// RunLogs is the client entry point for `desk logs`. It validates since
 // up front, opens one raw stream/channel, sends the one-time log
 // request, then writes every received chunk straight to stdout until the
 // device finishes or ctx is canceled. mode picks "quic"/"p2p" directly, or

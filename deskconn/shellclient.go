@@ -23,7 +23,7 @@ import (
 )
 
 // modeQUIC/modeP2P are the "quic"/"p2p" --mode flag values every raw-stream
-// client entry point switches on. cmd/deskconn has its own ModeQUIC/ModeP2P
+// client entry point switches on. cmd/desk has its own ModeQUIC/ModeP2P
 // with the same values, kept separate since it can't import these.
 const (
 	modeQUIC = "quic"
@@ -465,7 +465,7 @@ func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
 }
 
 // RunExec is the client entry point for anything that runs one command on a
-// device's PTY and exits when it finishes (deskconn exec, file ls, ai
+// device's PTY and exits when it finishes (desk exec, file ls, ai
 // resume) -- as opposed to RunShell's open-ended interactive session.
 func RunExec(ctx context.Context, mode, realm, cfgDirectory string, commandWithArgs []string) error {
 	var command string

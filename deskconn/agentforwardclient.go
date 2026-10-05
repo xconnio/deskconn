@@ -14,7 +14,7 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-// RunAgentForward is the client entry point for `deskconn shell -A`. It
+// RunAgentForward is the client entry point for `desk shell -A`. It
 // opens one session-level raw stream/channel, tells the device to start
 // forwarding, signals ready once the device acks, and for every external
 // connection the device reports, dials agentSock  and relays.

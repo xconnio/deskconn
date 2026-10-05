@@ -206,7 +206,7 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 	}
 }
 
-// ProxyVPNStartHandler proxies "deskconn vpn start": it arms d to accept
+// ProxyVPNStartHandler proxies "desk vpn start": it arms d to accept
 // inbound VPN tunnel requests using helperSocket, a vpnd socket the
 // caller already started.
 //
@@ -234,9 +234,9 @@ func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
 	}
 }
 
-// ProxyVPNStopHandler proxies "deskconn vpn stop": disarms serving, tearing down any active
+// ProxyVPNStopHandler proxies "desk vpn stop": disarms serving, tearing down any active
 // tunnel and closing the helper connection so vpnd unwinds and exits. Meant to run as
-// an independent command from "deskconn vpn start", not necessarily the same terminal.
+// an independent command from "desk vpn start", not necessarily the same terminal.
 func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
 	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
 		if !d.DisarmVPNServing() {

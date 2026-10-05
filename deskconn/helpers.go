@@ -268,7 +268,7 @@ func CallFileOp(deviceSession *xconn.Session, procedure string, payload []byte) 
 }
 
 // clientCredentials returns the authid and private key this machine uses on realm's
-// device: the ones given for the standalone target (deskconn --url), otherwise the
+// device: the ones given for the standalone target (desk --url), otherwise the
 // cloud login's.
 func clientCredentials(realm, cfgDirectory string) (string, string, error) {
 	if target, ok := common.StandaloneTargetFor(realm); ok {

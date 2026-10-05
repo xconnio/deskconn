@@ -36,7 +36,7 @@ func closeSessionWithTimeout(session *xconnwebrtc.WebRTCSession) {
 	select {
 	case <-done:
 	case <-time.After(12 * time.Second):
-		fmt.Fprintln(os.Stderr, "deskconn: timed out closing session cleanly, exiting anyway")
+		fmt.Fprintln(os.Stderr, "desk: timed out closing session cleanly, exiting anyway")
 	}
 }
 
@@ -108,7 +108,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 
 // runVPNStart arms this machine to let other devices route their traffic
 // through it, then returns right away -- serving continues in the
-// background (deskconnd + vpnd) until "deskconn vpn stop" or the
+// background (deskconnd + vpnd) until "desk vpn stop" or the
 // daemon shuts down. deskconnd has no capability or terminal of its own
 // for this, so this CLI process launches vpnd (the only blocking
 // part, briefly, for the sudo prompt) and hands deskconnd its socket.
@@ -150,7 +150,7 @@ func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 
 	fmt.Println("Serving in the background: this machine can now be used as a VPN exit node, " +
 		"one connection at a time.")
-	fmt.Println("Run \"deskconn vpn stop\" (from anywhere) to stop.")
+	fmt.Println("Run \"desk vpn stop\" (from anywhere) to stop.")
 }
 
 // runVPNStop tells this machine's own deskconnd to stop serving as a

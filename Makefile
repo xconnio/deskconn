@@ -14,7 +14,7 @@ release-snapshot:
 release-check:
 	goreleaser check
 
-build: build-xlink build-deskconnd build-deskconn
+build: build-xlink build-deskconnd build-desk
 
 build-xlink:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/xlink github.com/xconnio/deskconn/cmd/xlink
@@ -28,8 +28,8 @@ build-deskconnd:
 run-deskconnd:
 	go run github.com/xconnio/deskconn/cmd/deskconnd
 
-build-deskconn:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/deskconn github.com/xconnio/deskconn/cmd/deskconn
+build-desk:
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/desk github.com/xconnio/deskconn/cmd/desk
 
-run-deskconn:
-	go run github.com/xconnio/deskconn/cmd/deskconn
+run-desk:
+	go run github.com/xconnio/deskconn/cmd/desk

@@ -12,7 +12,7 @@ import (
 
 // EnableScreenshot/DisableScreenshot/ScreenshotEnabled are purely local
 // machine settings (config.yml read/write, no device/network round trip),
-// so the CLI (`deskconn screenshot enable/disable`) calls them directly.
+// so the CLI (`desk screenshot enable/disable`) calls them directly.
 func EnableScreenshot(cfgDirectory string) error {
 	return updateScreenshotConfig(cfgDirectory, true)
 }

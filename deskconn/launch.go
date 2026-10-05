@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	// VPNHelperName is the program name deskconn runs as its privileged VPN
+	// VPNHelperName is the program name desk runs as its privileged VPN
 	// helper under: main dispatches on argv[0], snap-style, and
-	// LaunchVPNHelper invokes deskconn through a symlink by this name.
+	// LaunchVPNHelper invokes desk through a symlink by this name.
 	VPNHelperName = "vpnd"
 
 	// helperReadyTimeout bounds how long we wait for the helper's socket to
@@ -49,7 +49,7 @@ func LaunchVPNHelper(ctx context.Context, cfgDirectory string) (socketPath strin
 	socketPath = filepath.Join(dir, "helper.sock")
 
 	// sudo passes the path it's given through as argv[0], so the symlink's name is what
-	// tells deskconn to run as the helper. It lives in this launch's private dir, so it
+	// tells desk to run as the helper. It lives in this launch's private dir, so it
 	// needs nothing installed and goes away with the dir.
 	helperPath := filepath.Join(dir, VPNHelperName)
 	if err := os.Symlink(exe, helperPath); err != nil {

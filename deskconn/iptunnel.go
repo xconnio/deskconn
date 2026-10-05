@@ -136,7 +136,7 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	case <-readyCh:
 	case <-closedCh:
 		return fmt.Errorf("remote device rejected the tunnel (not currently serving? " +
-			"it needs \"deskconn vpn start\" run on it first)")
+			"it needs \"desk vpn start\" run on it first)")
 	case <-time.After(common.VPNHandshakeTimeout):
 		return fmt.Errorf("timed out waiting for the remote device to set up the tunnel")
 	case <-ctx.Done():

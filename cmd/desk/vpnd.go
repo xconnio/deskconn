@@ -20,8 +20,8 @@ const (
 	// doesn't re-exec itself again -- see that function.
 	reexecEnvVar = "DESKCONN_VPND_DETACHED"
 
-	// vpndProgName is the program name deskconn runs as the privileged VPN helper under,
-	// snap-style: installed as a "vpnd" symlink to deskconn, and invoked through a symlink
+	// vpndProgName is the program name desk runs as the privileged VPN helper under,
+	// snap-style: installed as a "vpnd" symlink to desk, and invoked through a symlink
 	// by this name by deskconn.LaunchVPNHelper.
 	vpndProgName = deskconn.VPNHelperName
 )
@@ -37,10 +37,10 @@ func vpndArgs(argv []string) ([]string, bool) {
 	return nil, false
 }
 
-// runVPNd is the privileged backend for "deskconn vpn": it serves exactly
+// runVPNd is the privileged backend for "desk vpn": it serves exactly
 // one VPN helper client on a unix socket, then exits.
 func runVPNd(args []string) {
-	app := kingpin.New(vpndProgName, "Privileged backend for deskconn vpn")
+	app := kingpin.New(vpndProgName, "Privileged backend for desk vpn")
 	socketPath := app.Flag("socket", "Unix socket to listen on for the one client this process serves").
 		Required().String()
 	idleTimeout := app.Flag("idle-timeout", "Exit if no client connects within this long").
@@ -68,7 +68,7 @@ func runVPNd(args []string) {
 		os.Exit(1)
 	}
 	// Clean up the whole temp dir LaunchHelper made for this socket, not just the socket file
-	// -- "deskconn vpn start" hands off and never reaps us itself, so this is the only cleanup
+	// -- "desk vpn start" hands off and never reaps us itself, so this is the only cleanup
 	// that dir gets.
 	defer func() { _ = os.RemoveAll(filepath.Dir(*socketPath)) }()
 
@@ -102,7 +102,7 @@ func runVPNd(args []string) {
 // session (no controlling terminal), stdio redirected to /dev/null, and
 // returns nil so the caller knows to let that child take over. The child
 // keeps this process's argv[0]: os.Executable resolves the vpnd
-// symlink we were started through to deskconn itself, and without the
+// symlink we were started through to desk itself, and without the
 // name the child would come up as the regular CLI.
 //
 // Can't just call setsid(2) on ourselves: it fails with EPERM if we're
