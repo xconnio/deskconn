@@ -172,7 +172,7 @@ func ConnectDeviceRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xc
 // channels such as the IP tunnel) and Connection (e.g. to inspect the
 // selected ICE candidate pair).
 func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory string) (*xconnwebrtc.WebRTCSession, error) {
-	authid, privKey, err := clientCredentials(realm, cfgDirectory)
+	authenticator, err := clientAuthenticator(realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory strin
 		return nil, err
 	}
 
-	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, realm, authid, privKey, func() {})
+	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, realm, authenticator, func() {})
 	quicSess.Connection().Close()
 	if err != nil {
 		return nil, err
@@ -193,7 +193,11 @@ func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory strin
 
 func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
 	onDisconnect func()) (*xconn.Session, error) {
-	webrtcSess, err := common.ConnectWebrtcSession(session, realm, authid, privateKey, onDisconnect)
+	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	webrtcSess, err := common.ConnectWebrtcSession(session, realm, authenticator, onDisconnect)
 	if err != nil {
 		return nil, err
 	}
@@ -267,12 +271,15 @@ func CallFileOp(deviceSession *xconn.Session, procedure string, payload []byte) 
 	return common.EncryptedCall(deviceSession, procedure, payload, enc)
 }
 
-// clientCredentials returns the authid and private key this machine uses on realm's
-// device: the ones given for the standalone target (desk --url), otherwise the
-// cloud login's.
-func clientCredentials(realm, cfgDirectory string) (string, string, error) {
+// clientAuthenticator returns the authenticator this machine uses on realm's device: the
+// one for the standalone target (desk --url), otherwise the cloud login's.
+func clientAuthenticator(realm, cfgDirectory string) (auth.ClientAuthenticator, error) {
 	if target, ok := common.StandaloneTargetFor(realm); ok {
-		return target.AuthID, target.PrivateKey, nil
+		return target.Authenticator()
 	}
-	return common.ReadCredentials(cfgDirectory)
+	authid, privKey, err := common.ReadCredentials(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+	return xconnauth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
 }

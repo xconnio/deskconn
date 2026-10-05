@@ -10,6 +10,7 @@ import (
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/xconn-go"
+	xconnauth "github.com/xconnio/xconn-go/auth"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
@@ -365,9 +366,15 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *quicConn, realm, cfgDirectory
 		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
 		return
 	}
+	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
+	if err != nil {
+		log.Printf("p2p upgrade %s: %v", realm, err)
+		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
+		return
+	}
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, realm, authid, privKey, cancel)
+	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, realm, authenticator, cancel)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)
 		cancel()

@@ -120,8 +120,10 @@ func main() {
 		"(tcp://host:port or unix:///path) instead of a device on your account").Envar("DESKCONN_URL").String()
 	standaloneKey := app.Flag("private-key", "Private key (hex) to authenticate with --url; see `desk keygen`").
 		Envar("DESKCONN_PRIVATE_KEY").String()
-	standaloneAuthID := app.Flag("authid", "Authid to present with --url (default: current user)").
+	standaloneAuthID := app.Flag("authid", "Authid (username) to present with --url (default: current user)").
 		Envar("DESKCONN_AUTHID").String()
+	standalonePassword := app.Flag("secret", "Password to authenticate with --url instead of "+
+		"--private-key (prompted for if neither is given)").Envar("DESKCONN_SECRET").String()
 
 	keygenCmd := app.Command("keygen", "Generate a key pair for standalone devices "+
 		"(public key for deskconnd --public-key, private key for --private-key)")
@@ -307,8 +309,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		if *standaloneKey == "" {
-			fmt.Fprintln(os.Stderr, "--url needs --private-key (or DESKCONN_PRIVATE_KEY); see `desk keygen`")
+		if *standaloneKey != "" && *standalonePassword != "" {
+			fmt.Fprintln(os.Stderr, "--private-key and --secret are mutually exclusive")
 			os.Exit(1)
 		}
 		if *standaloneAuthID == "" {
@@ -317,8 +319,10 @@ func main() {
 				*standaloneAuthID = u.Username
 			}
 		}
-		common.SetStandaloneTarget(&common.StandaloneTarget{URL: *standaloneURL, AuthID: *standaloneAuthID,
-			PrivateKey: *standaloneKey})
+		authID := *standaloneAuthID
+		common.SetStandaloneTarget(&common.StandaloneTarget{URL: *standaloneURL, AuthID: authID,
+			PrivateKey: *standaloneKey, Password: *standalonePassword,
+			ReadPassword: func() (string, error) { return readStandalonePassword(authID) }})
 		switch parsedCmd {
 		case pingCmd.FullCommand(), connectCmd.FullCommand(), disconnectCmd.FullCommand(), lsCmd.FullCommand():
 			fmt.Fprintf(os.Stderr, "%s is not available with --url (it works on devices of your account)\n",
@@ -2381,6 +2385,24 @@ func readOTP() (string, error) {
 	}
 
 	return otp, nil
+}
+
+// readStandalonePassword prompts for authID's password on the standalone device, when
+// neither --private-key nor --secret was given and a command first connects.
+func readStandalonePassword(authID string) (string, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
+		return "", errors.New("--url needs --private-key (or DESKCONN_PRIVATE_KEY; see `desk keygen`) " +
+			"or --secret (or DESKCONN_SECRET)")
+	}
+
+	fmt.Fprintf(os.Stderr, "Password for %s: ", authID)
+	pwd, err := term.ReadPassword(int(os.Stdin.Fd())) // #nosec
+	fmt.Fprint(os.Stderr, "\r\n")
+	if err != nil {
+		return "", err
+	}
+
+	return string(pwd), nil
 }
 
 func readPassword() (string, error) {

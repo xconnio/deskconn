@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
+	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 	xconnauth "github.com/xconnio/xconn-go/auth"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
@@ -92,9 +93,9 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 // the CLI was pointed at (see SetStandaloneTarget), otherwise through the cloud over QUIC.
 func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*DeviceConn, error) {
 	if target, ok := StandaloneTargetFor(realm); ok {
-		authenticator, err := xconnauth.NewCryptoSignAuthenticator(target.AuthID, target.PrivateKey, nil)
+		authenticator, err := target.Authenticator()
 		if err != nil {
-			return nil, fmt.Errorf("invalid private key: %w", err)
+			return nil, err
 		}
 		return ConnectYamux(ctx, target.URL, realm, authenticator)
 	}
@@ -119,13 +120,10 @@ func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*D
 	return NewQUICDeviceConn(sess), nil
 }
 
-func ConnectWebrtcSession(session *xconn.Session, realm, authid, privateKey string,
+// ConnectWebrtcSession negotiates a WebRTC session to realm's device, signaling over
+// session, and joins realm over it with authenticator.
+func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator auth.ClientAuthenticator,
 	onDisconnect func()) (*xconnwebrtc.WebRTCSession, error) {
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
-	if err != nil {
-		return nil, err
-	}
-
 	config := &xconnwebrtc.ClientConfig{
 		Realm:                    realm,
 		ProcedureWebRTCOffer:     ProcedureWebRTCOffer,

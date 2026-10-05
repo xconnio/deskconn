@@ -94,8 +94,8 @@ desk shell <device> --mode routed   # force cloud router
 
 ## Standalone mode (no cloud)
 
-`deskconnd` can serve a device directly, without an account or the cloud router, to a fixed list of keys. One command
-starts it; clients point the CLI at its URL. Shell, exec, file operations, port and agent forwarding, logs and P2P
+`deskconnd` can serve a device directly, without an account or the cloud router, to a fixed list of keys and/or
+username/password accounts. One command starts it; clients point the CLI at its URL. Shell, exec, file operations, port and agent forwarding, logs and P2P
 work the same way.
 
 ### 1. Generate a key pair
@@ -116,6 +116,13 @@ deskconnd --standalone --url tcp://0.0.0.0:18080 --public-key 65160c38… [--pub
 `--public-key`s can connect, whatever authid they present. To run it as the service, put the flags on `ExecStart` with
 `systemctl --user edit deskconnd`.
 
+To allow username/password logins instead of (or as well as) keys, add `--user username:password`, repeated for more
+accounts (or set `DESKCONND_USERS`, one `username:password` per line, to keep passwords off the command line):
+
+```bash
+deskconnd --standalone --url tcp://0.0.0.0:18080 --user alice:s3cret [--user <username:password> ...]
+```
+
 ### 3. Connect from the client
 
 ```bash
@@ -125,6 +132,15 @@ desk exec -- uname -a
 desk file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
 desk file cat :/etc/hostname
 desk port forward 8080:80
+```
+
+With a username/password account, give the username as `--authid` (default: the current user) and the password with
+`--secret` or `DESKCONN_SECRET`; if neither a key nor a password is given, desk prompts for the password:
+
+```bash
+export DESKCONN_URL=tcp://203.0.113.5:18080 DESKCONN_AUTHID=alice
+desk shell
+# Password for alice:
 ```
 
 The same works with flags: `desk --url tcp://203.0.113.5:18080 --private-key 9f2d0b17… shell`. With `--url`,
@@ -204,6 +220,7 @@ Standalone devices (see [Standalone mode](#standalone-mode-no-cloud)):
 ```
 desk keygen                                        # key pair: public for deskconnd --public-key, private for --private-key
 desk --url <tcp://host:port> --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_PRIVATE_KEY
+desk --url <tcp://host:port> --authid <user> [--secret <pw>] <command>   # also DESKCONN_AUTHID / DESKCONN_SECRET
 ```
 
 ### Shell & exec
