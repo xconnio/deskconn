@@ -39,8 +39,13 @@ type aiCommands struct {
 func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiCommands {
 	aiCmd := app.Command("ai", "Sync and resume Claude Code CLI sessions directly with another device")
 
-	lsCmd := aiCmd.Command("ls", "List Claude Code sessions available on another device")
-	lsMachine := deviceArg(lsCmd, "machine", "Device to list sessions on", cfgDirectory)
+	lsCmd := aiCmd.Command("ls", "List Claude Code sessions for this project, on this device or another one")
+	// Unlike deviceArg, machine is optional here: omitting it lists this device's own sessions.
+	lsMachine := new(string)
+	if !standaloneRequested() {
+		lsMachine = lsCmd.Arg("machine", "Device to list sessions on (default: this device)").
+			HintAction(deviceCompletions(cfgDirectory)).String()
+	}
 	lsMode := modeFlag(lsCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
@@ -127,8 +132,18 @@ func runAILs(cfgDirectory, machine, mode string) error {
 	}
 
 	var sessions []common.AISessionSummary
-	switch mode {
-	case ModeQUIC:
+	switch {
+	case machine == "" && !standaloneRequested():
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		local, err := common.DiscoverClaudeSessions(homeDir, path)
+		if err != nil {
+			return fmt.Errorf("failed to discover local sessions: %w", err)
+		}
+		sessions = common.SummarizeAISessions(local)
+	case mode == ModeQUIC:
 		realm, err := deviceRealm(machine, cfgDirectory)
 		if err != nil {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
@@ -142,7 +157,7 @@ func runAILs(cfgDirectory, machine, mode string) error {
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
 		}
-	case ModeP2P:
+	case mode == ModeP2P:
 		realm, err := deviceRealm(machine, cfgDirectory)
 		if err != nil {
 			return fmt.Errorf("unknown device %q: %w", machine, err)
@@ -173,6 +188,10 @@ func runAILs(cfgDirectory, machine, mode string) error {
 		}
 	}
 	if len(sessions) == 0 {
+		if machine == "" && !standaloneRequested() {
+			fmt.Println("no claude sessions found on this device for this project")
+			return nil
+		}
 		fmt.Printf("no claude sessions found on %s for this project\n", machine)
 		return nil
 	}
@@ -279,7 +298,7 @@ func runAIResume(sessionID string, printOnly bool) error {
 	}
 	switch {
 	case len(matches) == 0:
-		return fmt.Errorf("no local session matching %q; run `desk ai ls <machine>` to see available ids", sessionID)
+		return fmt.Errorf("no local session matching %q; run `desk ai ls` to see available ids", sessionID)
 	case len(matches) > 1:
 		return fmt.Errorf("%q matches more than one local session; use a longer prefix", sessionID)
 	}
