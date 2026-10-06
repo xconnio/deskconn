@@ -73,9 +73,7 @@ func SetupWebRTC(session *xconn.Session, router *xconn.Router, authenticator aut
 		Serializer:                  &serializers.CBORSerializer{},
 		Authenticator:               authenticator,
 		Router:                      router,
-		ICEServers: []xconnwebrtc.ICEServer{
-			{URLs: []string{common.StunServerURL}},
-		},
+		ICEServers:                  common.ICEServers(),
 	}); err != nil {
 		return err
 	}
