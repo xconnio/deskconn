@@ -176,6 +176,23 @@ Setting `DESKCONN_CLOUD_QUIC_ADDRESS` at runtime overrides the built-in address 
 DESKCONN_CLOUD_QUIC_ADDRESS=127.0.0.1:8081 desk ls
 ```
 
+WebRTC uses a public STUN server only. To also relay through your own TURN server, set it in the environment.
+`DESKCONN_TURN_URL` accepts a comma-separated list:
+
+```bash
+export DESKCONN_TURN_URL=turn:turn.example.com:3478 DESKCONN_TURN_USERNAME=<user> DESKCONN_TURN_PASSWORD=<password>
+```
+
+The deskconnd service doesn't inherit your shell's environment; add the variables to it with
+`systemctl --user edit deskconnd`:
+
+```ini
+[Service]
+Environment=DESKCONN_TURN_URL=turn:turn.example.com:3478
+Environment=DESKCONN_TURN_USERNAME=<user>
+Environment=DESKCONN_TURN_PASSWORD=<password>
+```
+
 ### 3. Create an account and attach
 
 Sign up at http://localhost:3000/register. The stack prints one-time passwords to its logs instead of emailing them:

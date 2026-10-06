@@ -120,6 +120,29 @@ func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*D
 	return NewQUICDeviceConn(sess), nil
 }
 
+// ICEServers returns the STUN server plus, when DESKCONN_TURN_URL is set, a TURN server
+// authenticated with DESKCONN_TURN_USERNAME and DESKCONN_TURN_PASSWORD.
+// DESKCONN_TURN_URL may hold several comma-separated URLs.
+func ICEServers() []xconnwebrtc.ICEServer {
+	servers := []xconnwebrtc.ICEServer{{URLs: []string{StunServerURL}}}
+
+	var urls []string
+	for _, u := range strings.Split(os.Getenv("DESKCONN_TURN_URL"), ",") {
+		if u = strings.TrimSpace(u); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	if len(urls) == 0 {
+		return servers
+	}
+
+	return append(servers, xconnwebrtc.ICEServer{
+		URLs:       urls,
+		Username:   os.Getenv("DESKCONN_TURN_USERNAME"),
+		Credential: os.Getenv("DESKCONN_TURN_PASSWORD"),
+	})
+}
+
 // ConnectWebrtcSession negotiates a WebRTC session to realm's device, signaling over
 // session, and joins realm over it with authenticator.
 func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator auth.ClientAuthenticator,
@@ -132,10 +155,8 @@ func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator au
 		Serializer:               xconn.CBORSerializerSpec,
 		Authenticator:            authenticator,
 		Session:                  session,
-		ICEServers: []xconnwebrtc.ICEServer{
-			{URLs: []string{StunServerURL}},
-		},
-		OnDisconnect: onDisconnect,
+		ICEServers:               ICEServers(),
+		OnDisconnect:             onDisconnect,
 	}
 
 	return xconnwebrtc.ConnectWAMP(config)
