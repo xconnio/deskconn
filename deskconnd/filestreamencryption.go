@@ -9,7 +9,7 @@ import (
 
 // P2PServerKeyExchange performs the server side of the per-channel key
 // exchange. firstMessage is the client's plaintext public key, already
-// consumed by xlink's channel classification, so it's parsed directly
+// consumed by the relay dispatch's classification, so it's parsed directly
 // rather than read again off the channel. Sends back our own plaintext
 // public key and returns the derived session keys; every message from here
 // on is encrypted.

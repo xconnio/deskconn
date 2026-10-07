@@ -2,6 +2,7 @@ package deskconn_test
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"os"
@@ -14,10 +15,29 @@ import (
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
 	"github.com/xconnio/deskconn/deskconnd"
-	"github.com/xconnio/deskconn/xlink"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
+	xconnd "github.com/xconnio/xconn-go/xconn"
 )
+
+// listenQUIC serves router over QUIC on a local port with a self-signed certificate,
+// returning the URL and certificate fingerprint to connect with and the raw streams.
+func listenQUIC(t *testing.T, router *xconn.Router, authenticator auth.ServerAuthenticator) (string, string,
+	<-chan *xconn.QUICStream) {
+	t.Helper()
+	dir := t.TempDir()
+	cert, err := common.LoadOrCreateCertificate(filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"))
+	require.NoError(t, err)
+	listener, err := xconn.NewServer(router, authenticator, &xconn.ServerConfig{}).ListenAndServeQUIC("127.0.0.1:0",
+		&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for range listener.AcceptSession() { //nolint:revive // only draining
+		}
+	}()
+	return "quic://" + listener.Addr().String(), common.CertificateFingerprint(cert), listener.AcceptStream()
+}
 
 const streamProxyTestRealm = "io.xconn.test"
 
@@ -33,7 +53,7 @@ func (anyKeyAuthenticator) Authenticate(request auth.Request) (auth.Response, er
 }
 
 // startStreamProxy stands up the whole default-mode path short of the cloud: a
-// device serving raw streams over yamux through xlink's relay to deskconnd's real
+// device serving raw streams over QUIC through xconn's relay to deskconnd's real
 // handlers, a ClientSessions holding a persistent connection to it, and deskconnd's
 // stream proxy in front of that. It returns the config directory to dial the proxy in.
 func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconnd.ClientSessions) {
@@ -55,12 +75,10 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 		Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix", AllowCall: true}},
 	}}}))
 	t.Cleanup(router.Close)
-	listener, err := common.ListenYamux("unix://"+filepath.Join(dir, "device.sock"), router, anyKeyAuthenticator{})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = listener.Close() })
+	deviceURL, certHash, streams := listenQUIC(t, router, anyKeyAuthenticator{})
 	common.SafeGo(func() {
-		for stream := range listener.Streams() {
-			common.SafeGo(func() { xlink.RelayQUICStream(stream.Conn, relaySock) })
+		for stream := range streams {
+			common.SafeGo(func() { xconnd.RelayStream(stream.Conn, relaySock) })
 		}
 	})
 
@@ -71,8 +89,7 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, err := common.ConnectYamux(ctx, "unix://"+filepath.Join(dir, "device.sock"), streamProxyTestRealm,
-		authenticator)
+	conn, err := common.ConnectStandalone(ctx, deviceURL, certHash, streamProxyTestRealm, authenticator)
 	require.NoError(t, err)
 
 	clientSessions = deskconnd.NewClientSessions()

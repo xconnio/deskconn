@@ -109,24 +109,33 @@ desk keygen
 ### 2. Start deskconnd in standalone mode on the device
 
 ```bash
-deskconnd --standalone --url tcp://0.0.0.0:18080 --public-key 65160c38… [--public-key <another public key> ...]
+deskconnd --standalone --public-key 65160c38… [--public-key <another public key> ...]
 ```
 
-`--url` is `tcp://host:port` or `unix:///path/to.sock` (default `tcp://0.0.0.0:18080`). Clients holding one of the
-`--public-key`s can connect, whatever authid they present. To run it as the service, put the flags on `ExecStart` with
-`systemctl --user edit deskconnd`.
+deskconnd serves QUIC on UDP `0.0.0.0:18080` by default. Pick the transport with `--transport quic|webtransport|both`
+and the addresses with `--quic-address` and `--webtransport-address` (default `0.0.0.0:18081`, path `/wamp`). Clients
+holding one of the `--public-key`s can connect, whatever authid they present. To run it as the service, put the flags
+on `ExecStart` with `systemctl --user edit deskconnd`.
+
+Both transports use TLS. Pass your certificate with `--tls-cert cert.pem --tls-key key.pem` (e.g. one issued by a public
+CA); without them deskconnd generates a self-signed certificate once and keeps it in `~/.deskconn`. Either way it logs
+the certificate's SHA-256 fingerprint at startup:
+
+```
+standalone: certificate SHA-256 fingerprint 3f9a1c… (clients that don't trust its issuer connect with desk --cert-hash 3f9a1c…)
+```
 
 To allow username/password logins instead of (or as well as) keys, add `--user username:password`, repeated for more
 accounts (or set `DESKCONND_USERS`, one `username:password` per line, to keep passwords off the command line):
 
 ```bash
-deskconnd --standalone --url tcp://0.0.0.0:18080 --user alice:s3cret [--user <username:password> ...]
+deskconnd --standalone --user alice:s3cret [--user <username:password> ...]
 ```
 
 ### 3. Connect from the client
 
 ```bash
-export DESKCONN_URL=tcp://203.0.113.5:18080 DESKCONN_PRIVATE_KEY=9f2d0b17…
+export DESKCONN_URL=quic://203.0.113.5:18080 DESKCONN_CERT_HASH=3f9a1c… DESKCONN_PRIVATE_KEY=9f2d0b17…
 desk shell
 desk exec -- uname -a
 desk file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
@@ -138,12 +147,16 @@ With a username/password account, give the username as `--authid` (default: the 
 `--secret` or `DESKCONN_SECRET`; if neither a key nor a password is given, desk prompts for the password:
 
 ```bash
-export DESKCONN_URL=tcp://203.0.113.5:18080 DESKCONN_AUTHID=alice
+export DESKCONN_URL=quic://203.0.113.5:18080 DESKCONN_CERT_HASH=3f9a1c… DESKCONN_AUTHID=alice
 desk shell
 # Password for alice:
 ```
 
-The same works with flags: `desk --url tcp://203.0.113.5:18080 --private-key 9f2d0b17… shell`. With `--url`,
+Use `https://host:18081` as the URL to connect over WebTransport instead. `--cert-hash` (or `DESKCONN_CERT_HASH`)
+pins the device's certificate, which is what makes a self-signed one trusted; leave it out when the certificate is
+issued by a CA the client trusts.
+
+The same works with flags: `desk --url quic://203.0.113.5:18080 --cert-hash 3f9a1c… --private-key 9f2d0b17… shell`. With `--url`,
 commands take no device argument. `ping`, `connect`, `disconnect` and `ls` work on devices of your account only.
 
 ## Self-hosting
@@ -236,8 +249,8 @@ Standalone devices (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
 desk keygen                                        # key pair: public for deskconnd --public-key, private for --private-key
-desk --url <tcp://host:port> --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_PRIVATE_KEY
-desk --url <tcp://host:port> --authid <user> [--secret <pw>] <command>   # also DESKCONN_AUTHID / DESKCONN_SECRET
+desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_CERT_HASH / DESKCONN_PRIVATE_KEY
+desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --authid <user> [--secret <pw>] <command>   # also DESKCONN_AUTHID / DESKCONN_SECRET
 ```
 
 ### Shell & exec

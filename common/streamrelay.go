@@ -27,23 +27,9 @@ type MessageChannel interface {
 	OnBufferedAmountLow(f func())
 }
 
-// RelayKind says whether a local relay connection carries an ordered byte
-// stream (QUIC) or discrete messages (WebRTC) -- see RelayHeader.
+// RelayKind says whether a stream proxy connection carries an ordered byte
+// stream (QUIC) or discrete messages (WebRTC) -- see StreamProxyRequest.
 type RelayKind string
-
-// RelayHeader is the first message xlink writes on every local connection
-// it opens to deskconnd's stream-relay listener: it tells deskconnd which
-// feature owns the rest of the connection. For RelayKindQUIC, Op is set and
-// the remainder is the QUIC stream's bytes, untouched. For RelayKindWebRTC,
-// Label is set and the remainder is a sequence of RelayFrames (see
-// WriteRelayFrame/ReadRelayFrame), since a raw byte splice would lose
-// WebRTC's message boundaries.
-type RelayHeader struct {
-	Kind    RelayKind `json:"kind"`
-	Op      FSOp      `json:"op,omitempty"`
-	Label   string    `json:"label,omitempty"`
-	Ordered bool      `json:"ordered"`
-}
 
 // relayFrameKind discriminates one RelayFrame from another on a
 // RelayKindWebRTC connection.

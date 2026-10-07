@@ -129,6 +129,11 @@ const (
 	ProcedureDeskconnDetachDesktop   = "io.xconn.deskconn.desktop.detach"
 	TopicDeskconnDesktopDetachFormat = "io.xconn.deskconn.desktop.%s.detach"
 	MachineIDPath                    = "/etc/machine-id"
+
+	// The cloud's API for the keys authorized to connect to a desktop (see xconn-go's xconn.CloudConfig).
+	ProcedureDesktopKeyList      = "io.xconn.deskconn.desktop.access.key.list"
+	TopicDesktopKeyAddedFormat   = "io.xconn.deskconn.desktop.%s.key.add"
+	TopicDesktopKeyRemovedFormat = "io.xconn.deskconn.desktop.%s.key.remove"
 )
 
 const ProcedureFileCat = "io.xconn.deskconn.deskconnd.file.cat"
@@ -237,8 +242,8 @@ const (
 	// VPNFrameOpen  and VPNFrameReady are the "type" discriminators for the two
 	// control frames exchanged -- as DataChannel *text* messages -- before
 	// either side starts treating channel messages as raw binary IP
-	// packets. VPNFrameOpen also lets xlink's channel classification
-	// tell a VPN channel apart from a file-stream channel.
+	// packets. VPNFrameOpen also lets deskconnd's relay dispatch tell a
+	// VPN channel apart from a file-stream channel.
 	VPNFrameOpen  = "vpn-open"
 	VPNFrameReady = "vpn-ready"
 

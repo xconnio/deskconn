@@ -2,6 +2,7 @@ package deskconnd_test
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -19,6 +20,25 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
+// listenQUIC serves router over QUIC on a local port with a self-signed certificate,
+// returning the URL and certificate fingerprint to connect with and the raw streams.
+func listenQUIC(t *testing.T, router *xconn.Router, authenticator auth.ServerAuthenticator) (string, string,
+	<-chan *xconn.QUICStream) {
+	t.Helper()
+	dir := t.TempDir()
+	cert, err := common.LoadOrCreateCertificate(filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"))
+	require.NoError(t, err)
+	listener, err := xconn.NewServer(router, authenticator, &xconn.ServerConfig{}).ListenAndServeQUIC("127.0.0.1:0",
+		&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for range listener.AcceptSession() { //nolint:revive // only draining
+		}
+	}()
+	return "quic://" + listener.Addr().String(), common.CertificateFingerprint(cert), listener.AcceptStream()
+}
+
 const proxyTestRealm = "io.xconn.test"
 
 type cryptosignAuthenticator struct{}
@@ -32,8 +52,8 @@ func (cryptosignAuthenticator) Authenticate(request auth.Request) (auth.Response
 	return nil, errors.New("cryptosign only")
 }
 
-// startEchoProxy serves the stream proxy in front of a persistent QUIC-style (yamux)
-// connection to a device that echoes every raw stream.
+// startEchoProxy serves the stream proxy in front of a persistent QUIC connection to a
+// device that echoes every raw stream.
 func startEchoProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconnd.ClientSessions) {
 	t.Helper()
 	dir := t.TempDir()
@@ -45,12 +65,9 @@ func startEchoProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconn
 		Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix", AllowCall: true}},
 	}}}))
 	t.Cleanup(router.Close)
-	deviceURL := "unix://" + filepath.Join(dir, "device.sock")
-	listener, err := common.ListenYamux(deviceURL, router, cryptosignAuthenticator{})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = listener.Close() })
+	deviceURL, certHash, streams := listenQUIC(t, router, cryptosignAuthenticator{})
 	common.SafeGo(func() {
-		for stream := range listener.Streams() {
+		for stream := range streams {
 			common.SafeGo(func() { _, _ = io.Copy(stream, stream) })
 		}
 	})
@@ -61,7 +78,7 @@ func startEchoProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconn
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, err := common.ConnectYamux(ctx, deviceURL, proxyTestRealm, authenticator)
+	conn, err := common.ConnectStandalone(ctx, deviceURL, certHash, proxyTestRealm, authenticator)
 	require.NoError(t, err)
 
 	clientSessions = deskconnd.NewClientSessions()

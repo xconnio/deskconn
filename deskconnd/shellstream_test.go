@@ -14,7 +14,6 @@ import (
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
 	"github.com/xconnio/deskconn/deskconnd"
-	"github.com/xconnio/deskconn/xlink"
 )
 
 func TestBeginShellSessionCreatesNewPTY(t *testing.T) {
@@ -218,7 +217,7 @@ func TestHandleQUICShellStreamEndToEnd(t *testing.T) {
 
 	d := deskconnd.NewShellDeskconn()
 	go func() {
-		op, err := xlink.ReadStreamOp(server)
+		op, err := deskconnd.ReadStreamOp(server)
 		if err != nil {
 			return
 		}
@@ -258,7 +257,7 @@ func TestHandleQUICShellStreamIgnoresPing(t *testing.T) {
 
 	d := deskconnd.NewShellDeskconn()
 	go func() {
-		op, err := xlink.ReadStreamOp(server)
+		op, err := deskconnd.ReadStreamOp(server)
 		if err != nil {
 			return
 		}
