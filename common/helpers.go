@@ -89,15 +89,16 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 	return authid, privKey, nil
 }
 
-// ConnectDeviceRealmQUIC connects to realm's device: over yamux for the standalone target
-// the CLI was pointed at (see SetStandaloneTarget), otherwise through the cloud over QUIC.
+// ConnectDeviceRealmQUIC connects to realm's device: directly over QUIC or WebTransport for
+// the standalone target the CLI was pointed at (see SetStandaloneTarget), otherwise through
+// the cloud over QUIC.
 func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*DeviceConn, error) {
 	if target, ok := StandaloneTargetFor(realm); ok {
 		authenticator, err := target.Authenticator()
 		if err != nil {
 			return nil, err
 		}
-		return ConnectYamux(ctx, target.URL, realm, authenticator)
+		return ConnectStandalone(ctx, target.URL, target.CertHash, realm, authenticator)
 	}
 
 	authid, privKey, err := ReadCredentials(cfgDirectory)

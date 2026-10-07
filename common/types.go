@@ -41,7 +41,8 @@ type Config struct {
 // instead of a device from the cloud account. It authenticates with PrivateKey if set,
 // otherwise as user AuthID with Password, asking ReadPassword for it on first use if empty.
 type StandaloneTarget struct {
-	URL          string // tcp://host:port or unix:///path
+	URL          string // quic://host:port, or https://host:port[/path] for WebTransport
+	CertHash     string // SHA-256 fingerprint to pin the device's certificate to, if set
 	AuthID       string
 	PrivateKey   string // hex ed25519 seed
 	Password     string

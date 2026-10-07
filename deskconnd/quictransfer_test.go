@@ -13,7 +13,6 @@ import (
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
 	"github.com/xconnio/deskconn/deskconnd"
-	"github.com/xconnio/deskconn/xlink"
 )
 
 const testFileName = "file.txt"
@@ -27,7 +26,7 @@ func newQUICTestStream(t *testing.T) net.Conn {
 	client, server := net.Pipe()
 	var d deskconnd.Deskconn
 	go func() {
-		op, err := xlink.ReadStreamOp(server)
+		op, err := deskconnd.ReadStreamOp(server)
 		if err != nil {
 			return
 		}

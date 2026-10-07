@@ -117,7 +117,11 @@ func main() {
 	versionString := fmt.Sprintf("desk %s", version)
 	app := kingpin.New("desk", "Deskconn control CLI")
 	standaloneURL := app.Flag("url", "Connect directly to a standalone deskconnd at this URL "+
-		"(tcp://host:port or unix:///path) instead of a device on your account").Envar("DESKCONN_URL").String()
+		"(quic://host:port, or https://host:port for WebTransport) instead of a device on your account").
+		Envar("DESKCONN_URL").String()
+	standaloneCertHash := app.Flag("cert-hash", "SHA-256 fingerprint of the standalone device's certificate, "+
+		"as deskconnd prints it, to trust it even if self-signed (default: verify against trusted CAs)").
+		Envar("DESKCONN_CERT_HASH").String()
 	standaloneKey := app.Flag("private-key", "Private key (hex) to authenticate with --url; see `desk keygen`").
 		Envar("DESKCONN_PRIVATE_KEY").String()
 	standaloneAuthID := app.Flag("authid", "Authid (username) to present with --url (default: current user)").
@@ -305,7 +309,11 @@ func main() {
 	}
 
 	if *standaloneURL != "" {
-		if _, _, err := common.ParseYamuxURL(*standaloneURL); err != nil {
+		if _, err := common.ParseStandaloneURL(*standaloneURL); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if _, err := common.StandaloneTLSConfig(*standaloneCertHash); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -320,8 +328,8 @@ func main() {
 			}
 		}
 		authID := *standaloneAuthID
-		common.SetStandaloneTarget(&common.StandaloneTarget{URL: *standaloneURL, AuthID: authID,
-			PrivateKey: *standaloneKey, Password: *standalonePassword,
+		common.SetStandaloneTarget(&common.StandaloneTarget{URL: *standaloneURL, CertHash: *standaloneCertHash,
+			AuthID: authID, PrivateKey: *standaloneKey, Password: *standalonePassword,
 			ReadPassword: func() (string, error) { return readStandalonePassword(authID) }})
 		switch parsedCmd {
 		case pingCmd.FullCommand(), connectCmd.FullCommand(), disconnectCmd.FullCommand(), lsCmd.FullCommand():

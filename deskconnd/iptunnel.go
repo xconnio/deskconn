@@ -42,8 +42,8 @@ type vpnTunnelSession struct {
 	cleanup   func()
 }
 
-// handleVPNChannel is called once xlink's channel classification has
-// identified channel as a VPN tunnel request (see RelayHeader).
+// handleVPNChannel is called once the relay dispatch has identified
+// channel as a VPN tunnel request (see handleRelayConn).
 func (d *Deskconn) handleVPNChannel(channel common.MessageChannel) {
 	d.vpn.mu.Lock()
 	if d.vpn.closed || d.vpn.helper == nil {
