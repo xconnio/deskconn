@@ -148,6 +148,28 @@ func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn
 	}
 }
 
+// ProxyCallHandler forwards a call to procedure on the device whose realm is the first
+// argument, passing the remaining arguments through.
+func ProxyCallHandler(clientSessions *ClientSessions, cfgDirectory, procedure string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		}
+
+		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		}
+
+		callResp := deviceSess.Call(procedure).Args(inv.Args()[1:]...).Do()
+		if callResp.Err != nil {
+			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+		}
+		return xconn.NewInvocationResult(callResp.Args()...)
+	}
+}
+
 func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		realm, err := inv.ArgString(0)

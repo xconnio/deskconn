@@ -122,7 +122,6 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	deskconnApis.StartIndexer(ctx)
 
 	// Raw stream relay listener: xlink dials in once per classified
 	// remote stream/channel (see xconnd.RelayHeader).
@@ -207,6 +206,8 @@ func main() {
 			common.ProcedureGitStatus,
 			common.ProcedureGitOriginal,
 			common.ProcedureFileCat,
+			common.ProcedureCapabilitiesList,
+			common.ProcedureCapabilitiesSet,
 		},
 		StreamSocket: streamSockPath,
 	}
@@ -322,6 +323,10 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Des
 		common.ProcedureProxyVPNStop:      deskconnd.ProxyVPNStopHandler(deskconnApis),
 		common.ProcedureProxyPrinterList:  deskconnd.ProxyPrinterListHandler(clientSessions, cfgDirectory),
 		common.ProcedureProxyPrinterPrint: deskconnd.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyCapabilitiesList: deskconnd.ProxyCallHandler(clientSessions, cfgDirectory,
+			common.ProcedureCapabilitiesList),
+		common.ProcedureProxyCapabilitiesSet: deskconnd.ProxyCallHandler(clientSessions, cfgDirectory,
+			common.ProcedureCapabilitiesSet),
 		common.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSessions.Login()
 			return xconn.NewInvocationResult()

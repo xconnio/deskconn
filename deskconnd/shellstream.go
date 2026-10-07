@@ -111,6 +111,15 @@ func (p *interactiveShellSession) beginShellSession(ctrl common.ShellControlMsg,
 // handleQUICShellStream serves one shell over a raw QUIC stream: key
 // exchange, beginShellSession on the first control message, then a read
 // loop dispatching every further control/data envelope until it closes.
+// beginShellSession starts a shell session unless the terminal app is disabled.
+func (d *Deskconn) beginShellSession(ctrl common.ShellControlMsg, transport shellTransport) (
+	shellID, token string, ptmx *os.File, startReader func(), err error) {
+	if err := d.capabilities.check(terminalAppID); err != nil {
+		return "", "", nil, nil, err
+	}
+	return d.shellSession.beginShellSession(ctrl, transport)
+}
+
 func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 	defer stream.Close()
 
@@ -134,7 +143,7 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 	}
 
 	transport := &quicShellTransport{stream: stream, sendKey: sendKey}
-	shellID, token, ptmx, startReader, err := d.shellSession.beginShellSession(ctrl, transport)
+	shellID, token, ptmx, startReader, err := d.beginShellSession(ctrl, transport)
 	ackMsg := common.ShellControlMsg{ShellID: shellID, Token: token}
 	if err != nil {
 		ackMsg = common.ShellControlMsg{Error: err.Error()}
@@ -210,7 +219,7 @@ func (d *Deskconn) serveShellChannel(channel common.MessageChannel, firstMessage
 	}
 
 	transport := &p2pShellTransport{channel: channel, sendKey: sendKey}
-	shellID, token, ptmx, startReader, err := d.shellSession.beginShellSession(ctrl, transport)
+	shellID, token, ptmx, startReader, err := d.beginShellSession(ctrl, transport)
 	ackMsg := common.ShellControlMsg{ShellID: shellID, Token: token}
 	if err != nil {
 		ackMsg = common.ShellControlMsg{Error: err.Error()}

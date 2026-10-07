@@ -35,20 +35,22 @@ const (
 // the same string constants regardless of which process implements which
 // half.
 const (
-	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
-	ProcedureProxyDeviceInfo   = "io.xconn.deskconn.deskconnd.proxy.device.info"
-	ProcedureProxyPing         = "io.xconn.deskconn.deskconnd.proxy.ping"
-	ProcedureProxyCat          = "io.xconn.deskconn.deskconnd.proxy.file.cat"
-	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
-	ProcedureProxyPrinterPrint = "io.xconn.deskconn.deskconnd.proxy.printer.print"
-	ProcedureProxyVPNStart     = "io.xconn.deskconn.deskconnd.proxy.vpn.start"
-	ProcedureProxyVPNStop      = "io.xconn.deskconn.deskconnd.proxy.vpn.stop"
-	ProcedureLogin             = "io.xconn.deskconn.login"
-	ProcedureLogout            = "io.xconn.deskconn.logout"
-	ProcedureConnect           = "io.xconn.deskconn.connect"
-	ProcedureDisconnect        = "io.xconn.deskconn.disconnect"
-	ProcedureDisconnectAll     = "io.xconn.deskconn.disconnect_all"
-	ProcedureConnectedDevices  = "io.xconn.deskconn.connected_devices"
+	ProcedureProxyFileOp           = "io.xconn.deskconn.deskconnd.proxy.file.op"
+	ProcedureProxyDeviceInfo       = "io.xconn.deskconn.deskconnd.proxy.device.info"
+	ProcedureProxyPing             = "io.xconn.deskconn.deskconnd.proxy.ping"
+	ProcedureProxyCat              = "io.xconn.deskconn.deskconnd.proxy.file.cat"
+	ProcedureProxyPrinterList      = "io.xconn.deskconn.deskconnd.proxy.printer.list"
+	ProcedureProxyPrinterPrint     = "io.xconn.deskconn.deskconnd.proxy.printer.print"
+	ProcedureProxyVPNStart         = "io.xconn.deskconn.deskconnd.proxy.vpn.start"
+	ProcedureProxyVPNStop          = "io.xconn.deskconn.deskconnd.proxy.vpn.stop"
+	ProcedureProxyCapabilitiesList = "io.xconn.deskconn.deskconnd.proxy.capabilities.list"
+	ProcedureProxyCapabilitiesSet  = "io.xconn.deskconn.deskconnd.proxy.capabilities.set"
+	ProcedureLogin                 = "io.xconn.deskconn.login"
+	ProcedureLogout                = "io.xconn.deskconn.logout"
+	ProcedureConnect               = "io.xconn.deskconn.connect"
+	ProcedureDisconnect            = "io.xconn.deskconn.disconnect"
+	ProcedureDisconnectAll         = "io.xconn.deskconn.disconnect_all"
+	ProcedureConnectedDevices      = "io.xconn.deskconn.connected_devices"
 
 	LocalRealm = "io.xconn.deskconn.local"
 
@@ -107,6 +109,12 @@ const (
 	ProcedureAISessionList = "io.xconn.deskconn.deskconnd.ai.session.list"
 	ProcedureAISessionPull = "io.xconn.deskconn.deskconnd.ai.session.pull"
 
+	ProcedureCapabilitiesList = "io.xconn.deskconn.deskconnd.capabilities.list"
+	ProcedureCapabilitiesSet  = "io.xconn.deskconn.deskconnd.capabilities.set"
+	// TopicCapabilitiesChanged is published on the local realm, with the apps' list, after
+	// an app is enabled or disabled.
+	TopicCapabilitiesChanged = "io.xconn.deskconn.deskconnd.capabilities.on_change"
+
 	ProcedureGitStatus   = "io.xconn.deskconn.deskconnd.git.status"
 	ProcedureGitOriginal = "io.xconn.deskconn.deskconnd.git.original"
 )
@@ -137,6 +145,11 @@ const (
 )
 
 const ProcedureFileCat = "io.xconn.deskconn.deskconnd.file.cat"
+
+// ProcedureMediaIndexQuery is media-app's index query, registered on the local realm only:
+// deskconnd's ProcedureIndexQuery decrypts a client's query, forwards its JSON here and
+// encrypts the JSON result. media-app checks the query's categories are enabled.
+const ProcedureMediaIndexQuery = "io.xconn.deskconn.media.index.query"
 
 const (
 	ExtJpg  = ".jpg"

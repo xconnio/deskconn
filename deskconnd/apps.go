@@ -12,7 +12,7 @@ import (
 
 const systemAppID = "system"
 
-// trueValue is how .desktop entries and the index metadata spell a true flag.
+// trueValue is how .desktop entries spell a true flag.
 const trueValue = "true"
 
 type AppInfo struct {

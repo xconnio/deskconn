@@ -25,12 +25,15 @@ type Deskconn struct {
 	mpris                *MPRIS
 	audio                *Audio
 	printer              *Printer
-	indexer              *IndexService
 	wallpaper            *Wallpaper
 	processes            *ProcessMonitor
 	appRegistry          *AppRegistry
 	desktop              bool
 	vpn                  *vpnServer
+	capabilities         *capabilities
+	// session is the app-layer session Register registered on, also used to reach
+	// media-app's procedures.
+	session *xconn.Session
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment bool, cfgDirectory string) *Deskconn {
@@ -49,51 +52,27 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment 
 		vpn:                  newVPNServer(),
 	}
 	d.shellSession.agentForward = d.agentForwardSessions
+	d.capabilities = newCapabilities(d.apps(), desktopEnvironment, cfgDirectory)
 	if screen != nil {
 		d.wallpaper = NewWallpaper(screen.SessionBus())
 	}
-
-	indexer, err := NewIndexService(cfgDirectory)
-	if err != nil {
-		log.Printf("fileindex: failed to create index service: %v", err)
-		return d
-	}
-
-	d.indexer = indexer
 	return d
 }
 
-// StartIndexer starts the background file indexer.
-func (d *Deskconn) StartIndexer(ctx context.Context) {
-	if d.indexer != nil {
-		d.indexer.Start(ctx)
-	}
-}
-
 func (d *Deskconn) Register(session *xconn.Session) error {
+	d.session = session
+	// Always-on procedures. Each app's own procedures (see Deskconn.apps) are registered by
+	// d.capabilities, only while that app is enabled.
 	handlers := map[string]xconn.InvocationHandler{
-		common.ProcedureKeyExchange:     d.handleKeyExchange,
-		common.ProcedureShellIsBusy:     d.shellSession.handleShellIsBusy(),
-		common.ProcedureFileBrowse:      d.handleFileBrowse,
-		common.ProcedureFileRename:      d.handleFileRename,
-		common.ProcedureFileDelete:      d.handleFileDelete,
-		common.ProcedureFileCopy:        d.handleFileCopy,
-		common.ProcedureFileEdit:        d.handleFileEdit,
-		common.ProcedureFileCat:         d.handleFileCat,
-		common.ProcedureFileSearch:      d.handleFileSearch,
-		common.ProcedureGitStatus:       d.handleGitStatus,
-		common.ProcedureGitOriginal:     d.handleGitOriginal,
-		common.ProcedurePrinterList:     d.printer.handleListPrinters,
-		common.ProcedurePrinterPrint:    d.printer.handlePrint(),
-		common.ProcedureDeviceInfo:      d.handleDeviceInfo,
-		common.ProcedureDeviceIsDesktop: d.handleDeviceIsDesktop,
-		common.ProcedureProcessList:     d.handleProcessList,
-		common.ProcedureProcessSignal:   d.handleProcessSignal,
-		common.ProcedureAppList:         d.handleAppList,
-		common.ProcedureAppIcon:         d.handleAppIcon,
-		common.ProcedureIndexQuery:      d.handleIndexQuery,
-		common.ProcedureAISessionList:   d.handleAISessionList,
-		common.ProcedureAISessionPull:   d.handleAISessionPull,
+		common.ProcedureKeyExchange:      d.handleKeyExchange,
+		common.ProcedureCapabilitiesList: d.capabilities.handleList,
+		common.ProcedureCapabilitiesSet:  d.capabilities.handleSet,
+		common.ProcedurePrinterList:      d.printer.handleListPrinters,
+		common.ProcedurePrinterPrint:     d.printer.handlePrint(),
+		common.ProcedureDeviceInfo:       d.handleDeviceInfo,
+		common.ProcedureDeviceIsDesktop:  d.handleDeviceIsDesktop,
+		common.ProcedureAISessionList:    d.handleAISessionList,
+		common.ProcedureAISessionPull:    d.handleAISessionPull,
 		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
@@ -104,24 +83,22 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	// on a headless server. Skip registering them there.
 	if d.desktop {
 		maps.Copy(handlers, map[string]xconn.InvocationHandler{
-			common.ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
-			common.ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
-			common.ProcedureScreenLock:           d.lockScreenLockHandler,
-			common.ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
-			common.ProcedureMPRISPlayers:         d.handleListPlayers,
-			common.ProcedureMPRISPlayPause:       d.handlePlayPause,
-			common.ProcedureMPRISPlay:            d.handlePlay,
-			common.ProcedureMPRISPause:           d.handlePause,
-			common.ProcedureMPRISNext:            d.handleNext,
-			common.ProcedureMPRISPrevious:        d.handlePrevious,
-			common.ProcedureAudioMute:            d.handleAudioMute,
-			common.ProcedureAudioUnmute:          d.handleAudioUnmute,
-			common.ProcedureAudioToggleMute:      d.handleAudioToggleMute,
-			common.ProcedureAudioIsMuted:         d.handleAudioIsMuted,
-			common.ProcedureScreenshot:           d.handleScreenshot,
-			common.ProcedureScreenshotPermission: d.handleScreenShotPermission,
-			common.ProcedureWallpaperGet:         d.wallpaper.HandleGet,
-			common.ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
+			common.ProcedureScreenBrightnessGet: d.brightnessGetHandler,
+			common.ProcedureScreenBrightnessSet: d.brightnessSetHandler,
+			common.ProcedureScreenLock:          d.lockScreenLockHandler,
+			common.ProcedureScreenIsLocked:      d.lockScreenIsLockedHandler,
+			common.ProcedureMPRISPlayers:        d.handleListPlayers,
+			common.ProcedureMPRISPlayPause:      d.handlePlayPause,
+			common.ProcedureMPRISPlay:           d.handlePlay,
+			common.ProcedureMPRISPause:          d.handlePause,
+			common.ProcedureMPRISNext:           d.handleNext,
+			common.ProcedureMPRISPrevious:       d.handlePrevious,
+			common.ProcedureAudioMute:           d.handleAudioMute,
+			common.ProcedureAudioUnmute:         d.handleAudioUnmute,
+			common.ProcedureAudioToggleMute:     d.handleAudioToggleMute,
+			common.ProcedureAudioIsMuted:        d.handleAudioIsMuted,
+			common.ProcedureWallpaperGet:        d.wallpaper.HandleGet,
+			common.ProcedureWallpaperChecksum:   d.wallpaper.HandleChecksum,
 		})
 	}
 
@@ -132,6 +109,10 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		}
 
 		log.Printf("Registered procedure %s", uri)
+	}
+
+	if err := d.capabilities.register(session); err != nil {
+		return err
 	}
 
 	subResp := session.Subscribe(MetaTopicSessionLeave, d.handleSessionLeave).Do()
@@ -361,11 +342,9 @@ func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *
 	return xconn.NewInvocationResult(serverPublicKey)
 }
 
+// handleIndexQuery serves Pictures, Videos and Documents: it decrypts the query and
+// forwards it to media-app, which does the indexing and checks the query's categories.
 func (d *Deskconn) handleIndexQuery(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	if d.indexer == nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, "index service unavailable")
-	}
-
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
 		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
@@ -380,21 +359,19 @@ func (d *Deskconn) handleIndexQuery(_ context.Context, inv *xconn.Invocation) *x
 		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 	}
 
-	var args struct {
-		Categories []string          `json:"categories"`
-		Cursor     map[string]string `json:"cursor"`
-		Limit      int               `json:"limit"`
+	resp := d.session.Call(common.ProcedureMediaIndexQuery).Args(plaintext).Do()
+	if resp.Err != nil {
+		var wampErr *xconn.Error
+		if !errors.As(resp.Err, &wampErr) {
+			return xconn.NewInvocationError(common.ErrOperationFailed, resp.Err.Error())
+		}
+		if wampErr.URI == wampproto.ErrNoSuchProcedure {
+			return xconn.NewInvocationError(common.ErrOperationFailed, "media-app isn't running on this device")
+		}
+		// media-app's own errors, e.g. a disabled category, as they are.
+		return xconn.NewInvocationError(wampErr.URI, wampErr.Args...)
 	}
-	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-
-	result, err := d.indexer.Query(args.Categories, args.Cursor, args.Limit)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-
-	resultBytes, err := json.Marshal(result)
+	resultBytes, err := resp.ArgBytes(0)
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
