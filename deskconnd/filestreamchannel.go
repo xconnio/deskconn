@@ -18,7 +18,8 @@ import (
 // ephemeral public key that opens the per-channel key exchange, so it's
 // parsed directly rather than waiting to receive it again.
 func (d *Deskconn) HandleFileStreamChannel(_ string, channel common.MessageChannel, firstMessage []byte) {
-	common.SafeGo(func() { serveFileStreamChannel(channel, firstMessage) })
+	disabledErr := d.capabilities.check(filesAppID)
+	common.SafeGo(func() { serveFileStreamChannel(channel, firstMessage, disabledErr) })
 }
 
 // serveFileStreamChannel performs the per-channel key exchange and
@@ -27,7 +28,9 @@ func (d *Deskconn) HandleFileStreamChannel(_ string, channel common.MessageChann
 // and close immediately. read and write go to serveFileStreamSession,
 // which keeps the channel open across many chunk requests -- reopening
 // a channel per chunk was measured to badly limit throughput on real (non-loopback) links.
-func serveFileStreamChannel(channel common.MessageChannel, firstMessage []byte) {
+// serveFileStreamChannel serves one transfer, or with disabledErr set only tells the
+// client file transfers are disabled.
+func serveFileStreamChannel(channel common.MessageChannel, firstMessage []byte, disabledErr error) {
 	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
 	if err != nil {
 		log.Debugf("filestream: key exchange failed: %v", err)
@@ -62,6 +65,14 @@ func serveFileStreamChannel(channel common.MessageChannel, firstMessage []byte) 
 
 	req, err := common.RecvPriority(reqCh, closed, common.P2PRequestTimeout)
 	if err != nil {
+		_ = channel.Close()
+		return
+	}
+	// As over QUIC: list/init open every transfer and are answered with an FSResponse.
+	if disabledErr != nil {
+		if req.Op == common.FSOpList || req.Op == common.FSOpInit {
+			_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: disabledErr.Error()}, sendKey)
+		}
 		_ = channel.Close()
 		return
 	}

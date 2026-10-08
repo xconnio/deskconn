@@ -272,6 +272,7 @@ func main() {
 	selfRemoveYes := selfRemoveCmd.Flag("yes", "Do not prompt for confirmation").Short('y').Bool()
 
 	aiCmds := registerAICommands(app, cfgDirectory)
+	appsCmds := registerAppsCommands(app, cfgDirectory)
 
 	if len(os.Args) == 2 && os.Args[1] == "self" {
 		app.Usage([]string{"self"})
@@ -1291,7 +1292,7 @@ func main() {
 		}
 
 	default:
-		dispatchAICommand(parsedCmd, aiCmds, cfgDirectory)
+		_ = dispatchAppsCommand(parsedCmd, appsCmds, cfgDirectory) || dispatchAICommand(parsedCmd, aiCmds, cfgDirectory)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/xconn-go"
 )
 
 // Test-only access to unexported stream handlers and shell session state, for the
@@ -21,6 +22,16 @@ func (d *Deskconn) HandleQUICPortReverseStream(stream net.Conn) {
 }
 func (d *Deskconn) HandleQUICAgentForwardStream(stream net.Conn) {
 	d.handleQUICAgentForwardStream(stream)
+}
+
+type App = app
+
+// NewCapabilities returns capabilities for apps, already registering on session, along
+// with its list and set handlers.
+func NewCapabilities(apps []*App, desktop bool, cfgDirectory string, session *xconn.Session) (
+	enabled func(id string) bool, list, set xconn.InvocationHandler, err error) {
+	c := newCapabilities(apps, desktop, cfgDirectory)
+	return c.enabled, c.handleList, c.handleSet, c.register(session)
 }
 
 // NewAgentForwardDeskconn returns a Deskconn with only agent forwarding set up.
