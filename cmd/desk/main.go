@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
-	"github.com/godbus/dbus/v5"
 	"github.com/olekukonko/tablewriter"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
@@ -198,19 +197,6 @@ func main() {
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 	execModeFlag := modeFlag(execCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	printCmd := app.Command("print", "Print operations")
-	printEnableFlag := printCmd.Flag("enable", "Enable receiving print jobs on this desktop").Bool()
-	printHostPrintersFlag := printCmd.Flag("host-printers",
-		"Also allow remote clients to list this desktop's printers (use with --enable)").Bool()
-	printDisableFlag := printCmd.Flag("disable", "Disable receiving print jobs on this desktop").Bool()
-	printStatusFlag := printCmd.Flag("status", "Show whether this desktop accepts print jobs").Bool()
-	printLsDevice := printCmd.Flag("ls", "List printers on a device (device name or alias)").
-		HintAction(deviceCompletions(cfgDirectory)).String()
-	printTarget := printCmd.Arg("target", "Device and printer as machine:printer (e.g. m1:HP_LaserJet)").
-		HintAction(devicePathCompletions(cfgDirectory)).String()
-	printFilePath := printCmd.Arg("file_path", "Local file path").String()
-	printModeFlag := modeFlag(printCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
-
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
 	portForwardDevice := deviceArg(portForwardCmd, "device", "ID, name or alias of device", cfgDirectory)
@@ -278,10 +264,6 @@ func main() {
 		Default("-1").Int64()
 	logsSince := logsCmd.Flag("since", "Show entries since duration ago (e.g. 1h, 30m)").String()
 	logsModeFlag := modeFlag(logsCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
-
-	screenshotCmd := app.Command("screenshot", "Screenshot settings")
-	screenshotEnableCmd := screenshotCmd.Command("enable", "Allow remote screenshot access")
-	screenshotDisableCmd := screenshotCmd.Command("disable", "Deny remote screenshot access")
 
 	selfCmd := app.Command("self", "Manage the installed desk CLI.")
 	selfVersionCmd := selfCmd.Command("version", "Show the installed desk version")
@@ -761,161 +743,6 @@ func main() {
 
 		if err := deskconn.RunExec(context.Background(), *execModeFlag, realm, cfgDirectory, *command); err != nil {
 			fmt.Fprintln(os.Stderr, err)
-		}
-
-	case printCmd.FullCommand():
-		switch {
-		case *printEnableFlag:
-			if *printHostPrintersFlag {
-				if err := deskconn.EnablePrinterHosting(); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				fmt.Println("printer hosting enabled")
-			} else {
-				if err := deskconn.EnablePrinting(); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				fmt.Println("printing enabled")
-			}
-		case *printDisableFlag:
-			if err := deskconn.DisablePrinting(); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			fmt.Println("printing disabled")
-		case *printStatusFlag:
-			mode, err := common.CurrentPrintMode()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			switch mode {
-			case common.PrintModeDisabled:
-				fmt.Println("printing disabled")
-			case common.PrintModeAccept:
-				fmt.Println("printing enabled")
-			case common.PrintModeHost:
-				fmt.Println("printing enabled; printer hosting enabled")
-			default:
-				fmt.Printf("printing mode: %s\n", mode)
-			}
-		case *printLsDevice != "":
-			realm, err := deviceRealm(*printLsDevice, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			var callResp xconn.CallResponse
-			switch *printModeFlag {
-			case ModeQUIC:
-				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				defer quicSess.Connection().Close()
-				callResp = quicSess.Session.Call(common.ProcedurePrinterList).Do()
-			case ModeP2P:
-				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				defer func() { _ = p2pSess.Leave() }()
-				callResp = p2pSess.Call(common.ProcedurePrinterList).Do()
-			default:
-				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				callResp = localSession.Call(common.ProcedureProxyPrinterList).Args(realm).Do()
-			}
-			if callResp.Err != nil {
-				fmt.Fprintln(os.Stderr, callResp.Err)
-				return
-			}
-			if len(callResp.Args()) == 0 {
-				return
-			}
-			jsonData, err := json.Marshal(callResp.Args()[0])
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			var printers []common.PrinterInfo
-			if err := json.Unmarshal(jsonData, &printers); err != nil {
-				fmt.Fprintln(os.Stderr, "expected a list of printers")
-				return
-			}
-			table := tablewriter.NewWriter(os.Stdout)
-			table.Header([]string{"NAME", "PPD"})
-			for _, printerInfo := range printers {
-				_ = table.Append([]any{printerInfo.Name, printerInfo.PPDModel})
-			}
-			if err = table.Render(); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		case *printTarget != "":
-			device, printerName := parseDevicePath(*printTarget)
-			if printerName == "" {
-				fmt.Fprintln(os.Stderr, "invalid target: expected machine:printer (e.g. m1:HP_LaserJet)")
-				return
-			}
-			if *printFilePath == "" {
-				fmt.Fprintln(os.Stderr, "file_path required")
-				return
-			}
-			data, err := os.ReadFile(*printFilePath)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			filename := filepath.Base(*printFilePath)
-			realm, err := deviceRealm(device, cfgDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			var callResp xconn.CallResponse
-			switch *printModeFlag {
-			case ModeQUIC:
-				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				defer quicSess.Connection().Close()
-				callResp = quicSess.Session.Call(common.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
-			case ModeP2P:
-				p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				defer func() { _ = p2pSess.Leave() }()
-				callResp = p2pSess.Call(common.ProcedurePrinterPrint).Args(printerName, filename, data).Do()
-			default:
-				localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return
-				}
-				callResp = localSession.Call(common.ProcedureProxyPrinterPrint).Args(realm, printerName, filename, data).Do()
-			}
-			if callResp.Err != nil {
-				fmt.Fprintln(os.Stderr, callResp.Err)
-				return
-			}
-			if len(callResp.Args()) > 0 {
-				fmt.Printf("print job queued: %v\n", callResp.Args()[0])
-			} else {
-				fmt.Println("print job queued")
-			}
-		default:
-			app.Usage([]string{"print"})
 		}
 
 	case portForwardCmd.FullCommand():
@@ -1450,85 +1277,6 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		}
-
-	case screenshotEnableCmd.FullCommand():
-		confirmed, err := confirmPrompt(
-			"Deskconn will take a screenshot to verify screenshot permission. Allow? (y/n): ", false)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		if !confirmed {
-			fmt.Fprintln(os.Stderr, "screenshot enable cancelled")
-			return
-		}
-
-		homedir, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		credFilePath := filepath.Join(homedir, ".deskconn/credentials.json")
-		if _, err := os.Stat(credFilePath); err != nil {
-			fmt.Fprintln(os.Stderr, "device is not attached to any account")
-			return
-		}
-
-		data, err := os.ReadFile(credFilePath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		var creds common.Credentials
-		if err := json.Unmarshal(data, &creds); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), creds.Realm, cfgDirectory)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		defer quicSess.Connection().Close()
-		callResp := quicSess.Session.Call(common.ProcedureScreenshotPermission).Do()
-		if callResp.Err != nil {
-			fmt.Fprintln(os.Stderr, callResp.Err)
-			sessionBus, err := dbus.ConnectSessionBus()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-			_ = deskconn.RevokeScreenshotPermission(sessionBus)
-			return
-		}
-		if err := deskconn.EnableScreenshot(cfgDirectory); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		fmt.Println("screenshot enabled")
-
-	case screenshotDisableCmd.FullCommand():
-		sessionBus, err := dbus.ConnectSessionBus()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		defer sessionBus.Close()
-		var disableErr error
-		if err := deskconn.RevokeScreenshotPermission(sessionBus); err != nil {
-			disableErr = errors.Join(disableErr, fmt.Errorf("revoke screenshot permission: %w", err))
-		}
-		if err := deskconn.DisableScreenshot(cfgDirectory); err != nil {
-			disableErr = errors.Join(disableErr, err)
-		}
-		if disableErr != nil {
-			fmt.Fprintln(os.Stderr, disableErr)
-			return
-		}
-		fmt.Println("screenshot disabled")
 
 	case selfUpdateCmd.FullCommand():
 		if err := updateApp(); err != nil {
