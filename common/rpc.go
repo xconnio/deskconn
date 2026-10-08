@@ -83,6 +83,15 @@ type VPNSetSysctlData struct {
 	Previous string `json:"previous"`
 }
 
+type VPNSetLinkDNSArgs struct {
+	Iface   string   `json:"iface"`
+	Servers []string `json:"servers"`
+}
+
+type VPNRevertLinkDNSArgs struct {
+	Iface string `json:"iface"`
+}
+
 type VPNMasqueradeArgs struct {
 	Subnet string `json:"subnet"`
 	Oif    string `json:"oif"`

@@ -63,6 +63,10 @@ func (s *Server) handle(conn *net.UnixConn, req common.VPNHelperRequest) {
 		s.handleBlockIPv6Default(conn, req)
 	case common.VPNOpRestoreIPv6Default:
 		s.handleRestoreIPv6Default(conn, req)
+	case common.VPNOpSetLinkDNS:
+		s.handleSetLinkDNS(conn, req)
+	case common.VPNOpRevertLinkDNS:
+		s.handleRevertLinkDNS(conn, req)
 	case common.VPNOpSetSysctl:
 		s.handleSetSysctl(conn, req)
 	case common.VPNOpRestoreSysctl:
@@ -225,6 +229,41 @@ func (s *Server) handleRestoreIPv6Default(conn *net.UnixConn, req common.VPNHelp
 		return
 	}
 	s.undo.pop("ipv6_block")
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
+}
+
+func (s *Server) handleSetLinkDNS(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNSetLinkDNSArgs
+	if err := json.Unmarshal(req.Args, &args); err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+
+	if err := SetLinkDNS(args.Iface, args.Servers); err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+	iface := args.Iface
+	s.undo.push("link_dns:"+iface, func() {
+		if err := RevertLinkDNS(iface); err != nil {
+			log.Debugf("vpnd: failed to revert leftover dns settings on %s: %v", iface, err)
+		}
+	})
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
+}
+
+func (s *Server) handleRevertLinkDNS(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNRevertLinkDNSArgs
+	if err := json.Unmarshal(req.Args, &args); err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+
+	if err := RevertLinkDNS(args.Iface); err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+	s.undo.pop("link_dns:" + args.Iface)
 	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 

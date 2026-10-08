@@ -14,14 +14,6 @@ import (
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-// launchHelper wraps iptun.LaunchHelper with a heads-up that a password
-// prompt is coming -- called only once whatever this command needs is
-// confirmed reachable, so a failure fails fast without prompting first.
-func launchHelper(ctx context.Context, cfgDirectory string) (string, func() error, error) {
-	fmt.Println("A password is needed to grant vpnd the network access this requires.")
-	return deskconn.LaunchVPNHelper(ctx, cfgDirectory)
-}
-
 // closeSessionWithTimeout closes session with a bound, since Leave()'s
 // WAMP GOODBYE round-trip is network I/O that could otherwise make Ctrl-C
 // look like it's doing nothing (signal.Notify overrides the terminal's
@@ -44,7 +36,7 @@ func closeSessionWithTimeout(session *xconnwebrtc.WebRTCSession) {
 // dials it directly (P2P) and runs the tunnel here, so on Ctrl-C we wait
 // for its own teardown to actually finish before exiting. This process
 // also launches vpnd (see deskconn.LaunchVPNHelper), since it's the one
-// with a terminal for sudo to prompt on.
+// with a terminal for sudo to prompt on, and waits for it to exit.
 func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 	fmt.Printf("Connecting to %q...\n", device)
 
@@ -62,7 +54,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 	}
 	defer closeSessionWithTimeout(session)
 
-	socketPath, waitHelper, err := launchHelper(ctx, cfgDirectory)
+	socketPath, waitHelper, err := deskconn.LaunchVPNHelper(ctx, cfgDirectory, deskconn.VPNConnectUnit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -110,11 +102,10 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 // through it, then returns right away -- serving continues in the
 // background (deskconnd + vpnd) until "desk vpn stop" or the
 // daemon shuts down. deskconnd has no capability or terminal of its own
-// for this, so this CLI process launches vpnd (the only blocking
-// part, briefly, for the sudo prompt) and hands deskconnd its socket.
-//
-// vpnd is deliberately left running, not reaped here -- it cleans
-// up its own temp directory on exit regardless of how it's later stopped.
+// for this, so this CLI process starts vpnd as a transient systemd unit
+// (the only blocking part, briefly, for the sudo prompt) and hands
+// deskconnd its socket. systemd owns vpnd from there; it exits once
+// deskconnd closes its connection.
 func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 	ctx, cancel := context.WithCancel(cliCtx)
 	defer cancel()
@@ -136,7 +127,7 @@ func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 	}
 	defer func() { _ = localSession.Leave() }()
 
-	socketPath, _, err := launchHelper(ctx, cfgDirectory)
+	socketPath, _, err := deskconn.LaunchVPNHelper(ctx, cfgDirectory, deskconn.VPNServeUnit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -154,20 +145,33 @@ func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 }
 
 // runVPNStop tells this machine's own deskconnd to stop serving as a
-// VPN exit node, if it currently is -- see runVPNStart.
+// VPN exit node, if it currently is -- see runVPNStart. Disarming closes
+// deskconnd's connection to vpnd, which makes it exit without needing
+// sudo; stopping the unit directly is only the fallback for a vpnd that
+// deskconnd no longer knows about (e.g. deskconnd isn't running).
 func runVPNStop(ctx context.Context, cfgDirectory string) {
-	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-	localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
-	if err != nil {
+	if err := disarmVPNServing(ctx, cfgDirectory); err == nil {
+		fmt.Println("Stopped serving.")
+		return
+	} else if !deskconn.VPNHelperActive(deskconn.VPNServeUnit) {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
-	defer func() { _ = localSession.Leave() }()
 
-	resp := localSession.Call(common.ProcedureProxyVPNStop).DoContext(ctx)
-	if resp.Err != nil {
-		fmt.Fprintln(os.Stderr, resp.Err)
+	if err := deskconn.StopVPNHelper(ctx, deskconn.VPNServeUnit); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return
 	}
 	fmt.Println("Stopped serving.")
+}
+
+func disarmVPNServing(ctx context.Context, cfgDirectory string) error {
+	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
+	localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = localSession.Leave() }()
+
+	return localSession.Call(common.ProcedureProxyVPNStop).DoContext(ctx).Err
 }

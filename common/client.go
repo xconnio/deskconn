@@ -32,6 +32,25 @@ func (c *VPNHelperClient) Close() error {
 	return c.conn.Close()
 }
 
+// Alive reports whether the helper is still on the other end of the
+// connection, by peeking at it without blocking: a helper that exited (or
+// was stopped) shows up as end-of-file. Only meaningful while no call is
+// in flight, since it would otherwise race that call's response.
+func (c *VPNHelperClient) Alive() bool {
+	raw, err := c.conn.SyscallConn()
+	if err != nil {
+		return false
+	}
+
+	alive := false
+	ctrlErr := raw.Control(func(fd uintptr) {
+		buf := make([]byte, 1)
+		n, _, err := unix.Recvfrom(int(fd), buf, unix.MSG_PEEK|unix.MSG_DONTWAIT)
+		alive = (err == unix.EAGAIN || err == unix.EWOULDBLOCK) || (err == nil && n > 0) //nolint:errorlint
+	})
+	return ctrlErr == nil && alive
+}
+
 func (c *VPNHelperClient) call(op VPNHelperOp, args any) (VPNHelperResponse, int, error) {
 	var argData json.RawMessage
 	if args != nil {
@@ -170,6 +189,18 @@ func (c *VPNHelperClient) BlockIPv6Default() (hadDefault bool, prev *DefaultRout
 // RestoreIPv6Default mirrors the package-level RestoreIPv6Default.
 func (c *VPNHelperClient) RestoreIPv6Default(hadDefault bool, prev *DefaultRoute) error {
 	_, _, err := c.call(VPNOpRestoreIPv6Default, VPNRestoreIPv6DefaultArgs{HadDefault: hadDefault, Prev: prev})
+	return err
+}
+
+// SetLinkDNS mirrors the package-level SetLinkDNS.
+func (c *VPNHelperClient) SetLinkDNS(iface string, servers []string) error {
+	_, _, err := c.call(VPNOpSetLinkDNS, VPNSetLinkDNSArgs{Iface: iface, Servers: servers})
+	return err
+}
+
+// RevertLinkDNS mirrors the package-level RevertLinkDNS.
+func (c *VPNHelperClient) RevertLinkDNS(iface string) error {
+	_, _, err := c.call(VPNOpRevertLinkDNS, VPNRevertLinkDNSArgs{Iface: iface})
 	return err
 }
 

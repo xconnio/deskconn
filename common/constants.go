@@ -265,6 +265,12 @@ const (
 	VPNMaxRetransmits = 2
 )
 
+// VPNFallbackDNS returns the resolvers a VPN client uses, through the
+// tunnel, when the exit node didn't send any of its own that it can use.
+func VPNFallbackDNS() []string {
+	return []string{"1.1.1.1", "8.8.8.8"}
+}
+
 // Envelope kind bytes, own namespace like every other raw-stream feature's.
 const (
 	LogMsgControl byte = iota // encrypted JSON LogControlMsg, client's one-time request
@@ -390,6 +396,8 @@ const (
 	VPNOpRestoreDefaultRoute VPNHelperOp = "restore_default_route"
 	VPNOpBlockIPv6Default    VPNHelperOp = "block_ipv6_default"
 	VPNOpRestoreIPv6Default  VPNHelperOp = "restore_ipv6_default"
+	VPNOpSetLinkDNS          VPNHelperOp = "set_link_dns"
+	VPNOpRevertLinkDNS       VPNHelperOp = "revert_link_dns"
 
 	// The remaining ops are only used by the exit-node (server) role.
 	VPNOpSetSysctl             VPNHelperOp = "set_sysctl"
