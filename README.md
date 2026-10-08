@@ -291,16 +291,6 @@ desk port forward <device> [-l LOCAL] [-r REMOTE] [--p2p]
 desk port reverse <device> [-r REMOTE] [-l LOCAL] [--p2p]
 ```
 
-### Printing
-
-```
-desk print --enable [--host-printers]   # allow this desktop to receive print jobs
-desk print --disable
-desk print --status
-desk print --ls <device>                # list printers on a device
-desk print <device:printer> <file>      # send a print job
-```
-
 ### Configuration
 
 ```
