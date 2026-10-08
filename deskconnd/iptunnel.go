@@ -130,8 +130,17 @@ func (d *Deskconn) ArmVPNServing(helper *common.VPNHelperClient) error {
 	d.vpn.mu.Lock()
 	defer d.vpn.mu.Unlock()
 
-	if d.vpn.closed || d.vpn.helper != nil {
-		return fmt.Errorf("already serving, or shutting down")
+	if d.vpn.closed {
+		return fmt.Errorf("shutting down")
+	}
+	if d.vpn.helper != nil {
+		// A helper that died on its own (crashed, or its unit was stopped) leaves serving
+		// armed with nobody behind it; drop that one instead of refusing forever. Probing is
+		// only safe while no tunnel is using the helper, and a tunnel in use means it's alive.
+		if d.vpn.active != nil || d.vpn.starting || d.vpn.helper.Alive() {
+			return fmt.Errorf("already serving")
+		}
+		_ = d.vpn.helper.Close()
 	}
 	d.vpn.helper = helper
 	return nil
@@ -260,6 +269,7 @@ func startVPNTunnelServer(channel common.MessageChannel, helper *common.VPNHelpe
 		ServerIP:   common.VPNServerIP,
 		ClientCIDR: common.VPNClientCIDR,
 		MTU:        common.VPNMTU,
+		DNS:        upstreamDNSServers(),
 	})
 	if err != nil {
 		sess.close()
@@ -271,6 +281,23 @@ func startVPNTunnelServer(channel common.MessageChannel, helper *common.VPNHelpe
 	}
 
 	return sess, nil
+}
+
+// upstreamDNSServers returns this machine's own upstream resolvers that a
+// VPN client can use through the tunnel (see common.TunnelDNSServers).
+// systemd-resolved's own resolv.conf lists the real upstreams;
+// /etc/resolv.conf usually only names its local stub when it's in use.
+func upstreamDNSServers() []string {
+	for _, path := range []string{"/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if servers := common.TunnelDNSServers(common.ParseResolvConfNameservers(data)); len(servers) > 0 {
+			return servers
+		}
+	}
+	return nil
 }
 
 func (s *vpnTunnelSession) close() {

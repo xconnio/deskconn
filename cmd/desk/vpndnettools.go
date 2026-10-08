@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -102,6 +103,45 @@ func RestoreIPv6Default(hadDefault bool, prev *common.DefaultRoute) error {
 		return runNetCmd("ip", "-6", "route", "del", "unreachable", "default", "metric", "1")
 	}
 	return RestoreDefaultRoute(6, prev)
+}
+
+// SetLinkDNS has systemd-resolved send every lookup to servers over iface:
+// "~." makes iface the routing domain for all names, so no other link's
+// resolvers are asked (except for more specific domains, e.g. a LAN search
+// domain). Every server must be an IP address. Settings are per-link, so
+// systemd-resolved also drops them by itself once iface is gone.
+func SetLinkDNS(iface string, servers []string) error {
+	if len(servers) == 0 {
+		return fmt.Errorf("no dns servers given")
+	}
+	for _, s := range servers {
+		if net.ParseIP(s) == nil {
+			return fmt.Errorf("invalid dns server %q", s)
+		}
+	}
+
+	if err := runNetCmd("resolvectl", append([]string{"dns", iface}, servers...)...); err != nil {
+		return err
+	}
+	if err := runNetCmd("resolvectl", "domain", iface, "~."); err != nil {
+		_ = RevertLinkDNS(iface)
+		return err
+	}
+	if err := runNetCmd("resolvectl", "default-route", iface, "yes"); err != nil {
+		_ = RevertLinkDNS(iface)
+		return err
+	}
+	// Answers cached from before would otherwise keep pointing lookups at servers picked for
+	// the old network.
+	_ = runNetCmd("resolvectl", "flush-caches")
+	return nil
+}
+
+// RevertLinkDNS undoes SetLinkDNS.
+func RevertLinkDNS(iface string) error {
+	err := runNetCmd("resolvectl", "revert", iface)
+	_ = runNetCmd("resolvectl", "flush-caches")
+	return err
 }
 
 // SetSysctl writes value to the /proc/sys node for key (e.g.

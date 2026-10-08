@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -40,6 +41,22 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 	}
 
 	return ips
+}
+
+// usesResolvedStub reports whether this machine's resolv.conf sends lookups
+// to systemd-resolved, i.e. whether per-link settings made with resolvectl
+// actually take effect.
+func usesResolvedStub() bool {
+	data, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return false
+	}
+	for _, server := range common.ParseResolvConfNameservers(data) {
+		if server == "127.0.0.53" || server == "127.0.0.54" {
+			return true
+		}
+	}
+	return false
 }
 
 // ConnectVPNClient opens a VPN data channel on session, sets up this
@@ -132,8 +149,9 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 		return err
 	}
 
+	var ready common.VPNReadyFrame
 	select {
-	case <-readyCh:
+	case ready = <-readyCh:
 	case <-closedCh:
 		return fmt.Errorf("remote device rejected the tunnel (not currently serving? " +
 			"it needs \"desk vpn start\" run on it first)")
@@ -172,6 +190,23 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 		teardown = append(teardown, func() { _ = helper.RestoreIPv6Default(hadV6, prevV6) })
 	} else {
 		log.Debugf("iptunnel: could not block ipv6 default route, ipv6 traffic may bypass the tunnel: %v", verr)
+	}
+
+	// Lookups would otherwise still go to this network's own resolvers -- leaking every name
+	// looked up, and getting answers picked for this location instead of the exit node's.
+	dnsServers := common.TunnelDNSServers(ready.DNS)
+	if len(dnsServers) == 0 {
+		dnsServers = common.VPNFallbackDNS()
+	}
+	if derr := helper.SetLinkDNS(ifaceName, dnsServers); derr == nil {
+		teardown = append(teardown, func() { _ = helper.RevertLinkDNS(ifaceName) })
+		if !usesResolvedStub() {
+			log.Warnln("iptunnel: /etc/resolv.conf doesn't point at systemd-resolved, " +
+				"so dns lookups may not go through the tunnel")
+		}
+	} else {
+		log.Warnf("iptunnel: could not route dns through the tunnel, lookups will use this "+
+			"network's resolvers: %v", derr)
 	}
 
 	common.SafeGo(func() { common.PumpTUNToChannel(tun, channel, closedCh) })
