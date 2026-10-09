@@ -59,24 +59,6 @@ chmod 700 "$EXEC_DIR/deskconnd"
 # desk runs as the privileged VPN helper when invoked by this name.
 ln -sf "$BIN_DIR/desk" "$BIN_DIR/vpnd"
 
-# dsh/dcp are shortcuts for a fixed subcommand. Forwarding "--completion-bash" keeps
-# tab-completion working when invoked as "dsh"/"dcp".
-write_alias_script() {
-    local name="$1" subcommand="$2"
-    cat > "$BIN_DIR/$name" <<EOF
-#!/bin/sh
-if [ "\$1" = "--completion-bash" ]; then
-    shift
-    exec desk --completion-bash $subcommand "\$@"
-fi
-exec desk $subcommand "\$@"
-EOF
-    chmod 755 "$BIN_DIR/$name"
-}
-
-write_alias_script dsh shell
-write_alias_script dcp "file cp"
-
 BASH_COMP_DIR="$HOME/.local/share/bash-completion/completions"
 ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
 
@@ -105,15 +87,7 @@ awk -f "$AWK_SCRIPT" "$BASH_COMP_DIR/desk" > "$BASH_COMP_DIR/desk.tmp"
 mv "$BASH_COMP_DIR/desk.tmp" "$BASH_COMP_DIR/desk"
 rm -f "$AWK_SCRIPT"
 
-for alias_name in dsh dcp; do
-    sed "s/complete -F _desk_bash_autocomplete -o default desk/complete -F _desk_bash_autocomplete -o default $alias_name/" \
-        "$BASH_COMP_DIR/desk" > "$BASH_COMP_DIR/$alias_name"
-done
-
 "$BIN_DIR/desk" --completion-script-zsh > "$ZSH_COMP_DIR/_desk"
-for alias_name in dsh dcp; do
-    printf '#compdef %s\n_desk "$@"\n' "$alias_name" > "$ZSH_COMP_DIR/_$alias_name"
-done
 
 echo "Installed shell completions"
 echo "Installed desk $VERSION"

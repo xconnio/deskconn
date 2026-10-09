@@ -260,8 +260,6 @@ desk shell <device> [--mode p2p|routed] [-A]
 desk exec  <device> <command...> [--p2p]
 ```
 
-`dsh <device>` is a shortcut for `desk shell <device>`.
-
 `-A`/`--agent-forward` forwards your local `ssh-agent` to the shell, like `ssh -A`, so tools run there (`git`,
 `ssh`, ...) can authenticate with your local keys without copying them to the device. As with `ssh -A`, only use it
 against devices you trust — anyone with access to the remote shell for the session's duration can ask the forwarded
@@ -278,8 +276,6 @@ desk file cp  <src> <dst>   [-r] [--mode p2p|routed]
 desk file rm  <target>      [--mode p2p|routed]
 desk file cat <device:path> [--mode p2p|routed]
 ```
-
-`dcp <src> <dst>` is a shortcut for `desk file cp <src> <dst>`.
 
 ### Port forwarding
 
