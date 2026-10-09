@@ -66,7 +66,7 @@ func sortByModTimeDesc(sessions []AISessionFile) {
 	})
 }
 
-// SummarizeAISessions turns discovered session files into the summaries `ai ls` shows.
+// SummarizeAISessions turns discovered session files into the summaries `agent ls` shows.
 func SummarizeAISessions(sessions []AISessionFile) []AISessionSummary {
 	var summaries []AISessionSummary
 	for _, s := range sessions {

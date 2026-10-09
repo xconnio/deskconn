@@ -227,7 +227,7 @@ func main() {
 	selfRemoveCmd := selfCmd.Command("remove", "Remove desk from this machine")
 	selfRemoveYes := selfRemoveCmd.Flag("yes", "Do not prompt for confirmation").Short('y').Bool()
 
-	aiCmds := registerAICommands(app, cfgDirectory)
+	agentCmds := registerAgentCommands(app, cfgDirectory)
 
 	if len(os.Args) == 2 && os.Args[1] == "self" {
 		app.Usage([]string{"self"})
@@ -1247,7 +1247,7 @@ func main() {
 		}
 
 	default:
-		dispatchAICommand(parsedCmd, aiCmds, cfgDirectory)
+		dispatchAgentCommand(parsedCmd, agentCmds, cfgDirectory)
 	}
 }
 

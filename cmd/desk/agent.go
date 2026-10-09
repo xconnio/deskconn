@@ -18,17 +18,17 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-type aiCommands struct {
+type agentCommands struct {
 	ls     *kingpin.CmdClause
-	sync   *kingpin.CmdClause
+	pull   *kingpin.CmdClause
 	resume *kingpin.CmdClause
 
 	lsMachine *string
 	lsMode    *string
 
-	syncMachine   *string
-	syncMode      *string
-	syncSessionID *string
+	pullMachine   *string
+	pullMode      *string
+	pullSessionID *string
 
 	resumeSessionID *string
 	resumePrintOnly *bool
@@ -36,10 +36,10 @@ type aiCommands struct {
 	resumeMode      *string
 }
 
-func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiCommands {
-	aiCmd := app.Command("ai", "Sync and resume Claude Code CLI sessions directly with another device")
+func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agentCommands {
+	agentCmd := app.Command("agent", "Pull and resume Claude Code CLI sessions directly with another device")
 
-	lsCmd := aiCmd.Command("ls", "List Claude Code sessions for this project, on this device or another one")
+	lsCmd := agentCmd.Command("ls", "List Claude Code sessions for this project, on this device or another one")
 	// Unlike deviceArg, machine is optional here: omitting it lists this device's own sessions.
 	lsMachine := new(string)
 	if !standaloneRequested() {
@@ -49,32 +49,32 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	lsMode := modeFlag(lsCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
-	syncCmd := aiCmd.Command("sync", "Pull claude sessions from another device onto this one")
-	syncMachine := deviceArg(syncCmd, "machine", "Device to pull sessions from", cfgDirectory)
-	syncSessionID := syncCmd.Arg("session-id",
+	pullCmd := agentCmd.Command("pull", "Pull claude sessions from another device onto this one")
+	pullMachine := deviceArg(pullCmd, "machine", "Device to pull sessions from", cfgDirectory)
+	pullSessionID := pullCmd.Arg("session-id",
 		"Only pull the session matching this id (or a unique prefix of one); default pulls all").String()
-	syncMode := modeFlag(syncCmd,
+	pullMode := modeFlag(pullCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
-	resumeCmd := aiCmd.Command("resume", "Resume a Claude Code session by id (see `ai ls`)")
+	resumeCmd := agentCmd.Command("resume", "Resume a Claude Code session by id (see `agent ls`)")
 	resumeSessionID := resumeCmd.Arg("session-id", "Session id (or a unique prefix of one) to resume").Required().String()
 	resumePrintOnly := resumeCmd.Flag("print-only",
 		"Only print the resume command; don't launch").Bool()
 	resumeRemote := resumeCmd.Flag("remote",
-		"Run claude directly on this device instead of resuming a locally synced session").
+		"Run claude directly on this device instead of resuming a locally pulled session").
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	resumeMode := modeFlag(resumeCmd,
 		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
-	return &aiCommands{
+	return &agentCommands{
 		ls:              lsCmd,
-		sync:            syncCmd,
+		pull:            pullCmd,
 		resume:          resumeCmd,
 		lsMachine:       lsMachine,
 		lsMode:          lsMode,
-		syncMachine:     syncMachine,
-		syncMode:        syncMode,
-		syncSessionID:   syncSessionID,
+		pullMachine:     pullMachine,
+		pullMode:        pullMode,
+		pullSessionID:   pullSessionID,
 		resumeSessionID: resumeSessionID,
 		resumePrintOnly: resumePrintOnly,
 		resumeRemote:    resumeRemote,
@@ -82,22 +82,23 @@ func registerAICommands(app *kingpin.Application, cfgDirectory string) *aiComman
 	}
 }
 
-func dispatchAICommand(parsedCmd string, cmds *aiCommands, cfgDirectory string) bool {
+func dispatchAgentCommand(parsedCmd string, cmds *agentCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.ls.FullCommand():
-		if err := runAILs(cfgDirectory, *cmds.lsMachine, *cmds.lsMode); err != nil {
+		if err := runAgentLs(cfgDirectory, *cmds.lsMachine, *cmds.lsMode); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
-	case cmds.sync.FullCommand():
-		if err := runAISync(cfgDirectory, *cmds.syncMachine, *cmds.syncMode, *cmds.syncSessionID); err != nil {
+	case cmds.pull.FullCommand():
+		if err := runAgentPull(cfgDirectory, *cmds.pullMachine, *cmds.pullMode, *cmds.pullSessionID); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	case cmds.resume.FullCommand():
 		if *cmds.resumeRemote != "" {
-			if err := runAIResumeRemote(cfgDirectory, *cmds.resumeRemote, *cmds.resumeSessionID, *cmds.resumeMode); err != nil {
+			err := runAgentResumeRemote(cfgDirectory, *cmds.resumeRemote, *cmds.resumeSessionID, *cmds.resumeMode)
+			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
-		} else if err := runAIResume(*cmds.resumeSessionID, *cmds.resumePrintOnly); err != nil {
+		} else if err := runAgentResume(*cmds.resumeSessionID, *cmds.resumePrintOnly); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	default:
@@ -106,10 +107,10 @@ func dispatchAICommand(parsedCmd string, cmds *aiCommands, cfgDirectory string) 
 	return true
 }
 
-// aiProjectPath returns the current directory's path relative to $HOME - not the absolute
+// agentProjectPath returns the current directory's path relative to $HOME - not the absolute
 // path - since that's what identifies "the same project" across your machines regardless of
 // username or where each machine's home directory happens to live.
-func aiProjectPath() (string, error) {
+func agentProjectPath() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("failed to get current directory: %w", err)
@@ -125,8 +126,8 @@ func aiProjectPath() (string, error) {
 	return path, nil
 }
 
-func runAILs(cfgDirectory, machine, mode string) error {
-	path, err := aiProjectPath()
+func runAgentLs(cfgDirectory, machine, mode string) error {
+	path, err := agentProjectPath()
 	if err != nil {
 		return err
 	}
@@ -204,8 +205,8 @@ func runAILs(cfgDirectory, machine, mode string) error {
 	return table.Render()
 }
 
-func runAISync(cfgDirectory, machine, mode, sessionID string) error {
-	path, err := aiProjectPath()
+func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
+	path, err := agentProjectPath()
 	if err != nil {
 		return err
 	}
@@ -271,8 +272,8 @@ func runAISync(cfgDirectory, machine, mode, sessionID string) error {
 	return nil
 }
 
-func runAIResume(sessionID string, printOnly bool) error {
-	path, err := aiProjectPath()
+func runAgentResume(sessionID string, printOnly bool) error {
+	path, err := agentProjectPath()
 	if err != nil {
 		return err
 	}
@@ -286,7 +287,7 @@ func runAIResume(sessionID string, printOnly bool) error {
 		return fmt.Errorf("failed to discover local sessions: %w", err)
 	}
 	if len(sessions) == 0 {
-		return errors.New("no local claude sessions found for this project; run `desk ai sync <machine>` first")
+		return errors.New("no local claude sessions found for this project; run `desk agent pull <machine>` first")
 	}
 
 	var matches []common.AISessionFile
@@ -298,7 +299,7 @@ func runAIResume(sessionID string, printOnly bool) error {
 	}
 	switch {
 	case len(matches) == 0:
-		return fmt.Errorf("no local session matching %q; run `desk ai ls` to see available ids", sessionID)
+		return fmt.Errorf("no local session matching %q; run `desk agent ls` to see available ids", sessionID)
 	case len(matches) > 1:
 		return fmt.Errorf("%q matches more than one local session; use a longer prefix", sessionID)
 	}
@@ -307,7 +308,7 @@ func runAIResume(sessionID string, printOnly bool) error {
 	tool := match.Tool
 	fullID := strings.TrimSuffix(filepath.Base(match.Path), ".jsonl")
 
-	cmdName, args := aiResumeCommand(fullID)
+	cmdName, args := agentResumeCommand(fullID)
 	if printOnly {
 		fmt.Println(strings.Join(append([]string{cmdName}, args...), " "))
 		return nil
@@ -316,7 +317,7 @@ func runAIResume(sessionID string, printOnly bool) error {
 	return launch(tool, cmdName, args)
 }
 
-func aiResumeCommand(sessionID string) (string, []string) {
+func agentResumeCommand(sessionID string) (string, []string) {
 	args := []string{"--resume"}
 	if sessionID != "" {
 		args = append(args, sessionID)
@@ -324,8 +325,8 @@ func aiResumeCommand(sessionID string) (string, []string) {
 	return "claude", args
 }
 
-func runAIResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
-	path, err := aiProjectPath()
+func runAgentResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
+	path, err := agentProjectPath()
 	if err != nil {
 		return err
 	}
@@ -334,7 +335,7 @@ func runAIResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
 		return fmt.Errorf("unknown device %q: %w", machine, err)
 	}
 
-	cmdName, args := aiResumeCommand(sessionID)
+	cmdName, args := agentResumeCommand(sessionID)
 	fullArgs := append([]string{
 		"bash", "-c", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
 	}, args...)
