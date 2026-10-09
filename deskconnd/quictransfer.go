@@ -124,11 +124,17 @@ func quicServeList(stream net.Conn, req common.FSRequest, sendKey []byte) {
 // application-level failure (bad path, etc.) is reported to the client via
 // FSResponse.Err and treated as handled.
 func quicServeReadOnce(stream net.Conn, req common.FSRequest, sendKey []byte) error {
-	_, basePath, err := remoteRootAndBase(req.Path)
+	resolvedRoot, basePath, err := remoteRootAndBase(req.Path)
 	if err != nil {
 		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
 	}
-	absPath := filepath.Join(basePath, filepath.FromSlash(req.RelPath))
+
+	// See serveWebRTCReadOnce for why a single-file root resolves to resolvedRoot directly
+	// rather than joining basePath with RelPath.
+	absPath := resolvedRoot
+	if common.IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint) {
+		absPath = filepath.Join(basePath, filepath.FromSlash(req.RelPath))
+	}
 
 	f, err := os.Open(absPath) //nolint:gosec
 	if err != nil {

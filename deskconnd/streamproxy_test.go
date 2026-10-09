@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -56,7 +57,11 @@ func (cryptosignAuthenticator) Authenticate(request auth.Request) (auth.Response
 // device that echoes every raw stream.
 func startEchoProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconnd.ClientSessions) {
 	t.Helper()
-	dir := t.TempDir()
+	// Short prefix, not t.TempDir(): unix socket paths are length-limited, and t.TempDir()
+	// embeds the full (often long) test name.
+	dir, err := os.MkdirTemp("", "streamproxy")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
 	require.NoError(t, err)

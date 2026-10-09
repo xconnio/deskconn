@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"os"
+	"runtime"
 
 	log "github.com/sirupsen/logrus"
 
@@ -70,6 +71,16 @@ func (d *Deskconn) StartIndexer(ctx context.Context) {
 	}
 }
 
+// Close releases resources held open for the lifetime of the process, such as the file
+// indexer's database handle. Callers that tear down a Deskconn instance before process exit
+// (tests, in particular - on Windows an open file blocks removal of its containing directory)
+// must call this to avoid leaking the handle.
+func (d *Deskconn) Close() {
+	if d.indexer != nil {
+		d.indexer.Close()
+	}
+}
+
 func (d *Deskconn) Register(session *xconn.Session) error {
 	handlers := map[string]xconn.InvocationHandler{
 		common.ProcedureKeyExchange:     d.handleKeyExchange,
@@ -104,25 +115,34 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	// on a headless server. Skip registering them there.
 	if d.desktop {
 		maps.Copy(handlers, map[string]xconn.InvocationHandler{
-			common.ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
-			common.ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
-			common.ProcedureScreenLock:           d.lockScreenLockHandler,
-			common.ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
-			common.ProcedureMPRISPlayers:         d.handleListPlayers,
-			common.ProcedureMPRISPlayPause:       d.handlePlayPause,
-			common.ProcedureMPRISPlay:            d.handlePlay,
-			common.ProcedureMPRISPause:           d.handlePause,
-			common.ProcedureMPRISNext:            d.handleNext,
-			common.ProcedureMPRISPrevious:        d.handlePrevious,
-			common.ProcedureAudioMute:            d.handleAudioMute,
-			common.ProcedureAudioUnmute:          d.handleAudioUnmute,
-			common.ProcedureAudioToggleMute:      d.handleAudioToggleMute,
-			common.ProcedureAudioIsMuted:         d.handleAudioIsMuted,
-			common.ProcedureScreenshot:           d.handleScreenshot,
-			common.ProcedureScreenshotPermission: d.handleScreenShotPermission,
-			common.ProcedureWallpaperGet:         d.wallpaper.HandleGet,
-			common.ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
+			common.ProcedureScreenLock:        d.lockScreenLockHandler,
+			common.ProcedureScreenIsLocked:    d.lockScreenIsLockedHandler,
+			common.ProcedureAudioMute:         d.handleAudioMute,
+			common.ProcedureAudioUnmute:       d.handleAudioUnmute,
+			common.ProcedureAudioToggleMute:   d.handleAudioToggleMute,
+			common.ProcedureAudioIsMuted:      d.handleAudioIsMuted,
+			common.ProcedureWallpaperGet:      d.wallpaper.HandleGet,
+			common.ProcedureWallpaperChecksum: d.wallpaper.HandleChecksum,
 		})
+
+		// Brightness, MPRIS and screenshot all go through D-Bus (login1,
+		// MPRIS players, xdg-desktop-portal) with no Windows equivalent, so
+		// there's nothing to back them there - skip registering them rather
+		// than exposing procedures that could only ever return an error.
+		if runtime.GOOS != "windows" {
+			maps.Copy(handlers, map[string]xconn.InvocationHandler{
+				common.ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
+				common.ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
+				common.ProcedureMPRISPlayers:         d.handleListPlayers,
+				common.ProcedureMPRISPlayPause:       d.handlePlayPause,
+				common.ProcedureMPRISPlay:            d.handlePlay,
+				common.ProcedureMPRISPause:           d.handlePause,
+				common.ProcedureMPRISNext:            d.handleNext,
+				common.ProcedureMPRISPrevious:        d.handlePrevious,
+				common.ProcedureScreenshot:           d.handleScreenshot,
+				common.ProcedureScreenshotPermission: d.handleScreenShotPermission,
+			})
+		}
 	}
 
 	for uri, handler := range handlers {
