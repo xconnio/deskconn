@@ -37,53 +37,18 @@ import (
 
 var version = "v0.1.0-alpha"
 
-// cliAliasScript describes a short subcommand-specific wrapper installed
-// alongside desk, e.g. "dsh" running "desk shell".
-type cliAliasScript struct {
-	name       string
-	subcommand []string
-}
-
-// aliasScripts lists the wrapper scripts installed next to the desk binary.
-func aliasScripts() []cliAliasScript {
-	return []cliAliasScript{
-		{name: aliasProgShell, subcommand: []string{subcommandShell}},
-		{name: aliasProgCopy, subcommand: []string{subcommandFile, subcommandCopy}},
-	}
-}
-
-// aliasWrapperScript renders a POSIX sh wrapper that runs desk with
-// subcommand fixed, forwarding the rest of argv untouched. It also forwards
-// live completion requests ("--completion-bash", the first arg per
-// kingpin's generated completion script) so tab-completion still works.
-func aliasWrapperScript(subcommand []string) string {
-	args := strings.Join(subcommand, " ")
-	return fmt.Sprintf(`#!/bin/sh
-if [ "$1" = "%[1]s" ]; then
-    shift
-    exec desk %[1]s %[2]s "$@"
-fi
-exec desk %[2]s "$@"
-`, completionBashFlag, args)
-}
-
-// cliAliases lists the wrapper scripts' names installed alongside desk.
-func cliAliases() []string {
-	names := make([]string, 0, len(aliasScripts()))
-	for _, s := range aliasScripts() {
-		names = append(names, s.name)
-	}
-	return names
-}
-
-// legacyCLIPaths lists files left behind by installs from before the CLI was renamed
-// from deskconn to desk: the binary itself and its shell completions.
+// legacyCLIPaths lists files left behind by older installs: the pre-rename "deskconn" CLI and
+// the removed "dsh"/"dcp" shortcut wrappers, along with their shell completions.
 func legacyCLIPaths(binDir, bashCompDir, zshCompDir string) []string {
-	return []string{
-		filepath.Join(binDir, "deskconn"),
-		filepath.Join(bashCompDir, "deskconn"),
-		filepath.Join(zshCompDir, "_deskconn"),
+	var paths []string
+	for _, name := range []string{"deskconn", "dsh", "dcp"} {
+		paths = append(paths,
+			filepath.Join(binDir, name),
+			filepath.Join(bashCompDir, name),
+			filepath.Join(zshCompDir, "_"+name),
+		)
 	}
+	return paths
 }
 
 const (
@@ -91,15 +56,6 @@ const (
 	ModeP2P  = "p2p"
 
 	jsonFieldPath = "path"
-
-	aliasProgShell = "dsh"
-	aliasProgCopy  = "dcp"
-
-	subcommandShell = "shell"
-	subcommandFile  = "file"
-	subcommandCopy  = "cp"
-
-	completionBashFlag = "--completion-bash"
 )
 
 func main() {
@@ -1569,13 +1525,6 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		filepath.Join(zshCompDir, "_desk"),
 	}
 	paths = append(paths, legacyCLIPaths(binDir, bashCompDir, zshCompDir)...)
-	for _, alias := range cliAliases() {
-		paths = append(paths,
-			filepath.Join(binDir, alias),
-			filepath.Join(bashCompDir, alias),
-			filepath.Join(zshCompDir, "_"+alias),
-		)
-	}
 
 	fmt.Println("Removing desk binaries and shell completions...")
 	for _, p := range paths {
@@ -1691,13 +1640,6 @@ func downloadAndInstallUpdate(downloadURL string) error {
 			if err := os.Symlink(deskPath, linkPath); err != nil {
 				return fmt.Errorf("failed to create %s symlink: %w", vpndProgName, err)
 			}
-			for _, s := range aliasScripts() {
-				scriptPath := filepath.Join(binDir, s.name)
-				script := aliasWrapperScript(s.subcommand)
-				if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil { // nolint: gosec
-					return fmt.Errorf("failed to write %s wrapper: %w", s.name, err)
-				}
-			}
 			foundDesk = true
 		case "deskconnd":
 			fmt.Println("Installing deskconnd...")
@@ -1757,20 +1699,6 @@ func installCompletions(deskBin string) error {
 	}
 	if err := os.WriteFile(filepath.Join(zshDir, "_desk"), zshOut, 0644); err != nil { // nolint: gosec
 		return fmt.Errorf("writing zsh completion: %w", err)
-	}
-
-	for _, alias := range cliAliases() {
-		aliasBash := strings.Replace(bashScript,
-			"complete -F _desk_bash_autocomplete -o default desk",
-			"complete -F _desk_bash_autocomplete -o default "+alias, 1)
-		if err := os.WriteFile(filepath.Join(bashDir, alias), []byte(aliasBash), 0644); err != nil { // nolint: gosec
-			return fmt.Errorf("writing %s bash completion: %w", alias, err)
-		}
-
-		aliasZsh := "#compdef " + alias + "\n_desk \"$@\"\n"
-		if err := os.WriteFile(filepath.Join(zshDir, "_"+alias), []byte(aliasZsh), 0644); err != nil { // nolint: gosec
-			return fmt.Errorf("writing %s zsh completion: %w", alias, err)
-		}
 	}
 
 	return nil
