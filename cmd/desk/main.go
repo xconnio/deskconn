@@ -17,7 +17,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,7 +31,6 @@ import (
 	"github.com/xconnio/deskconn/deskconn"
 	wampauth "github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
-	"github.com/xconnio/xconn-go/auth"
 )
 
 var version = "v0.1.0-alpha"
@@ -100,7 +98,7 @@ func main() {
 	attachPassword := attachCmd.Flag("password", "Password").Short('p').String()
 	attachPasswordStdin := attachCmd.Flag("password-stdin", "Read password from stdin").Bool()
 
-	detachCmd := machineCmd.Command("detach", "Detach this machine from your account")
+	detachCmd := machineCmd.Command("detach", "Detach this machine from your account (asks to confirm first)")
 
 	aliasCmd := machineCmd.Command("alias", "Set or unset a machine's alias")
 	aliasMachine := aliasCmd.Arg("machine", "ID, name or alias of machine").Required().
@@ -1420,43 +1418,29 @@ func confirmPrompt(prompt string, defaultYes bool) (bool, error) {
 
 // detachIfAttached detaches this machine from the cloud account if it is currently
 // attached. It is a no-op otherwise.
-func detachIfAttached() error {
+func detachIfAttached(cfgDirectory string) error {
 	credFile, err := common.CredentialsFilePath()
 	if err != nil {
 		return err
 	}
-
-	data, err := os.ReadFile(credFile)
+	if _, err := os.Stat(credFile); os.IsNotExist(err) {
+		return nil
+	}
+	machineID, err := os.ReadFile(common.MachineIDPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+		return fmt.Errorf("failed to read machine-id: %w", err)
+	}
+
+	session, err := deskconn.ConnectCloudRealm(cfgDirectory)
+	if err != nil {
 		return err
 	}
-
-	var cred common.Credentials
-	if err := json.Unmarshal(data, &cred); err != nil {
-		return fmt.Errorf("failed to parse credentials file: %w", err)
-	}
+	defer func() { _ = session.Leave() }()
 
 	fmt.Println("Detaching this machine from your account...")
-
-	cryptosignAuth, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
-	if err != nil {
-		return fmt.Errorf("failed to initialize cryptosign authenticator: %w", err)
-	}
-
-	cloudSess, err := xconn.ConnectQUIC(context.Background(), common.CloudQUICAddress(), common.CloudRealm,
-		&xconn.QUICDialerConfig{Authenticator: cryptosignAuth, TLSConfig: common.CloudQUICTLSConfig()})
-	if err != nil {
-		return fmt.Errorf("failed to connect to cloud: %w", err)
-	}
-	defer cloudSess.Connection().Close()
-
-	if err := deskconn.Detach(cloudSess.Session, cred.AuthID); err != nil {
+	if err := deskconn.Detach(session, strings.TrimSpace(string(machineID))); err != nil {
 		return err
 	}
-
 	fmt.Println("Machine detached.")
 	return nil
 }
@@ -1474,7 +1458,7 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		}
 	}
 
-	if err := detachIfAttached(); err != nil {
+	if err := detachIfAttached(cfgDirectory); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to detach this machine from your account: %v\n", err)
 	}
 
@@ -1833,19 +1817,23 @@ func promptAttachMachine(username, password string) error {
 	return deskconn.CacheMachines(cfgDirectory, machines)
 }
 
+// detach detaches this machine from the user's account after they confirm, and removes
+// its credentials so it can be attached again.
 func detach(cfgDirectory string) error {
+	machineID, err := os.ReadFile(common.MachineIDPath)
+	if err != nil {
+		return fmt.Errorf("failed to read machine-id: %w", err)
+	}
+
 	session, err := deskconn.ConnectCloudRealm(cfgDirectory)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = session.Leave() }()
 
-	authID, name, err := selectMachine(session)
-	if err != nil {
-		return err
-	}
-
-	confirmed, err := confirmPrompt(
-		fmt.Sprintf("Are you sure you want to detach desktop '%s' with ID '%s'?\n(Y/n): ", name, authID), true)
+	fmt.Println("This machine will be removed from your account and can't be reached remotely " +
+		"until you attach it again.")
+	confirmed, err := confirmPrompt("Detach this machine? (y/N): ", false)
 	if err != nil {
 		return err
 	}
@@ -1854,7 +1842,22 @@ func detach(cfgDirectory string) error {
 		return nil
 	}
 
-	return deskconn.Detach(session, authID)
+	if err := deskconn.Detach(session, strings.TrimSpace(string(machineID))); err != nil {
+		return err
+	}
+
+	// deskconnd also removes it when it hears about the detach, but not if it isn't running,
+	// and attach refuses to run while it's there.
+	credFile, err := common.CredentialsFilePath()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(credFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("machine detached, but failed to remove its credentials: %w", err)
+	}
+
+	fmt.Println("Machine detached.")
+	return nil
 }
 
 func login(flagUsername, flagPassword string, useStdin bool) error {
@@ -2090,111 +2093,6 @@ func readPassword() (string, error) {
 	}
 
 	return string(pwd), nil
-}
-
-func selectOption(callResp xconn.CallResponse, title string, idField string, prompt string) (int, error) {
-	count := len(callResp.Args())
-	if count == 1 {
-		return 0, nil
-	}
-
-	type row struct {
-		i    int
-		name string
-		id   string
-		line string
-	}
-
-	rows := make([]row, 0, count)
-	maxWidth := 0
-
-	for i := 0; i < count; i++ {
-		dict, err := callResp.ArgDict(i)
-		if err != nil {
-			return -1, err
-		}
-
-		name, _ := dict.String("name")
-		id, _ := dict.String(idField)
-
-		if name == "" {
-			name = id
-		}
-
-		line := fmt.Sprintf(" %2d) %-20s  %s", i+1, name, id)
-		if len(line) > maxWidth {
-			maxWidth = len(line)
-		}
-
-		rows = append(rows, row{i + 1, name, id, line})
-	}
-
-	sep := strings.Repeat("─", maxWidth)
-
-	fmt.Println()
-	fmt.Println(sep)
-	fmt.Println(" ", title)
-	fmt.Println(sep)
-
-	for _, r := range rows {
-		fmt.Println(r.line)
-	}
-
-	fmt.Println(sep)
-	fmt.Printf(" %s [1-%d] (default 1): ", prompt, count)
-
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return -1, err
-		}
-
-		input = strings.TrimSpace(input)
-		if input == "" {
-			return 0, nil
-		}
-
-		idx, err := strconv.Atoi(input)
-		if err != nil || idx < 1 || idx > count {
-			fmt.Printf(" Invalid selection. Enter 1-%d: ", count)
-			continue
-		}
-
-		return idx - 1, nil
-	}
-}
-
-func selectMachine(session *xconn.Session) (authid string, name string, err error) {
-	callResp := session.Call(deskconn.ProcedureListDesktop).Do()
-
-	if callResp.Err != nil {
-		return "", "", callResp.Err
-	}
-	if len(callResp.Args()) == 0 {
-		return "", "", fmt.Errorf("no desktop attached to the account")
-	}
-
-	idx, err := selectOption(callResp, "Available machines", "authid", "Select machine")
-	if err != nil {
-		return "", "", err
-	}
-
-	machineDict, err := callResp.ArgDict(idx)
-	if err != nil {
-		return "", "", err
-	}
-	authid, err = machineDict.String("authid")
-	if err != nil {
-		return "", "", err
-	}
-	name, err = machineDict.String("name")
-	if err != nil {
-		return "", "", err
-	}
-
-	return authid, name, nil
 }
 
 func machineCompletions(cfgDirectory string) func() []string {
