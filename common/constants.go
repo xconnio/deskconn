@@ -138,6 +138,19 @@ const (
 
 const ProcedureFileCat = "io.xconn.deskconn.deskconnd.file.cat"
 
+// ProcedureMediaIndexQuery is media-app's index query, registered on the local realm only:
+// deskconnd's ProcedureIndexQuery decrypts a client's query, forwards its JSON here and
+// encrypts the JSON result.
+const ProcedureMediaIndexQuery = "io.xconn.deskconn.media.index.query"
+
+// ProcedureCapabilitiesList lists the apps the frontend may show. Apps served outside
+// deskconnd, like media-app's, are listed while their process is connected.
+const ProcedureCapabilitiesList = "io.xconn.deskconn.deskconnd.capabilities.list"
+
+// ProcedureAppsRegister is how a process on deskconnd's local socket registers the apps it
+// serves, with a JSON list of {"id", "name"}. Local realm only.
+const ProcedureAppsRegister = "io.xconn.deskconn.deskconnd.apps.register"
+
 const (
 	ExtJpg  = ".jpg"
 	ExtJpeg = ".jpeg"

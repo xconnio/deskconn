@@ -7,14 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	"image/color"
-	_ "image/gif"
-	"image/jpeg"
-	_ "image/png"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -165,13 +159,13 @@ func generateThumbnails(entries []common.FileEntry) {
 		if e.IsDir || e.IsSymlink {
 			continue
 		}
-		if isImageFile(e.Name) && e.Size <= maxThumbnailSourceSize {
+		if isImageFile(e.Name) && e.Size <= common.MaxThumbnailSourceSize {
 			wg.Add(1)
 			common.SafeGo(func() {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				e.Thumbnail = generateThumbnail(e.Path)
+				e.Thumbnail = common.ImageThumbnail(e.Path)
 			})
 		} else if isVideoFile(e.Name) {
 			wg.Add(1)
@@ -179,7 +173,7 @@ func generateThumbnails(entries []common.FileEntry) {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				e.Thumbnail = generateVideoThumbnail(e.Path)
+				e.Thumbnail = common.VideoThumbnail(e.Path)
 			})
 		} else if isPDFFile(e.Name) {
 			wg.Add(1)
@@ -187,7 +181,7 @@ func generateThumbnails(entries []common.FileEntry) {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				e.Thumbnail = generatePDFThumbnail(e.Path)
+				e.Thumbnail = common.PDFThumbnail(e.Path)
 			})
 		}
 	}
@@ -277,9 +271,6 @@ func fileTypeFromInfo(info os.FileInfo) string {
 	}
 }
 
-const maxThumbnailSourceSize = 20 * 1024 * 1024 // 20 MB
-const thumbnailMaxDim = 480
-
 func isImageFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case common.ExtJpg, common.ExtJpeg, common.ExtPng, common.ExtGif:
@@ -299,116 +290,6 @@ func isVideoFile(name string) bool {
 
 func isPDFFile(name string) bool {
 	return strings.ToLower(filepath.Ext(name)) == common.ExtPdf
-}
-
-func generateThumbnail(path string) string {
-	//nolint:gosec // path comes from an already-resolved FileEntry/walk under a jailed root
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	src, _, err := image.Decode(f)
-	if err != nil {
-		return ""
-	}
-
-	thumb := scaledImage(src, thumbnailMaxDim)
-
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: 85}); err != nil {
-		return ""
-	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes())
-}
-
-func generateVideoThumbnail(path string) string {
-	ffmpeg, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		return ""
-	}
-
-	//nolint:gosec // path comes from an already-resolved FileEntry/walk under a jailed root
-	cmd := exec.Command(ffmpeg,
-		"-ss", "00:00:01",
-		"-i", path,
-		"-vframes", "1",
-		"-vf", fmt.Sprintf("scale=%d:-1", thumbnailMaxDim),
-		"-f", "image2pipe",
-		"-vcodec", "mjpeg",
-		"-",
-	)
-	out, err := cmd.Output()
-	if err != nil || len(out) == 0 {
-		return ""
-	}
-	return base64.StdEncoding.EncodeToString(out)
-}
-
-// generatePDFThumbnail renders the first page of a PDF to a JPEG via
-// pdftocairo (poppler-utils). Returns "" if the tool or file is unavailable.
-func generatePDFThumbnail(path string) string {
-	pdftocairo, err := exec.LookPath("pdftocairo")
-	if err != nil {
-		return ""
-	}
-
-	//nolint:gosec // path comes from an already-resolved FileEntry/walk under a jailed root
-	cmd := exec.Command(pdftocairo,
-		"-jpeg",
-		"-singlefile",
-		"-scale-to", fmt.Sprint(thumbnailMaxDim),
-		"-f", "1",
-		"-l", "1",
-		path,
-		"-",
-	)
-	out, err := cmd.Output()
-	if err != nil || len(out) == 0 {
-		return ""
-	}
-	return base64.StdEncoding.EncodeToString(out)
-}
-
-func scaledImage(src image.Image, maxDim int) image.Image {
-	b := src.Bounds()
-	srcW, srcH := b.Dx(), b.Dy()
-	if srcW <= maxDim && srcH <= maxDim {
-		return src
-	}
-
-	dstW, dstH := maxDim, maxDim
-	if srcW > srcH {
-		dstH = srcH * maxDim / srcW
-	} else {
-		dstW = srcW * maxDim / srcH
-	}
-	if dstW < 1 {
-		dstW = 1
-	}
-	if dstH < 1 {
-		dstH = 1
-	}
-
-	const samples = 4
-	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
-	for y := 0; y < dstH; y++ {
-		for x := 0; x < dstW; x++ {
-			var r, g, bl, a uint32
-			for sy := 0; sy < samples; sy++ {
-				py := b.Min.Y + (y*samples+sy)*srcH/(dstH*samples)
-				for sx := 0; sx < samples; sx++ {
-					px := b.Min.X + (x*samples+sx)*srcW/(dstW*samples)
-					cr, cg, cb, ca := src.At(px, py).RGBA()
-					r, g, bl, a = r+cr, g+cg, bl+cb, a+ca
-				}
-			}
-			n := uint32(samples * samples)
-			dst.SetRGBA(x, y, color.RGBA{uint8(r / n >> 8), uint8(g / n >> 8), uint8(bl / n >> 8), uint8(a / n >> 8)})
-		}
-	}
-	return dst
 }
 
 // resolveOperationPath resolves a path and always enforces home-directory containment.
@@ -654,7 +535,7 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 			batch = append(batch, buildFileEntry(path, info))
 			if !d.IsDir() {
 				name := d.Name()
-				if (isImageFile(name) && info.Size() <= maxThumbnailSourceSize) || isVideoFile(name) || isPDFFile(name) {
+				if (isImageFile(name) && info.Size() <= common.MaxThumbnailSourceSize) || isVideoFile(name) || isPDFFile(name) {
 					mediaPaths = append(mediaPaths, path)
 				}
 			}
@@ -698,11 +579,11 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 			var thumb string
 			switch {
 			case isImageFile(name):
-				thumb = generateThumbnail(p)
+				thumb = common.ImageThumbnail(p)
 			case isPDFFile(name):
-				thumb = generatePDFThumbnail(p)
+				thumb = common.PDFThumbnail(p)
 			default:
-				thumb = generateVideoThumbnail(p)
+				thumb = common.VideoThumbnail(p)
 			}
 			if thumb != "" {
 				results <- thumbResult{path: p, thumb: thumb}
