@@ -157,7 +157,8 @@ pins the machine's certificate, which is what makes a self-signed one trusted; l
 issued by a CA the client trusts.
 
 The same works with flags: `desk --url quic://203.0.113.5:18080 --cert-hash 3f9a1c… --private-key 9f2d0b17… shell`. With `--url`,
-commands take no machine argument. `ping`, `connect`, `disconnect` and `ls` work on machines of your account only.
+commands take no machine argument. `machine ping`, `machine connect`, `machine disconnect` and `ls` work on machines of
+your account only.
 
 ## Self-hosting
 
@@ -246,7 +247,9 @@ desk machine detach
 desk machine alias  <machine> <name>
 desk machine alias  <machine> --unset
 desk machine logs   <machine> [<source>] [-f] [-n N] [--since DURATION] [--mode p2p|routed]
-desk ping <machine> [--count N]
+desk machine ping   <machine> [--count N]
+desk machine connect    <machine>
+desk machine disconnect [<machine>] [--all]
 ```
 
 `desk ls` is a shortcut for `desk machine ls`.

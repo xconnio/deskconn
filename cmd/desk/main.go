@@ -183,14 +183,14 @@ func main() {
 	vpnStartCmd := vpnCmd.Command("start", "Let other machines route their traffic through this machine")
 	vpnStopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
 
-	pingCmd := app.Command("ping", "Ping a machine and measure round-trip time")
+	pingCmd := machineCmd.Command("ping", "Ping a machine and measure round-trip time")
 	pingMachine := machineArg(pingCmd, "ID, name or alias of machine", cfgDirectory)
 	pingCount := pingCmd.Flag("count", "Number of pings to send (0 = infinite)").Short('c').Default("0").Int()
 
-	connectCmd := app.Command("connect", "Establish a persistent connection to a machine")
+	connectCmd := machineCmd.Command("connect", "Establish a persistent connection to a machine")
 	connectMachine := machineArg(connectCmd, "ID, name or alias of machine", cfgDirectory)
 
-	disconnectCmd := app.Command("disconnect", "Disconnect a persistent connection")
+	disconnectCmd := machineCmd.Command("disconnect", "Disconnect a persistent connection")
 	disconnectMachine := disconnectCmd.Arg("machine", "ID, name or alias of machine").
 		HintAction(machineCompletions(cfgDirectory)).String()
 	disconnectAllFlag := disconnectCmd.Flag("all", "Disconnect all machines").Bool()
@@ -270,7 +270,8 @@ func main() {
 			AuthID: authID, PrivateKey: *standaloneKey, Password: *standalonePassword,
 			ReadPassword: func() (string, error) { return readStandalonePassword(authID) }})
 		switch parsedCmd {
-		case pingCmd.FullCommand(), connectCmd.FullCommand(), disconnectCmd.FullCommand(), lsCmd.FullCommand():
+		case pingCmd.FullCommand(), connectCmd.FullCommand(), disconnectCmd.FullCommand(), lsCmd.FullCommand(),
+			machineLsCmd.FullCommand():
 			fmt.Fprintf(os.Stderr, "%s is not available with --url (it works on machines of your account)\n",
 				parsedCmd)
 			os.Exit(1)
