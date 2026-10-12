@@ -3,6 +3,7 @@ package deskconn
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,27 +14,54 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
+// file.cat takes the path as an encrypted JSON string and streams the file as encrypted
+// chunks, both with the session's key-exchange keys. Through the local daemon's proxy, the
+// daemon does the encryption and the chunks arrive in plain text.
+
 func CatFile(session *xconn.Session, remotePath string) error {
-	return streamCat(session, common.ProcedureFileCat, os.Stdout, remotePath)
+	return catFile(session, os.Stdout, remotePath)
 }
 
 func CatFileViaProxy(localSession *xconn.Session, realm, remotePath string) error {
-	return streamCat(localSession, common.ProcedureProxyCat, os.Stdout, realm, remotePath)
+	return streamCat(localSession, common.ProcedureProxyCat, os.Stdout, []any{realm, remotePath}, nil)
 }
 
 func ReadFile(session *xconn.Session, remotePath string) ([]byte, error) {
 	buf := &bytes.Buffer{}
-	err := streamCat(session, common.ProcedureFileCat, buf, remotePath)
+	err := catFile(session, buf, remotePath)
 	return buf.Bytes(), err
 }
 
 func ReadFileViaProxy(localSession *xconn.Session, realm, remotePath string) ([]byte, error) {
 	buf := &bytes.Buffer{}
-	err := streamCat(localSession, common.ProcedureProxyCat, buf, realm, remotePath)
+	err := streamCat(localSession, common.ProcedureProxyCat, buf, []any{realm, remotePath}, nil)
 	return buf.Bytes(), err
 }
 
-func streamCat(session *xconn.Session, procedure string, out io.Writer, prefixArgs ...any) error {
+func catFile(session *xconn.Session, out io.Writer, remotePath string) error {
+	enc, err := common.ClientKeyExchange(session)
+	if err != nil {
+		return fmt.Errorf("key exchange failed: %w", err)
+	}
+	encryptedPath, err := encryptJSON(remotePath, enc.SendKey)
+	if err != nil {
+		return err
+	}
+	return streamCat(session, common.ProcedureFileCat, out, []any{encryptedPath}, enc.ReceiveKey)
+}
+
+// encryptJSON marshals v to JSON and encrypts it with key.
+func encryptJSON(v any, key []byte) ([]byte, error) {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return common.EncryptPayload(payload, key)
+}
+
+// streamCat calls procedure with args and writes each progress result's chunk to out,
+// decrypting it with receiveKey unless that is nil.
+func streamCat(session *xconn.Session, procedure string, out io.Writer, args []any, receiveKey []byte) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -48,18 +76,9 @@ func streamCat(session *xconn.Session, procedure string, out io.Writer, prefixAr
 		}
 	})
 
-	publicKey, privateKey, err := common.CreateX25519KeyPair()
-	if err != nil {
-		return fmt.Errorf("failed to generate keypair: %w", err)
-	}
-
-	callArgs := append(prefixArgs, publicKey)
-
 	var (
-		receiveKey     []byte
-		firstServerMsg = true
-		receivedData   bool
-		transferErr    error
+		receivedData bool
+		transferErr  error
 	)
 
 	callResp := session.Call(procedure).
@@ -68,36 +87,19 @@ func streamCat(session *xconn.Session, procedure string, out io.Writer, prefixAr
 				return
 			}
 
-			if firstServerMsg {
-				firstServerMsg = false
-				data, argErr := progress.ArgBytes(0)
-				if argErr != nil || !bytes.HasPrefix(data, []byte("KEY:")) {
-					transferErr = fmt.Errorf("expected key exchange message from server")
-					cancel()
-					return
-				}
-				var err error
-				_, receiveKey, err = common.ClientKeyExchangeKeys(privateKey, data[4:])
-				if err != nil {
-					transferErr = fmt.Errorf("key exchange failed: %w", err)
-					cancel()
-					return
-				}
-				return
-			}
-
-			encrypted, err := progress.ArgBytes(0)
+			chunk, err := progress.ArgBytes(0)
 			if err != nil {
 				transferErr = fmt.Errorf("invalid message format: %w", err)
 				cancel()
 				return
 			}
-
-			chunk, err := common.DecryptPayload(encrypted, receiveKey)
-			if err != nil {
-				transferErr = fmt.Errorf("failed to decrypt chunk: %w", err)
-				cancel()
-				return
+			if receiveKey != nil {
+				chunk, err = common.DecryptPayload(chunk, receiveKey)
+				if err != nil {
+					transferErr = fmt.Errorf("failed to decrypt chunk: %w", err)
+					cancel()
+					return
+				}
 			}
 
 			if _, err := out.Write(chunk); err != nil {
@@ -106,7 +108,7 @@ func streamCat(session *xconn.Session, procedure string, out io.Writer, prefixAr
 				return
 			}
 			receivedData = true
-		}).Args(callArgs...).DoContext(ctx)
+		}).Args(args...).DoContext(ctx)
 
 	if transferErr != nil {
 		return transferErr

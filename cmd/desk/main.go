@@ -1122,7 +1122,8 @@ func main() {
 			return
 		}
 
-		var callResp xconn.CallResponse
+		var rawData []byte
+		var callErr error
 		switch *infoModeFlag {
 		case ModeQUIC:
 			quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
@@ -1131,7 +1132,7 @@ func main() {
 				return
 			}
 			defer quicSess.Connection().Close()
-			callResp = quicSess.Call(common.ProcedureMachineInfo).Do()
+			rawData, callErr = deskconn.CallFileOp(quicSess.Session, common.ProcedureMachineInfo, nil)
 		case ModeP2P:
 			p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
@@ -1139,23 +1140,21 @@ func main() {
 				return
 			}
 			defer func() { _ = p2pSess.Leave() }()
-			callResp = p2pSess.Call(common.ProcedureMachineInfo).Do()
+			rawData, callErr = deskconn.CallFileOp(p2pSess, common.ProcedureMachineInfo, nil)
 		default:
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			callResp = localSession.Call(common.ProcedureProxyMachineInfo).Args(realm).Do()
+			callResp := localSession.Call(common.ProcedureProxyMachineInfo).Args(realm).Do()
+			callErr = callResp.Err
+			if callErr == nil {
+				rawData, callErr = callResp.ArgBytes(0)
+			}
 		}
-
-		if callResp.Err != nil {
-			fmt.Fprintln(os.Stderr, callResp.Err)
-			return
-		}
-		rawData, err := callResp.ArgBytes(0)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if callErr != nil {
+			fmt.Fprintln(os.Stderr, callErr)
 			return
 		}
 		var info common.MachineInfo

@@ -341,21 +341,29 @@ func (w *Wallpaper) load() (string, []byte, error) {
 	return path, data, err
 }
 
-func (w *Wallpaper) HandleGet(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	path, data, err := w.load()
+func (d *Deskconn) handleWallpaperGet(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, errResult := d.callerKeys(inv)
+	if errResult != nil {
+		return errResult
+	}
+
+	path, data, err := d.wallpaper.load()
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
-
-	return xconn.NewInvocationResult(imageMimeTypeByExt(path), data)
+	return encryptResult(enc, imageResult{Mime: imageMimeTypeByExt(path), Data: data})
 }
 
-func (w *Wallpaper) HandleChecksum(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	_, data, err := w.load()
+func (d *Deskconn) handleWallpaperChecksum(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, errResult := d.callerKeys(inv)
+	if errResult != nil {
+		return errResult
+	}
+
+	_, data, err := d.wallpaper.load()
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
-
 	sum := sha256.Sum256(data)
-	return xconn.NewInvocationResult(hex.EncodeToString(sum[:]))
+	return encryptResult(enc, hex.EncodeToString(sum[:]))
 }

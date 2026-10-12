@@ -1,7 +1,8 @@
 package deskconnd
 
 import (
-	"fmt"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -28,7 +29,8 @@ func resolvePath(remotePath string) (string, error) {
 }
 
 // resolveAndStatPath resolves remotePath and stats it, returning a
-// WAMP-shaped error any invocation handler can return directly.
+// WAMP-shaped error any invocation handler can return directly. The errors
+// leave out the path, since the call's path was sent encrypted.
 func resolveAndStatPath(remotePath string) (string, os.FileInfo, *xconn.InvocationResult) {
 	resolvedRemotePath, err := resolvePath(remotePath)
 	if err != nil {
@@ -37,31 +39,19 @@ func resolveAndStatPath(remotePath string) (string, os.FileInfo, *xconn.Invocati
 	info, err := os.Lstat(resolvedRemotePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil, xconn.NewInvocationError(common.ErrInvalidArgument,
-				fmt.Sprintf("%s: no such file or directory", remotePath))
+			return "", nil, xconn.NewInvocationError(common.ErrInvalidArgument, "no such file or directory")
 		}
-		return "", nil, xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return "", nil, xconn.NewInvocationError(common.ErrOperationFailed, withoutPath(err).Error())
 	}
 	return resolvedRemotePath, info, nil
 }
 
-// serverStreamKeyExchange reads the client's public key from the invocation at clientKeyArgIdx,
-// performs an X25519 key exchange, derives both send/receive keys, and sends the server's
-// public key back as the first progress message.
-func serverStreamKeyExchange(inv *xconn.Invocation, clientKeyArgIdx int) (*encryptionKeys, *xconn.InvocationResult) {
-	clientPublicKey, err := inv.ArgBytes(clientKeyArgIdx)
-	if err != nil || len(clientPublicKey) != 32 {
-		return nil, xconn.NewInvocationError(common.ErrInvalidArgument, "client public key is required")
+// withoutPath strips the path from a file operation's error ("open /a/b: permission
+// denied" becomes "permission denied").
+func withoutPath(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
 	}
-
-	serverPublicKey, sendKey, receiveKey, err := ServerKeyExchange(clientPublicKey)
-	if err != nil {
-		return nil, xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-
-	if err := inv.SendProgress([]any{append([]byte("KEY:"), serverPublicKey...)}, nil); err != nil {
-		return nil, xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-
-	return &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey}, nil
+	return err
 }

@@ -64,7 +64,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	d.session = session
 	handlers := map[string]xconn.InvocationHandler{
 		common.ProcedureKeyExchange:      d.handleKeyExchange,
-		common.ProcedureShellIsBusy:      d.shellSession.handleShellIsBusy(),
+		common.ProcedureShellIsBusy:      d.handleShellIsBusy,
 		common.ProcedureFileBrowse:       d.handleFileBrowse,
 		common.ProcedureFileRename:       d.handleFileRename,
 		common.ProcedureFileDelete:       d.handleFileDelete,
@@ -96,8 +96,8 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	// printer procedures are served by remotecontrol-app.
 	if d.desktop && d.wallpaper != nil {
 		maps.Copy(handlers, map[string]xconn.InvocationHandler{
-			common.ProcedureWallpaperGet:      d.wallpaper.HandleGet,
-			common.ProcedureWallpaperChecksum: d.wallpaper.HandleChecksum,
+			common.ProcedureWallpaperGet:      d.handleWallpaperGet,
+			common.ProcedureWallpaperChecksum: d.handleWallpaperChecksum,
 		})
 	}
 
