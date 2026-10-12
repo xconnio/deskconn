@@ -57,6 +57,18 @@ try {
         exit 1
     }
 
+    # On an upgrade, deskconn.exe may already be running under the scheduled task from a
+    # previous install - Windows locks a running exe, so it must be stopped before it can
+    # be overwritten. (Stop-ScheduledTask doesn't kill the process; the task's registered
+    # action just re-launches the exe, so the running instance is what actually holds the
+    # file open.)
+    if (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue) {
+        Write-Host "Stopping existing $ServiceName task before upgrade..."
+        Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+        Get-Process -Name deskconn -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+    }
+
     # 'desk' is reserved by Windows for Display Settings (desk.cpl) and can't be safely
     # overridden, so the CLI is installed here as 'deskconn.exe' instead - never as
     # 'desk.exe', which would shadow it on PATH. The daemon runs its own copy from
