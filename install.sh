@@ -196,7 +196,7 @@ install_service_darwin() {
     local plist_file="$HOME/Library/LaunchAgents/$label.plist"
     local log_dir="$HOME/Library/Logs/deskconn"
 
-    echo "Setting up launchd agent for $SERVICE_NAME..."
+    echo "Setting up launchd agent for $label..."
     mkdir -p "$(dirname "$plist_file")" "$log_dir"
 
     cat > "$plist_file" <<EOL
