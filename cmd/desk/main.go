@@ -154,17 +154,13 @@ func main() {
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	editModeFlag := modeFlag(editCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	shellCmd := app.Command("shell", "Start interactive shell")
-	shellDeviceName := deviceArg(shellCmd, "ID, name or alias of machine to shell", cfgDirectory)
+	shellCmd := app.Command("shell", "Start an interactive shell, or run a command if one is given")
+	shellDeviceName := deviceArg(shellCmd, "ID, name or alias of machine", cfgDirectory)
+	shellCommand := shellCmd.Arg("command", "Command to run instead of an interactive shell").Strings()
 	shellModeFlag := modeFlag(shellCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 	shellForwardAgent := shellCmd.Flag("agent-forward",
 		"Forward the local SSH agent to the remote shell (like ssh -A). Only use with hosts you trust.",
 	).Short('A').Bool()
-
-	execCmd := app.Command("exec", "Run a command")
-	execDeviceName := deviceArg(execCmd, "ID, name or alias of machine to run command", cfgDirectory)
-	command := execCmd.Arg("command", "Command to run").Required().Strings()
-	execModeFlag := modeFlag(execCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote machine")
@@ -692,18 +688,12 @@ func main() {
 		}
 		defer setupAgentForward(*shellModeFlag, realm, cfgDirectory, agentSock)()
 
-		if err := deskconn.RunShell(context.Background(), *shellModeFlag, realm, cfgDirectory); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if len(*shellCommand) > 0 {
+			err = deskconn.RunExec(context.Background(), *shellModeFlag, realm, cfgDirectory, *shellCommand)
+		} else {
+			err = deskconn.RunShell(context.Background(), *shellModeFlag, realm, cfgDirectory)
 		}
-
-	case execCmd.FullCommand():
-		realm, err := deviceRealm(*execDeviceName, cfgDirectory)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		if err := deskconn.RunExec(context.Background(), *execModeFlag, realm, cfgDirectory, *command); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 

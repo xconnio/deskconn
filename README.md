@@ -137,7 +137,7 @@ deskconnd --standalone --user alice:s3cret [--user <username:password> ...]
 ```bash
 export DESKCONN_URL=quic://203.0.113.5:18080 DESKCONN_CERT_HASH=3f9a1c… DESKCONN_PRIVATE_KEY=9f2d0b17…
 desk shell
-desk exec -- uname -a
+desk shell -- uname -a
 desk file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
 desk file cat :/etc/hostname
 desk port forward 8080:80
@@ -259,12 +259,13 @@ desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --private
 desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --authid <user> [--secret <pw>] <command>   # also DESKCONN_AUTHID / DESKCONN_SECRET
 ```
 
-### Shell & exec
+### Shell
 
 ```
-desk shell <machine> [--mode p2p|routed] [-A]
-desk exec  <machine> <command...> [--p2p]
+desk shell <machine> [--mode p2p|routed] [-A] [<command>...]
 ```
+
+With a command, `desk shell` runs it on the machine and exits; without one it opens an interactive shell.
 
 `-A`/`--agent-forward` forwards your local `ssh-agent` to the shell, like `ssh -A`, so tools run there (`git`,
 `ssh`, ...) can authenticate with your local keys without copying them to the machine. As with `ssh -A`, only use it
