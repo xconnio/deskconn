@@ -56,7 +56,7 @@ func runVPNd(args []string) {
 		os.Exit(1)
 	}
 	// Clean up the whole temp dir LaunchVPNHelper made for this socket, not just the socket
-	// file -- "desk vpn start" hands off and returns, so this is the only cleanup that dir gets.
+	// file -- "desk vpn serve" hands off and returns, so this is the only cleanup that dir gets.
 	defer func() { _ = os.RemoveAll(filepath.Dir(*socketPath)) }()
 
 	// Only the operator's uid (or root) can reach that dir at all; this just ensures that uid

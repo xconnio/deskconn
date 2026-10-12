@@ -98,7 +98,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string) 
 	fmt.Println("Tunnel down")
 }
 
-// runVPNStart arms this machine to let other machines route their traffic
+// runVPNServe arms this machine to let other machines route their traffic
 // through it, then returns right away -- serving continues in the
 // background (deskconnd + vpnd) until "desk vpn stop" or the
 // daemon shuts down. deskconnd has no capability or terminal of its own
@@ -106,7 +106,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string) 
 // (the only blocking part, briefly, for the sudo prompt) and hands
 // deskconnd its socket. systemd owns vpnd from there; it exits once
 // deskconnd closes its connection.
-func runVPNStart(cliCtx context.Context, cfgDirectory string) {
+func runVPNServe(cliCtx context.Context, cfgDirectory string) {
 	ctx, cancel := context.WithCancel(cliCtx)
 	defer cancel()
 
@@ -145,7 +145,7 @@ func runVPNStart(cliCtx context.Context, cfgDirectory string) {
 }
 
 // runVPNStop tells this machine's own deskconnd to stop serving as a
-// VPN exit node, if it currently is -- see runVPNStart. Disarming closes
+// VPN exit node, if it currently is -- see runVPNServe. Disarming closes
 // deskconnd's connection to vpnd, which makes it exit without needing
 // sudo; stopping the unit directly is only the fallback for a vpnd that
 // deskconnd no longer knows about (e.g. deskconnd isn't running).

@@ -180,7 +180,7 @@ func main() {
 	vpnCmd := app.Command("vpn", "Route internet traffic through a remote machine, or serve as one")
 	vpnConnectCmd := vpnCmd.Command("connect", "Connect to a machine and tunnel all traffic through it")
 	vpnConnectMachine := machineArg(vpnConnectCmd, "ID, name or alias of machine", cfgDirectory)
-	vpnStartCmd := vpnCmd.Command("start", "Let other machines route their traffic through this machine")
+	vpnServeCmd := vpnCmd.Command("serve", "Let other machines route their traffic through this machine")
 	vpnStopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
 
 	pingCmd := machineCmd.Command("ping", "Ping a machine and measure round-trip time")
@@ -950,10 +950,10 @@ func main() {
 		runVPNConnect(vpnCtx, cfgDirectory, vpnRealm, *vpnConnectMachine)
 		vpnCancel()
 
-	case vpnStartCmd.FullCommand():
-		vpnStartCtx, vpnStartCancel := context.WithCancel(context.Background())
-		runVPNStart(vpnStartCtx, cfgDirectory)
-		vpnStartCancel()
+	case vpnServeCmd.FullCommand():
+		vpnServeCtx, vpnServeCancel := context.WithCancel(context.Background())
+		runVPNServe(vpnServeCtx, cfgDirectory)
+		vpnServeCancel()
 
 	case vpnStopCmd.FullCommand():
 		runVPNStop(context.Background(), cfgDirectory)
