@@ -11,6 +11,7 @@ func configureHelp(app *kingpin.Application) {
 	app.UsageFuncs(template.FuncMap{
 		"CommandRows":   commandHelpRows,
 		"GroupExamples": groupHelpExamples,
+		"ShellExamples": shellHelpExamples,
 		"CommandFlags":  commandHelpFlags,
 		"GlobalFlags": func(flags []*kingpin.FlagModel, global []*kingpin.FlagModel) []*kingpin.FlagModel {
 			return filterHelpFlags(flags, global, true)
@@ -44,6 +45,11 @@ Args:
 Flags:
 {{. | FlagsToTwoColumns | FormatTwoColumns}}
 {{end -}}
+{{if eq $command.FullCommand "shell" -}}
+Examples:
+{{range ShellExamples}}  {{.}}
+{{end}}
+{{end -}}
 {{with GlobalFlags .Context.Flags .App.Flags -}}
 Global flags:
 {{. | FlagsToTwoColumns | FormatTwoColumns}}
@@ -73,6 +79,13 @@ Examples:
   desk file cp ./notes.txt office:/tmp/notes.txt
 {{end -}}
 `)
+}
+
+func shellHelpExamples() []string {
+	if standaloneRequested() {
+		return []string{"desk shell", "desk shell -- uname -a", "desk shell -A"}
+	}
+	return []string{"desk shell office", "desk shell office -- uname -a", "desk shell -A office"}
 }
 
 func commandHelpRows(commands []*kingpin.CmdModel, names ...string) [][2]string {

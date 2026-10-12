@@ -232,6 +232,10 @@ func main() {
 		return
 	}
 	if len(os.Args) == 2 {
+		if os.Args[1] == "shell" && !standaloneRequested() {
+			app.Usage(os.Args[1:])
+			return
+		}
 		for _, command := range app.Model().Commands {
 			if command.Name == os.Args[1] && len(command.Commands) > 0 {
 				app.Usage(os.Args[1:])
