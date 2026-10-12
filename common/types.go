@@ -25,6 +25,9 @@ type Machine struct {
 	Connected    bool         `yaml:"-" json:"-"`
 }
 
+// PrintMode is remotecontrol-app's printing setting, kept in config.yml.
+type PrintMode string
+
 type PrintingConfig struct {
 	Mode PrintMode `yaml:"mode,omitempty"`
 }

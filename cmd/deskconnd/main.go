@@ -91,33 +91,19 @@ func main() {
 
 	isDesktop := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
-	var screen *deskconnd.Screen
-	var mpris *deskconnd.MPRIS
-	var audio *deskconnd.Audio
-
+	var sessionBus *dbus.Conn
 	if isDesktop {
-		systemBus, err := dbus.ConnectSystemBus()
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer systemBus.Close()
-
-		sessionBus, err := dbus.ConnectSessionBus()
+		sessionBus, err = dbus.ConnectSessionBus()
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer sessionBus.Close()
-
-		screen = deskconnd.NewScreen(sessionBus, systemBus, cfgDirectory)
-		mpris = deskconnd.NewMPRIS(sessionBus)
-		audio = deskconnd.NewAudio()
-		defer audio.Close()
 	} else {
 		log.Println("no display detected (DISPLAY/WAYLAND_DISPLAY unset), " +
 			"running in server mode: display APIs disabled")
 	}
 
-	deskconnApis := deskconnd.NewDeskconn(screen, mpris, audio, isDesktop, cfgDirectory)
+	deskconnApis := deskconnd.NewDeskconn(sessionBus, isDesktop)
 	defer deskconnApis.CloseVPNTunnel()
 
 	ctx, cancel := context.WithCancel(context.Background())

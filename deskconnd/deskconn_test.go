@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/godbus/dbus/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/common"
@@ -30,45 +29,6 @@ func setupRouterAndConnectSessions(t *testing.T) (*xconn.Session, *xconn.Session
 	return callee, caller
 }
 
-func TestBrightnessGetSet(t *testing.T) {
-	callee, caller := setupRouterAndConnectSessions(t)
-
-	conn, err := dbus.ConnectSystemBus()
-	require.NoError(t, err)
-	sessionConn, err := dbus.ConnectSessionBus()
-	require.NoError(t, err)
-	screen := deskconnd.NewScreen(sessionConn, conn, t.TempDir())
-	mpris := deskconnd.NewMPRIS(sessionConn)
-	audio := deskconnd.NewAudio()
-	defer audio.Close()
-	d := deskconnd.NewDeskconn(screen, mpris, audio, true, t.TempDir())
-	require.NoError(t, d.Register(callee))
-
-	callResp := caller.Call(common.ProcedureScreenBrightnessGet).Do()
-	if callResp.Err != nil {
-		// Headless / DBus unavailable case
-		require.ErrorContains(t, callResp.Err, "brightness device not available")
-		return
-	}
-
-	initial := int(callResp.ArgInt64Or(0, 0))
-	require.GreaterOrEqual(t, initial, 0)
-	require.LessOrEqual(t, initial, 100)
-
-	callResp = caller.Call(common.ProcedureScreenBrightnessSet).Do()
-	require.ErrorContains(t, callResp.Err, "wamp.error.invalid_argument")
-
-	callResp = caller.Call(common.ProcedureScreenBrightnessSet).Arg(70).Do()
-	require.NoError(t, callResp.Err)
-
-	callResp = caller.Call(common.ProcedureScreenBrightnessGet).Do()
-	require.NoError(t, callResp.Err)
-
-	updated := int(callResp.ArgInt64Or(0, 0))
-	require.GreaterOrEqual(t, updated, 0)
-	require.LessOrEqual(t, updated, 100)
-}
-
 func TestMachineInfoIncludesBattery(t *testing.T) {
 	tmp := t.TempDir()
 	dev := filepath.Join(tmp, "BAT0")
@@ -83,7 +43,7 @@ func TestMachineInfoIncludesBattery(t *testing.T) {
 
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	d := deskconnd.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	d := deskconnd.NewDeskconn(nil, false)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(common.ProcedureMachineInfo).Do()
@@ -102,7 +62,7 @@ func TestMachineInfoIncludesBattery(t *testing.T) {
 func TestMachineIsDesktop(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	d := deskconnd.NewDeskconn(nil, nil, nil, true, t.TempDir())
+	d := deskconnd.NewDeskconn(nil, true)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(common.ProcedureMachineIsDesktop).Do()
@@ -116,7 +76,7 @@ func TestMachineIsDesktop(t *testing.T) {
 func TestMachineIsDesktopFalseOnServer(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	d := deskconnd.NewDeskconn(nil, nil, nil, false, t.TempDir())
+	d := deskconnd.NewDeskconn(nil, false)
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(common.ProcedureMachineIsDesktop).Do()
