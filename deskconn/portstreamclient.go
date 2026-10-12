@@ -189,7 +189,7 @@ func completePortForwardHandshake(conn shellConn, sendKey, receiveKey []byte, re
 		return false
 	}
 	if ack.Error != "" {
-		log.Debugf("port forward: device could not dial port %s: %s", remotePort, ack.Error)
+		log.Debugf("port forward: machine could not dial port %s: %s", remotePort, ack.Error)
 		return false
 	}
 	return true

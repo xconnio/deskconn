@@ -442,7 +442,7 @@ func awaitDaemonP2P(ctx context.Context, realm, cfgDirectory string) (*DaemonStr
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("the connection to the device did not upgrade to P2P")
+			return nil, fmt.Errorf("the connection to the machine did not upgrade to P2P")
 		case <-ticker.C:
 		}
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)

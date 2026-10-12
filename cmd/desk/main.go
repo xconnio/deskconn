@@ -72,9 +72,9 @@ func main() {
 	versionString := fmt.Sprintf("desk %s", version)
 	app := kingpin.New("desk", "Deskconn control CLI")
 	standaloneURL := app.Flag("url", "Connect directly to a standalone deskconnd at this URL "+
-		"(quic://host:port, or https://host:port for WebTransport) instead of a device on your account").
+		"(quic://host:port, or https://host:port for WebTransport) instead of a machine on your account").
 		Envar("DESKCONN_URL").String()
-	standaloneCertHash := app.Flag("cert-hash", "SHA-256 fingerprint of the standalone device's certificate, "+
+	standaloneCertHash := app.Flag("cert-hash", "SHA-256 fingerprint of the standalone machine's certificate, "+
 		"as deskconnd prints it, to trust it even if self-signed (default: verify against trusted CAs)").
 		Envar("DESKCONN_CERT_HASH").String()
 	standaloneKey := app.Flag("private-key", "Private key (hex) to authenticate with --url; see `desk keygen`").
@@ -84,7 +84,7 @@ func main() {
 	standalonePassword := app.Flag("secret", "Password to authenticate with --url instead of "+
 		"--private-key (prompted for if neither is given)").Envar("DESKCONN_SECRET").String()
 
-	keygenCmd := app.Command("keygen", "Generate a key pair for standalone devices "+
+	keygenCmd := app.Command("keygen", "Generate a key pair for standalone machines "+
 		"(public key for deskconnd --public-key, private key for --private-key)")
 
 	machineCmd := app.Command("machine", "Manage the machines on your account")
@@ -95,7 +95,7 @@ func main() {
 	machineLsCmd.Flag("detailed", "Show detailed output").BoolVar(&lsDetailed)
 
 	attachCmd := machineCmd.Command("attach", "Attach this machine to your account")
-	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
+	attachName := attachCmd.Flag("name", "Machine name").Short('n').String()
 	attachUsername := attachCmd.Flag("username", "Username").Short('u').String()
 	attachPassword := attachCmd.Flag("password", "Password").Short('p').String()
 	attachPasswordStdin := attachCmd.Flag("password-stdin", "Read password from stdin").Bool()
@@ -115,22 +115,22 @@ func main() {
 
 	fileCmd := app.Command("file", "File operations")
 
-	lsFileCmd := fileCmd.Command("ls", "List files on a device")
-	lsFileTarget := lsFileCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp)").Required().
+	lsFileCmd := fileCmd.Command("ls", "List files on a machine")
+	lsFileTarget := lsFileCmd.Arg("target", "Remote path as machine:path (e.g. m1:/tmp)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	lsFileModeFlag := modeFlag(lsFileCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a device")
-	mvSrc := mvCmd.Arg("src", "Source path as device:path (e.g. m1:/a.txt)").Required().
+	mvCmd := fileCmd.Command("mv", "Move or rename a file or directory on a machine")
+	mvSrc := mvCmd.Arg("src", "Source path as machine:path (e.g. m1:/a.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
-	mvDst := mvCmd.Arg("dst", "Destination path as device:path (e.g. m1:/b.txt)").Required().
+	mvDst := mvCmd.Arg("dst", "Destination path as machine:path (e.g. m1:/b.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	mvModeFlag := modeFlag(mvCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	cpCmd := fileCmd.Command("cp", "Copy files to/from/between devices")
-	cpSrc := cpCmd.Arg("src", "Source: device:path for remote, /path for local").Required().
+	cpCmd := fileCmd.Command("cp", "Copy files to/from/between machines")
+	cpSrc := cpCmd.Arg("src", "Source: machine:path for remote, /path for local").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
-	cpDst := cpCmd.Arg("dst", "Destination: device:path for remote, /path for local").Required().
+	cpDst := cpCmd.Arg("dst", "Destination: machine:path for remote, /path for local").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cpRecursive := cpCmd.Flag("recursive", "Copy directories recursively").Short('r').Bool()
 	cpModeFlag := modeFlag(cpCmd,
@@ -139,67 +139,67 @@ func main() {
 	cpStreams := cpCmd.Flag("streams", "Number of parallel streams to use for the transfer (default 4)").
 		Short('s').Int()
 
-	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a device")
-	rmTarget := rmCmd.Arg("target", "Remote path as device:path (e.g. m1:/tmp/a.txt)").Required().
+	rmCmd := fileCmd.Command("rm", "Remove a file or directory on a machine")
+	rmTarget := rmCmd.Arg("target", "Remote path as machine:path (e.g. m1:/tmp/a.txt)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	rmModeFlag := modeFlag(rmCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	catCmd := fileCmd.Command("cat", "Print the contents of a file on a device")
-	catTarget := catCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
+	catCmd := fileCmd.Command("cat", "Print the contents of a file on a machine")
+	catTarget := catCmd.Arg("target", "Remote path as machine:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	catModeFlag := modeFlag(catCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	editCmd := fileCmd.Command("edit", "Edit a text file on a device with $EDITOR and send only the diff")
-	editTarget := editCmd.Arg("target", "Remote path as device:path (e.g. m1:/etc/hosts)").Required().
+	editCmd := fileCmd.Command("edit", "Edit a text file on a machine with $EDITOR and send only the diff")
+	editTarget := editCmd.Arg("target", "Remote path as machine:path (e.g. m1:/etc/hosts)").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	editModeFlag := modeFlag(editCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	shellCmd := app.Command("shell", "Start interactive shell")
-	shellDeviceName := deviceArg(shellCmd, "device", "ID, name or alias of device to shell", cfgDirectory)
+	shellDeviceName := deviceArg(shellCmd, "ID, name or alias of machine to shell", cfgDirectory)
 	shellModeFlag := modeFlag(shellCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 	shellForwardAgent := shellCmd.Flag("agent-forward",
 		"Forward the local SSH agent to the remote shell (like ssh -A). Only use with hosts you trust.",
 	).Short('A').Bool()
 
 	execCmd := app.Command("exec", "Run a command")
-	execDeviceName := deviceArg(execCmd, "device", "ID, name or alias of device to run command", cfgDirectory)
+	execDeviceName := deviceArg(execCmd, "ID, name or alias of machine to run command", cfgDirectory)
 	command := execCmd.Arg("command", "Command to run").Required().Strings()
 	execModeFlag := modeFlag(execCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	portCmd := app.Command("port", "Port forwarding operations")
-	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote device")
-	portForwardDevice := deviceArg(portForwardCmd, "device", "ID, name or alias of device", cfgDirectory)
+	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote machine")
+	portForwardDevice := deviceArg(portForwardCmd, "ID, name or alias of machine", cfgDirectory)
 	portForwardPorts := portForwardCmd.Arg("ports", "Port mapping as localport:remoteport").String()
 	portForwardLocalFlag := portForwardCmd.Flag("local", "Local port to listen on").Short('l').String()
-	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote device to connect to").Short('r').String()
+	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote machine to connect to").Short('r').String()
 	portForwardModeFlag := modeFlag(portForwardCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	portReverseCmd := portCmd.Command("reverse", "Reverse-forward a remote port to a local port")
-	portReverseDevice := deviceArg(portReverseCmd, "device", "ID, name or alias of device", cfgDirectory)
+	portReverseDevice := deviceArg(portReverseCmd, "ID, name or alias of machine", cfgDirectory)
 	portReversePorts := portReverseCmd.Arg("ports", "Port mapping as remoteport:localport").String()
-	portReverseRemoteFlag := portReverseCmd.Flag("remote", "Port on the remote device to listen on").Short('r').String()
+	portReverseRemoteFlag := portReverseCmd.Flag("remote", "Port on the remote machine to listen on").Short('r').String()
 	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
 	portReverseModeFlag := modeFlag(portReverseCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	vpnCmd := app.Command("vpn", "Route internet traffic through a remote device, or serve as one")
-	vpnConnectCmd := vpnCmd.Command("connect", "Connect to a device and tunnel all traffic through it")
-	vpnConnectDevice := deviceArg(vpnConnectCmd, "device", "ID, name or alias of device", cfgDirectory)
-	vpnStartCmd := vpnCmd.Command("start", "Let other devices route their traffic through this machine")
+	vpnCmd := app.Command("vpn", "Route internet traffic through a remote machine, or serve as one")
+	vpnConnectCmd := vpnCmd.Command("connect", "Connect to a machine and tunnel all traffic through it")
+	vpnConnectDevice := deviceArg(vpnConnectCmd, "ID, name or alias of machine", cfgDirectory)
+	vpnStartCmd := vpnCmd.Command("start", "Let other machines route their traffic through this machine")
 	vpnStopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
 
-	pingCmd := app.Command("ping", "Ping a device and measure round-trip time")
-	pingDevice := deviceArg(pingCmd, "device", "ID, name or alias of device", cfgDirectory)
+	pingCmd := app.Command("ping", "Ping a machine and measure round-trip time")
+	pingDevice := deviceArg(pingCmd, "ID, name or alias of machine", cfgDirectory)
 	pingCount := pingCmd.Flag("count", "Number of pings to send (0 = infinite)").Short('c').Default("0").Int()
 
-	connectCmd := app.Command("connect", "Establish a persistent connection to a device")
-	connectDevice := deviceArg(connectCmd, "device", "ID, name or alias of device", cfgDirectory)
+	connectCmd := app.Command("connect", "Establish a persistent connection to a machine")
+	connectDevice := deviceArg(connectCmd, "ID, name or alias of machine", cfgDirectory)
 
 	disconnectCmd := app.Command("disconnect", "Disconnect a persistent connection")
-	disconnectDevice := disconnectCmd.Arg("device", "ID, name or alias of device").
+	disconnectDevice := disconnectCmd.Arg("machine", "ID, name or alias of machine").
 		HintAction(deviceCompletions(cfgDirectory)).String()
-	disconnectAllFlag := disconnectCmd.Flag("all", "Disconnect all devices").Bool()
+	disconnectAllFlag := disconnectCmd.Flag("all", "Disconnect all machines").Bool()
 
 	lsCmd := app.Command("ls", "List machines (shortcut for `machine ls`)")
 	lsCmd.Flag("refresh", "Refresh machine list from cloud").BoolVar(&lsRefresh)
@@ -214,11 +214,11 @@ func main() {
 	configEdit := configCmd.Command("edit", "Edit full config")
 
 	infoCmd := machineCmd.Command("info", "Show machine resource usage")
-	infoDevice := deviceArg(infoCmd, "machine", "ID, name or alias of machine", cfgDirectory)
+	infoDevice := deviceArg(infoCmd, "ID, name or alias of machine", cfgDirectory)
 	infoModeFlag := modeFlag(infoCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	logsCmd := machineCmd.Command("logs", "Stream logs from a machine")
-	logsDevice := deviceArg(logsCmd, "machine", "ID, name or alias of machine", cfgDirectory)
+	logsDevice := deviceArg(logsCmd, "ID, name or alias of machine", cfgDirectory)
 	logsSource := logsCmd.Arg("source",
 		"Service name (e.g. nginx) or file path (e.g. /var/log/syslog); omit for system journal").String()
 	logsFollow := logsCmd.Flag("follow", "Follow log output").Short('f').Bool()
@@ -277,7 +277,7 @@ func main() {
 			ReadPassword: func() (string, error) { return readStandalonePassword(authID) }})
 		switch parsedCmd {
 		case pingCmd.FullCommand(), connectCmd.FullCommand(), disconnectCmd.FullCommand(), lsCmd.FullCommand():
-			fmt.Fprintf(os.Stderr, "%s is not available with --url (it works on devices of your account)\n",
+			fmt.Fprintf(os.Stderr, "%s is not available with --url (it works on machines of your account)\n",
 				parsedCmd)
 			os.Exit(1)
 		}
@@ -350,7 +350,7 @@ func main() {
 		srcDevice, srcPath := parseDevicePath(*mvSrc)
 		dstDevice, dstPath := parseDevicePath(*mvDst)
 		if srcDevice != dstDevice {
-			fmt.Fprintln(os.Stderr, "cross-device move not supported")
+			fmt.Fprintln(os.Stderr, "cross-machine move not supported")
 			return
 		}
 		realm, err := deviceRealm(srcDevice, cfgDirectory)
@@ -372,7 +372,7 @@ func main() {
 			srcDevice, srcPath := parseDevicePath(*cpSrc)
 			dstDevice, dstPath := parseDevicePath(*cpDst)
 			if srcDevice != dstDevice {
-				fmt.Fprintln(os.Stderr, "cross-device copy not supported")
+				fmt.Fprintln(os.Stderr, "cross-machine copy not supported")
 				return
 			}
 			realm, err := deviceRealm(srcDevice, cfgDirectory)
@@ -510,7 +510,7 @@ func main() {
 				}
 			}
 		default:
-			fmt.Fprintln(os.Stderr, "at least one of src or dst must be a remote path (device:path)")
+			fmt.Fprintln(os.Stderr, "at least one of src or dst must be a remote path (machine:path)")
 		}
 
 	case rmCmd.FullCommand():
@@ -1064,11 +1064,11 @@ func main() {
 				fmt.Fprintln(os.Stderr, callResp.Err)
 				return
 			}
-			fmt.Println("disconnected all devices")
+			fmt.Println("disconnected all machines")
 			return
 		}
 		if *disconnectDevice == "" {
-			fmt.Fprintln(os.Stderr, "specify a device or use --all")
+			fmt.Fprintln(os.Stderr, "specify a machine or use --all")
 			return
 		}
 		realm, err := deviceRealm(*disconnectDevice, cfgDirectory)
@@ -1450,7 +1450,7 @@ func detachIfAttached() error {
 		return fmt.Errorf("failed to parse credentials file: %w", err)
 	}
 
-	fmt.Println("Detaching this device from your account...")
+	fmt.Println("Detaching this machine from your account...")
 
 	cryptosignAuth, err := auth.NewCryptoSignAuthenticator(cred.AuthID, cred.PrivateKey, nil)
 	if err != nil {
@@ -1468,14 +1468,14 @@ func detachIfAttached() error {
 		return err
 	}
 
-	fmt.Println("Device detached.")
+	fmt.Println("Machine detached.")
 	return nil
 }
 
 func removeApp(cfgDirectory string, skipConfirm bool) error {
 	if !skipConfirm {
 		confirmed, err := confirmPrompt("Are you sure you want to remove desk and all configuration, "+
-			"credentials and device list? (y/N): ", false)
+			"credentials and machine list? (y/N): ", false)
 		if err != nil {
 			return err
 		}
@@ -1486,7 +1486,7 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 	}
 
 	if err := detachIfAttached(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to detach this device from your account: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: failed to detach this machine from your account: %v\n", err)
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -1538,7 +1538,7 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		}
 	}
 
-	fmt.Println("Removing desk configuration, credentials and device list...")
+	fmt.Println("Removing desk configuration, credentials and machine list...")
 	if err := os.RemoveAll(cfgDirectory); err != nil {
 		return fmt.Errorf("failed to remove config directory: %w", err)
 	}
@@ -1764,7 +1764,7 @@ func attach(flagUsername, flagPassword, name string, useStdin bool) error {
 		return err
 	}
 	if _, err := os.Stat(file); err == nil {
-		return fmt.Errorf("device already attached")
+		return fmt.Errorf("machine already attached")
 	}
 
 	username, password, err := readCredentials(flagUsername, flagPassword, useStdin)
@@ -1791,7 +1791,7 @@ func resolveDeviceName(name string) (string, error) {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Printf("Name of the new device [default=%s]: ", host)
+	fmt.Printf("Name of the new machine [default=%s]: ", host)
 
 	input, err := reader.ReadString('\n')
 	if err != nil {
@@ -1814,7 +1814,7 @@ func promptAttachDevice(username, password string) error {
 		return nil
 	}
 
-	confirmed, err := confirmPrompt("No devices found on your account. Attach this device now? (Y/n): ", true)
+	confirmed, err := confirmPrompt("No machines found on your account. Attach this machine now? (Y/n): ", true)
 	if err != nil {
 		return err
 	}
@@ -1838,7 +1838,7 @@ func promptAttachDevice(username, password string) error {
 
 	devices, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
 	if err != nil {
-		return fmt.Errorf("failed to fetch devices: %w", err)
+		return fmt.Errorf("failed to fetch machines: %w", err)
 	}
 
 	return deskconn.CacheDevices(cfgDirectory, devices)
@@ -1947,13 +1947,13 @@ func standaloneRequested() bool {
 	return false
 }
 
-// deviceArg defines cmd's device argument. With --url there is only one device, so the
+// deviceArg defines cmd's machine argument. With --url there is only one machine, so the
 // argument isn't defined at all and the result is empty.
-func deviceArg(cmd *kingpin.CmdClause, name, help, cfgDirectory string) *string {
+func deviceArg(cmd *kingpin.CmdClause, help, cfgDirectory string) *string {
 	if standaloneRequested() {
 		return new(string)
 	}
-	return cmd.Arg(name, help).Required().HintAction(deviceCompletions(cfgDirectory)).String()
+	return cmd.Arg("machine", help).Required().HintAction(deviceCompletions(cfgDirectory)).String()
 }
 
 // modeFlag defines cmd's --mode flag. With --url it defaults to a direct connection: the
@@ -2005,7 +2005,7 @@ func deviceRealm(deviceName, cfgDirectory string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("device not found: %s", deviceName)
+	return "", fmt.Errorf("machine not found: %s", deviceName)
 }
 
 func readCredentials(flagUsername, flagPassword string, useStdin bool) (username, password string, err error) {
@@ -2187,7 +2187,7 @@ func selectDevice(session *xconn.Session) (authid string, name string, err error
 		return "", "", fmt.Errorf("no desktop attached to the account")
 	}
 
-	idx, err := selectOption(callResp, "Available devices", "authid", "Select device")
+	idx, err := selectOption(callResp, "Available machines", "authid", "Select machine")
 	if err != nil {
 		return "", "", err
 	}
@@ -2467,7 +2467,7 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 	}
 
 	if !updated {
-		return fmt.Errorf("device %s not found", deviceKey)
+		return fmt.Errorf("machine %s not found", deviceKey)
 	}
 
 	out, err := yaml.Marshal(config)

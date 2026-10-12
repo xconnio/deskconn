@@ -37,20 +37,20 @@ type agentCommands struct {
 }
 
 func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agentCommands {
-	agentCmd := app.Command("agent", "Pull and resume Claude Code CLI sessions directly with another device")
+	agentCmd := app.Command("agent", "Pull and resume Claude Code CLI sessions directly with another machine")
 
-	lsCmd := agentCmd.Command("ls", "List Claude Code sessions for this project, on this device or another one")
+	lsCmd := agentCmd.Command("ls", "List Claude Code sessions for this project, on this machine or another one")
 	// Unlike deviceArg, machine is optional here: omitting it lists this device's own sessions.
 	lsMachine := new(string)
 	if !standaloneRequested() {
-		lsMachine = lsCmd.Arg("machine", "Device to list sessions on (default: this device)").
+		lsMachine = lsCmd.Arg("machine", "Machine to list sessions on (default: this machine)").
 			HintAction(deviceCompletions(cfgDirectory)).String()
 	}
 	lsMode := modeFlag(lsCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
-	pullCmd := agentCmd.Command("pull", "Pull claude sessions from another device onto this one")
-	pullMachine := deviceArg(pullCmd, "machine", "Device to pull sessions from", cfgDirectory)
+	pullCmd := agentCmd.Command("pull", "Pull claude sessions from another machine onto this one")
+	pullMachine := deviceArg(pullCmd, "Machine to pull sessions from", cfgDirectory)
 	pullSessionID := pullCmd.Arg("session-id",
 		"Only pull the session matching this id (or a unique prefix of one); default pulls all").String()
 	pullMode := modeFlag(pullCmd,
@@ -61,7 +61,7 @@ func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agent
 	resumePrintOnly := resumeCmd.Flag("print-only",
 		"Only print the resume command; don't launch").Bool()
 	resumeRemote := resumeCmd.Flag("remote",
-		"Run claude directly on this device instead of resuming a locally pulled session").
+		"Run claude directly on this machine instead of resuming a locally pulled session").
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	resumeMode := modeFlag(resumeCmd,
 		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, default uses daemon persistent session")
@@ -147,7 +147,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 	case mode == ModeQUIC:
 		realm, err := deviceRealm(machine, cfgDirectory)
 		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
+			return fmt.Errorf("unknown machine %q: %w", machine, err)
 		}
 		quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -161,7 +161,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 	case mode == ModeP2P:
 		realm, err := deviceRealm(machine, cfgDirectory)
 		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
+			return fmt.Errorf("unknown machine %q: %w", machine, err)
 		}
 		p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -175,7 +175,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 	default:
 		realm, err := deviceRealm(machine, cfgDirectory)
 		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
+			return fmt.Errorf("unknown machine %q: %w", machine, err)
 		}
 		localSession, err := xconn.ConnectAnonymous(context.Background(),
 			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), common.LocalRealm)
@@ -190,7 +190,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 	}
 	if len(sessions) == 0 {
 		if machine == "" && !standaloneRequested() {
-			fmt.Println("no claude sessions found on this device for this project")
+			fmt.Println("no claude sessions found on this machine for this project")
 			return nil
 		}
 		fmt.Printf("no claude sessions found on %s for this project\n", machine)
@@ -217,7 +217,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 		var realm string
 		realm, err = deviceRealm(machine, cfgDirectory)
 		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
+			return fmt.Errorf("unknown machine %q: %w", machine, err)
 		}
 		quicSess, qErr := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
 		if qErr != nil {
@@ -229,7 +229,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 		var realm string
 		realm, err = deviceRealm(machine, cfgDirectory)
 		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
+			return fmt.Errorf("unknown machine %q: %w", machine, err)
 		}
 		p2pSess, pErr := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
 		if pErr != nil {
@@ -241,7 +241,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 		var realm string
 		realm, err = deviceRealm(machine, cfgDirectory)
 		if err != nil {
-			return fmt.Errorf("unknown device %q: %w", machine, err)
+			return fmt.Errorf("unknown machine %q: %w", machine, err)
 		}
 		localSession, lErr := xconn.ConnectAnonymous(context.Background(),
 			fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory), common.LocalRealm)
@@ -332,7 +332,7 @@ func runAgentResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
 	}
 	realm, err := deviceRealm(machine, cfgDirectory)
 	if err != nil {
-		return fmt.Errorf("unknown device %q: %w", machine, err)
+		return fmt.Errorf("unknown machine %q: %w", machine, err)
 	}
 
 	cmdName, args := agentResumeCommand(sessionID)

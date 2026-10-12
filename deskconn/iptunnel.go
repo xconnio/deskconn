@@ -117,7 +117,7 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	select {
 	case <-openCh:
 	case <-closedCh:
-		return fmt.Errorf("remote device closed the vpn channel before it opened")
+		return fmt.Errorf("remote machine closed the vpn channel before it opened")
 	case <-time.After(common.VPNHandshakeTimeout):
 		return fmt.Errorf("timed out opening vpn data channel")
 	case <-ctx.Done():
@@ -153,10 +153,10 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	select {
 	case ready = <-readyCh:
 	case <-closedCh:
-		return fmt.Errorf("remote device rejected the tunnel (not currently serving? " +
+		return fmt.Errorf("remote machine rejected the tunnel (not currently serving? " +
 			"it needs \"desk vpn start\" run on it first)")
 	case <-time.After(common.VPNHandshakeTimeout):
-		return fmt.Errorf("timed out waiting for the remote device to set up the tunnel")
+		return fmt.Errorf("timed out waiting for the remote machine to set up the tunnel")
 	case <-ctx.Done():
 		return ctx.Err()
 	}

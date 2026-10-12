@@ -53,7 +53,7 @@ func handleStreamProxyConn(conn net.Conn, clientSessions *ClientSessions, cfgDir
 		fail(err)
 		return
 	}
-	errNoQUIC := errors.New("the connection to the device no longer uses QUIC")
+	errNoQUIC := errors.New("the connection to the machine no longer uses QUIC")
 
 	switch req.Kind {
 	case "":
@@ -92,7 +92,7 @@ func handleStreamProxyConn(conn net.Conn, clientSessions *ClientSessions, cfgDir
 
 	case common.RelayKindWebRTC:
 		if rtc == nil {
-			fail(errors.New("the connection to the device is no longer P2P"))
+			fail(errors.New("the connection to the machine is no longer P2P"))
 			return
 		}
 		channel, err := common.OpenDataChannel(rtc, req.Label)
