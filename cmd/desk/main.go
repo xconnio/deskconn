@@ -205,10 +205,6 @@ func main() {
 
 	logoutCmd := accountCmd.Command("logout", "Logout")
 
-	configCmd := app.Command("config", "Manage desk configuration")
-	configShow := configCmd.Command("show", "Show config")
-	configEdit := configCmd.Command("edit", "Edit full config")
-
 	infoCmd := machineCmd.Command("info", "Show machine resource usage")
 	infoMachine := machineArg(infoCmd, "ID, name or alias of machine", cfgDirectory)
 	infoModeFlag := modeFlag(infoCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
@@ -1074,18 +1070,6 @@ func main() {
 		}
 		fmt.Printf("disconnected %s\n", *disconnectMachine)
 
-	case configShow.FullCommand():
-		data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(os.Stderr, "no config found, user not logged in")
-				return
-			}
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		fmt.Print(string(data))
-
 	case aliasCmd.FullCommand():
 		if *aliasUnset == (*aliasName != "") {
 			fmt.Fprintln(os.Stderr, "specify either an alias name or --unset")
@@ -1094,27 +1078,6 @@ func main() {
 		if err := updateMachineAlias(cfgDirectory, *aliasMachine, *aliasName); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
-
-	case configEdit.FullCommand():
-		_, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(os.Stderr, "no config found, user not logged in")
-				return
-			}
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vi"
-		}
-
-		cmd := exec.Command(editor, filepath.Join(cfgDirectory, "config.yml")) // nolint: gosec
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
 
 	case infoCmd.FullCommand():
 		realm, err := machineRealm(*infoMachine, cfgDirectory)
