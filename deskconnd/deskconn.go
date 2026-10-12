@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"os"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 
@@ -25,12 +26,20 @@ type Deskconn struct {
 	mpris                *MPRIS
 	audio                *Audio
 	printer              *Printer
-	indexer              *IndexService
 	wallpaper            *Wallpaper
 	processes            *ProcessMonitor
 	appRegistry          *AppRegistry
 	desktop              bool
 	vpn                  *vpnServer
+	// session is the session Register registered on, also used to reach media-app's
+	// procedures.
+	session *xconn.Session
+
+	appsMu sync.Mutex
+	// externalApps are the apps other processes registered, by their session.
+	externalApps map[uint64][]externalApp
+	// indexQuery is registered while media-app's apps are.
+	indexQuery *xconn.RegisterResponse
 }
 
 func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment bool, cfgDirectory string) *Deskconn {
@@ -47,30 +56,17 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment 
 		appRegistry:          NewAppRegistry(),
 		desktop:              desktopEnvironment,
 		vpn:                  newVPNServer(),
+		externalApps:         map[uint64][]externalApp{},
 	}
 	d.shellSession.agentForward = d.agentForwardSessions
 	if screen != nil {
 		d.wallpaper = NewWallpaper(screen.SessionBus())
 	}
-
-	indexer, err := NewIndexService(cfgDirectory)
-	if err != nil {
-		log.Printf("fileindex: failed to create index service: %v", err)
-		return d
-	}
-
-	d.indexer = indexer
 	return d
 }
 
-// StartIndexer starts the background file indexer.
-func (d *Deskconn) StartIndexer(ctx context.Context) {
-	if d.indexer != nil {
-		d.indexer.Start(ctx)
-	}
-}
-
 func (d *Deskconn) Register(session *xconn.Session) error {
+	d.session = session
 	handlers := map[string]xconn.InvocationHandler{
 		common.ProcedureKeyExchange:     d.handleKeyExchange,
 		common.ProcedureShellIsBusy:     d.shellSession.handleShellIsBusy(),
@@ -91,13 +87,16 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		common.ProcedureProcessSignal:   d.handleProcessSignal,
 		common.ProcedureAppList:         d.handleAppList,
 		common.ProcedureAppIcon:         d.handleAppIcon,
-		common.ProcedureIndexQuery:      d.handleIndexQuery,
 		common.ProcedureAISessionList:   d.handleAISessionList,
 		common.ProcedureAISessionPull:   d.handleAISessionPull,
 		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
 	}
+
+	// Pictures, Videos and Documents are listed and served while media-app is connected.
+	handlers[common.ProcedureCapabilitiesList] = d.handleCapabilitiesList
+	handlers[common.ProcedureAppsRegister] = d.handleAppsRegister
 
 	// Display-related RPCs depend on a session D-Bus connection (screen,
 	// wallpaper, MPRIS) or PulseAudio (audio), neither of which is available
@@ -328,6 +327,7 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 		return
 	}
 	d.keys.delete(sessionID)
+	d.handleAppUnregister(sessionID)
 }
 
 func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
@@ -361,11 +361,9 @@ func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *
 	return xconn.NewInvocationResult(serverPublicKey)
 }
 
+// handleIndexQuery serves Pictures, Videos and Documents: it decrypts the query and
+// forwards it to media-app, which does the indexing.
 func (d *Deskconn) handleIndexQuery(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	if d.indexer == nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, "index service unavailable")
-	}
-
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
 		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
@@ -380,21 +378,19 @@ func (d *Deskconn) handleIndexQuery(_ context.Context, inv *xconn.Invocation) *x
 		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 	}
 
-	var args struct {
-		Categories []string          `json:"categories"`
-		Cursor     map[string]string `json:"cursor"`
-		Limit      int               `json:"limit"`
+	resp := d.session.Call(common.ProcedureMediaIndexQuery).Args(plaintext).Do()
+	if resp.Err != nil {
+		var wampErr *xconn.Error
+		if !errors.As(resp.Err, &wampErr) {
+			return xconn.NewInvocationError(common.ErrOperationFailed, resp.Err.Error())
+		}
+		if wampErr.URI == wampproto.ErrNoSuchProcedure {
+			return xconn.NewInvocationError(common.ErrOperationFailed, "media-app isn't running on this device")
+		}
+		// media-app's own errors, as they are.
+		return xconn.NewInvocationError(wampErr.URI, wampErr.Args...)
 	}
-	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-
-	result, err := d.indexer.Query(args.Categories, args.Cursor, args.Limit)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-
-	resultBytes, err := json.Marshal(result)
+	resultBytes, err := resp.ArgBytes(0)
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}

@@ -122,7 +122,6 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	deskconnApis.StartIndexer(ctx)
 
 	// Raw stream relay listener: xlink dials in once per classified
 	// remote stream/channel (see xconnd.RelayHeader).
@@ -207,6 +206,7 @@ func main() {
 			common.ProcedureGitStatus,
 			common.ProcedureGitOriginal,
 			common.ProcedureFileCat,
+			common.ProcedureCapabilitiesList,
 		},
 		StreamSocket: streamSockPath,
 	}
