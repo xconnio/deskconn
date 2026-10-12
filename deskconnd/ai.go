@@ -100,7 +100,7 @@ func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation)
 		byTool[s.Tool] = append(byTool[s.Tool], s)
 	}
 	if len(byTool) == 0 {
-		return xconn.NewInvocationError(common.ErrOperationFailed, "no local sessions found on this device for this project")
+		return xconn.NewInvocationError(common.ErrOperationFailed, "no local sessions found on this machine for this project")
 	}
 
 	var bundles []common.AISessionBundle

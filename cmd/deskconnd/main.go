@@ -32,8 +32,8 @@ const (
 )
 
 func main() {
-	app := kingpin.New("deskconnd", "Deskconn daemon: the device's APIs and its connectivity (xlink)")
-	standalone := app.Flag("standalone", "Serve this device directly over --transport to --public-key holders "+
+	app := kingpin.New("deskconnd", "Deskconn daemon: the machine's APIs and its connectivity (xlink)")
+	standalone := app.Flag("standalone", "Serve this machine directly over --transport to --public-key holders "+
 		"and --user accounts, instead of through the cloud").Bool()
 	standaloneTransport := app.Flag("transport", "Standalone transport to serve: quic, webtransport or both").
 		Default(transportQUIC).Enum(transportQUIC, transportWebTransport, transportBoth)

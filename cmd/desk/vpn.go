@@ -72,7 +72,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 	}
 	defer func() { _ = helper.Close() }()
 
-	fmt.Println("Waiting for the remote device to accept the tunnel...")
+	fmt.Println("Waiting for the remote machine to accept the tunnel...")
 	errCh := make(chan error, 1)
 	onReady := func() {
 		fmt.Printf("Tunnel up: routing this machine's internet traffic through %q. Press Ctrl-C to stop.\n", device)

@@ -84,7 +84,7 @@ func Login(session *xconn.Session, username, otp string) ([]common.Device, error
 
 	devices, err := fetchDevices(cloudSession)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch devices: %w", err)
+		return nil, fmt.Errorf("failed to fetch machines: %w", err)
 	}
 
 	if err := CacheDevices(cfgDirectory, devices); err != nil {

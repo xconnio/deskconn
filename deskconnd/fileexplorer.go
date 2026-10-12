@@ -27,7 +27,7 @@ import (
 )
 
 var errFilePathEscapesHome = errors.New("relative path escapes home directory")
-var errEditConflict = errors.New("file changed on the device, patch could not be applied cleanly")
+var errEditConflict = errors.New("file changed on the machine, patch could not be applied cleanly")
 
 const binarySniffLen = 8000
 

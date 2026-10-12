@@ -3,7 +3,7 @@
 A split operating system where the runtime lives on your computer, the interface lives on any device, and applications
 can execute locally or in the cloud.
 
-It lets you control Linux desktops remotely (run shells, transfer files, forward ports and more) from any device on your
+It lets you control Linux desktops remotely (run shells, transfer files, forward ports and more) from any machine on your
 account. Connections are routed through the [Deskconn cloud router](https://github.com/xconnio/deskconn-router) and can
 transparently upgrade to direct WebRTC P2P links for lower latency.
 
@@ -16,7 +16,7 @@ The Deskconn ecosystem consists of five pieces. This repository contains the two
 | [deskconnd](https://github.com/xconnio/deskconn)                                                                                        | Desktop daemon. Registers and exposes desktop APIs over WAMP. Runs as a systemd user service.                                 |
 | [desk](https://github.com/xconnio/deskconn)                                                                                             | Control CLI. Attach desktops, manage files, open shells, forward ports, and more.                                             |
 | [deskconn-router](https://github.com/xconnio/deskconn-router)                                                                           | Cloud WAMP router. The central hub — every component (CLI, daemon, account service, web app, mobile app) connects through it. |
-| [deskconn-account-service](https://github.com/xconnio/deskconn-account-service)                                                         | Manages user accounts, organizations, and per-device CryptoSign principals.                                                   |
+| [deskconn-account-service](https://github.com/xconnio/deskconn-account-service)                                                         | Manages user accounts, organizations, and per-machine CryptoSign principals.                                                  |
 | [deskconn-web-app](https://github.com/xconnio/deskconn-web-app) / [deskconn-mobile-app](https://github.com/xconnio/deskconn-mobile-app) | Web and mobile interfaces.                                                                                                    |
 
 ### How a command reaches your desktop
@@ -28,10 +28,10 @@ desk CLI
 deskconnd (local proxy)
     │  (WebSocket — wss://api.deskconn.com/ws or WebRTC P2P)
     ▼
-deskconnd (target device)
+deskconnd (target machine)
 ```
 
-The local `deskconnd` maintains a persistent session to the cloud router per target device. The shell command starts
+The local `deskconnd` maintains a persistent session to the cloud router per target machine. The shell command starts
 over the routed path and migrates transparently to a direct WebRTC connection in the background once the P2P handshake
 completes.
 
@@ -58,9 +58,9 @@ Sign up at [deskconn.com](https://deskconn.com) or via the mobile app.
 ### 2. Attach the desktop to the cloud
 
 ```bash
-desk attach --username <email> --password <password>
+desk machine attach --username <email> --password <password>
 # or read the password from stdin
-echo "$PASSWORD" | desk attach --username <email> --password-stdin
+echo "$PASSWORD" | desk machine attach --username <email> --password-stdin
 ```
 
 This creates a realm for the desktop under your account and writes credentials to `~/.deskconn/credentials.json`. The
@@ -76,7 +76,7 @@ You'll then be prompted for the one-time password emailed to you. Once verified,
 keypair, registers it with the account service, and stores it locally. You only need to do this once per machine;
 the key is valid for 30 days and is renewed on the next login.
 
-### 4. List your devices
+### 4. List your machines
 
 ```bash
 desk ls
@@ -87,14 +87,14 @@ desk ls --detailed   # show realm, ID, and organisation
 ### 5. Open a shell
 
 ```bash
-desk shell <device>
-desk shell <device> --mode p2p      # force WebRTC
-desk shell <device> --mode routed   # force cloud router
+desk shell <machine>
+desk shell <machine> --mode p2p      # force WebRTC
+desk shell <machine> --mode routed   # force cloud router
 ```
 
 ## Standalone mode (no cloud)
 
-`deskconnd` can serve a device directly, without an account or the cloud router, to a fixed list of keys and/or
+`deskconnd` can serve a machine directly, without an account or the cloud router, to a fixed list of keys and/or
 username/password accounts. One command starts it; clients point the CLI at its URL. Shell, exec, file operations, port and agent forwarding, logs and P2P
 work the same way.
 
@@ -106,7 +106,7 @@ desk keygen
 # Private Key: 9f2d0b17…
 ```
 
-### 2. Start deskconnd in standalone mode on the device
+### 2. Start deskconnd in standalone mode on the machine
 
 ```bash
 deskconnd --standalone --public-key 65160c38… [--public-key <another public key> ...]
@@ -153,11 +153,11 @@ desk shell
 ```
 
 Use `https://host:18081` as the URL to connect over WebTransport instead. `--cert-hash` (or `DESKCONN_CERT_HASH`)
-pins the device's certificate, which is what makes a self-signed one trusted; leave it out when the certificate is
+pins the machine's certificate, which is what makes a self-signed one trusted; leave it out when the certificate is
 issued by a CA the client trusts.
 
 The same works with flags: `desk --url quic://203.0.113.5:18080 --cert-hash 3f9a1c… --private-key 9f2d0b17… shell`. With `--url`,
-commands take no device argument. `ping`, `connect`, `disconnect` and `ls` work on devices of your account only.
+commands take no machine argument. `ping`, `connect`, `disconnect` and `ls` work on machines of your account only.
 
 ## Self-hosting
 
@@ -219,7 +219,7 @@ foreground:
 
 ```bash
 systemctl --user stop deskconnd   # if the official release is installed; it shares ~/.deskconn
-bin/desk attach --username <email> --password <password>
+bin/desk machine attach --username <email> --password <password>
 bin/deskconnd
 ```
 
@@ -234,18 +234,24 @@ Don't run `desk self update` on these builds: it installs the official release, 
 desk login    [--username] [--password] [--password-stdin]
 desk logout
 desk whoami
-desk attach   [--name] [--username] [--password] [--password-stdin]
-desk detach   [--username] [--password] [--password-stdin]
 ```
 
-### Devices
+### Machines
 
 ```
-desk ls [--refresh] [--detailed]
-desk ping <device> [--count N]
+desk machine ls     [--refresh] [--detailed]
+desk machine info   <machine> [--mode p2p|routed]
+desk machine attach [--name] [--username] [--password] [--password-stdin]
+desk machine detach
+desk machine alias  <machine> <name>
+desk machine alias  <machine> --unset
+desk machine logs   <machine> [<source>] [-f] [-n N] [--since DURATION] [--mode p2p|routed]
+desk ping <machine> [--count N]
 ```
 
-Standalone devices (see [Standalone mode](#standalone-mode-no-cloud)):
+`desk ls` is a shortcut for `desk machine ls`.
+
+Standalone machines (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
 desk keygen                                        # key pair: public for deskconnd --public-key, private for --private-key
@@ -256,43 +262,41 @@ desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --authid 
 ### Shell & exec
 
 ```
-desk shell <device> [--mode p2p|routed] [-A]
-desk exec  <device> <command...> [--p2p]
+desk shell <machine> [--mode p2p|routed] [-A]
+desk exec  <machine> <command...> [--p2p]
 ```
 
 `-A`/`--agent-forward` forwards your local `ssh-agent` to the shell, like `ssh -A`, so tools run there (`git`,
-`ssh`, ...) can authenticate with your local keys without copying them to the device. As with `ssh -A`, only use it
-against devices you trust — anyone with access to the remote shell for the session's duration can ask the forwarded
+`ssh`, ...) can authenticate with your local keys without copying them to the machine. As with `ssh -A`, only use it
+against machines you trust — anyone with access to the remote shell for the session's duration can ask the forwarded
 agent to sign on your behalf.
 
 ### File operations
 
-All file commands accept `device:path` for remote paths and a bare `/path` for local paths.
+All file commands accept `machine:path` for remote paths and a bare `/path` for local paths.
 
 ```
-desk file ls  <device:path> [--mode p2p|routed]
+desk file ls  <machine:path> [--mode p2p|routed]
 desk file mv  <src> <dst>   [--mode p2p|routed]
 desk file cp  <src> <dst>   [-r] [--mode p2p|routed]
 desk file rm  <target>      [--mode p2p|routed]
-desk file cat <device:path> [--mode p2p|routed]
+desk file cat <machine:path> [--mode p2p|routed]
 ```
 
 ### Port forwarding
 
 ```
-# Forward local:remote — traffic on localhost:LOCAL goes to REMOTE on the device
-desk port forward <device> [-l LOCAL] [-r REMOTE] [--p2p]
+# Forward local:remote — traffic on localhost:LOCAL goes to REMOTE on the machine
+desk port forward <machine> [-l LOCAL] [-r REMOTE] [--p2p]
 
-# Reverse — the device listens on REMOTE and forwards to localhost:LOCAL
-desk port reverse <device> [-r REMOTE] [-l LOCAL] [--p2p]
+# Reverse — the machine listens on REMOTE and forwards to localhost:LOCAL
+desk port reverse <machine> [-r REMOTE] [-l LOCAL] [--p2p]
 ```
 
 ### Configuration
 
 ```
 desk config show
-desk config set <device> alias <value>
-desk config unset <device> alias
 desk config edit
 ```
 
@@ -328,15 +332,15 @@ make test
 
 All credentials and configuration are stored under `~/.deskconn/`:
 
-| File                    | Contents                                                               |
-|-------------------------|------------------------------------------------------------------------|
-| `credentials.json`      | Device attach credentials (realm, authid, keypair) used by `deskconnd` |
-| `id_ed25519`            | CLI private key, username, and key expiry                              |
-| `id_ed25519.pub`        | CLI public key, username, and account name                             |
-| `config.yml`            | Device list and aliases                                                |
-| `principals.json`       | Local CryptoSign principals (used by the local WAMP router)            |
-| `turn_credentials.json` | Cached TURN server credentials for WebRTC                              |
-| `deskconn.sock`         | Unix socket for local CLI–daemon communication                         |
+| File                    | Contents                                                                |
+|-------------------------|-------------------------------------------------------------------------|
+| `credentials.json`      | Machine attach credentials (realm, authid, keypair) used by `deskconnd` |
+| `id_ed25519`            | CLI private key, username, and key expiry                               |
+| `id_ed25519.pub`        | CLI public key, username, and account name                              |
+| `config.yml`            | Machine list and aliases                                                |
+| `principals.json`       | Local CryptoSign principals (used by the local WAMP router)             |
+| `turn_credentials.json` | Cached TURN server credentials for WebRTC                               |
+| `deskconn.sock`         | Unix socket for local CLI–daemon communication                          |
 
 ## License
 
