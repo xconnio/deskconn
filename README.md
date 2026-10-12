@@ -58,9 +58,9 @@ Sign up at [deskconn.com](https://deskconn.com) or via the mobile app.
 ### 2. Attach the desktop to the cloud
 
 ```bash
-desk attach --username <email> --password <password>
+desk machine attach --username <email> --password <password>
 # or read the password from stdin
-echo "$PASSWORD" | desk attach --username <email> --password-stdin
+echo "$PASSWORD" | desk machine attach --username <email> --password-stdin
 ```
 
 This creates a realm for the desktop under your account and writes credentials to `~/.deskconn/credentials.json`. The
@@ -219,7 +219,7 @@ foreground:
 
 ```bash
 systemctl --user stop deskconnd   # if the official release is installed; it shares ~/.deskconn
-bin/desk attach --username <email> --password <password>
+bin/desk machine attach --username <email> --password <password>
 bin/deskconnd
 ```
 
@@ -234,16 +234,22 @@ Don't run `desk self update` on these builds: it installs the official release, 
 desk login    [--username] [--password] [--password-stdin]
 desk logout
 desk whoami
-desk attach   [--name] [--username] [--password] [--password-stdin]
-desk detach   [--username] [--password] [--password-stdin]
 ```
 
-### Devices
+### Machines
 
 ```
-desk ls [--refresh] [--detailed]
+desk machine ls     [--refresh] [--detailed]
+desk machine info   <machine> [--mode p2p|routed]
+desk machine attach [--name] [--username] [--password] [--password-stdin]
+desk machine detach
+desk machine alias  <machine> <name>
+desk machine alias  <machine> --unset
+desk machine logs   <machine> [<source>] [-f] [-n N] [--since DURATION] [--mode p2p|routed]
 desk ping <device> [--count N]
 ```
+
+`desk ls` is a shortcut for `desk machine ls`.
 
 Standalone devices (see [Standalone mode](#standalone-mode-no-cloud)):
 
@@ -291,8 +297,6 @@ desk port reverse <device> [-r REMOTE] [-l LOCAL] [--p2p]
 
 ```
 desk config show
-desk config set <device> alias <value>
-desk config unset <device> alias
 desk config edit
 ```
 

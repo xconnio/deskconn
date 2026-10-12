@@ -87,13 +87,26 @@ func main() {
 	keygenCmd := app.Command("keygen", "Generate a key pair for standalone devices "+
 		"(public key for deskconnd --public-key, private key for --private-key)")
 
-	attachCmd := app.Command("attach", "Attach a device")
+	machineCmd := app.Command("machine", "Manage the machines on your account")
+
+	machineLsCmd := machineCmd.Command("ls", "List machines")
+	var lsRefresh, lsDetailed bool
+	machineLsCmd.Flag("refresh", "Refresh machine list from cloud").BoolVar(&lsRefresh)
+	machineLsCmd.Flag("detailed", "Show detailed output").BoolVar(&lsDetailed)
+
+	attachCmd := machineCmd.Command("attach", "Attach this machine to your account")
 	attachName := attachCmd.Flag("name", "Device name").Short('n').String()
 	attachUsername := attachCmd.Flag("username", "Username").Short('u').String()
 	attachPassword := attachCmd.Flag("password", "Password").Short('p').String()
 	attachPasswordStdin := attachCmd.Flag("password-stdin", "Read password from stdin").Bool()
 
-	detachCmd := app.Command("detach", "Detach device")
+	detachCmd := machineCmd.Command("detach", "Detach this machine from your account")
+
+	aliasCmd := machineCmd.Command("alias", "Set or unset a machine's alias")
+	aliasDevice := aliasCmd.Arg("machine", "ID, name or alias of machine").Required().
+		HintAction(deviceCompletions(cfgDirectory)).String()
+	aliasName := aliasCmd.Arg("name", "Alias to set").String()
+	aliasUnset := aliasCmd.Flag("unset", "Remove the machine's alias").Bool()
 
 	loginCmd := app.Command("login", "Login and store credentials")
 	loginUsername := loginCmd.Flag("username", "Username").Short('u').String()
@@ -188,9 +201,9 @@ func main() {
 		HintAction(deviceCompletions(cfgDirectory)).String()
 	disconnectAllFlag := disconnectCmd.Flag("all", "Disconnect all devices").Bool()
 
-	lsCmd := app.Command("ls", "List devices")
-	lsRefreshFlag := lsCmd.Flag("refresh", "Refresh device list from cloud").Bool()
-	lsDetailedFlag := lsCmd.Flag("detailed", "Show detailed output").Bool()
+	lsCmd := app.Command("ls", "List machines (shortcut for `machine ls`)")
+	lsCmd.Flag("refresh", "Refresh machine list from cloud").BoolVar(&lsRefresh)
+	lsCmd.Flag("detailed", "Show detailed output").BoolVar(&lsDetailed)
 
 	whoamiCMD := app.Command("whoami", "Show current user")
 
@@ -198,21 +211,14 @@ func main() {
 
 	configCmd := app.Command("config", "Manage desk configuration")
 	configShow := configCmd.Command("show", "Show config")
-	configSet := configCmd.Command("set", "Set device alias")
-	configSetDevice := configSet.Arg("device", "ID, name or alias of device").Required().String()
-	configSetKey := configSet.Arg("key", "Config key to set").Required().String()
-	configSetValue := configSet.Arg("value", "Config value").Required().String()
-	configUnset := configCmd.Command("unset", "Unset device alias")
-	configUnsetDevice := configUnset.Arg("device", "ID, name or alias of device").Required().String()
-	configUnsetKey := configUnset.Arg("key", "Config key").Required().String()
 	configEdit := configCmd.Command("edit", "Edit full config")
 
-	infoCmd := app.Command("info", "Show device resource usage")
-	infoDevice := deviceArg(infoCmd, "device", "ID, name or alias of device", cfgDirectory)
+	infoCmd := machineCmd.Command("info", "Show machine resource usage")
+	infoDevice := deviceArg(infoCmd, "machine", "ID, name or alias of machine", cfgDirectory)
 	infoModeFlag := modeFlag(infoCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	logsCmd := app.Command("logs", "Stream logs from a device")
-	logsDevice := deviceArg(logsCmd, "device", "ID, name or alias of device", cfgDirectory)
+	logsCmd := machineCmd.Command("logs", "Stream logs from a machine")
+	logsDevice := deviceArg(logsCmd, "machine", "ID, name or alias of machine", cfgDirectory)
 	logsSource := logsCmd.Arg("source",
 		"Service name (e.g. nginx) or file path (e.g. /var/log/syslog); omit for system journal").String()
 	logsFollow := logsCmd.Flag("follow", "Follow log output").Short('f').Bool()
@@ -811,7 +817,7 @@ func main() {
 			}
 		}
 
-	case lsCmd.FullCommand():
+	case lsCmd.FullCommand(), machineLsCmd.FullCommand():
 		session, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 		if err != nil {
 			log.Fatal(err)
@@ -833,7 +839,7 @@ func main() {
 			if errors.Is(err, os.ErrNotExist) {
 				fileExists = false
 			} else {
-				if !*lsRefreshFlag {
+				if !lsRefresh {
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
@@ -841,10 +847,10 @@ func main() {
 			}
 		}
 		tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED SINCE"}
-		if *lsDetailedFlag {
+		if lsDetailed {
 			tableHeader = append(tableHeader, "ORGANIZATION", "REALM")
 		}
-		if !*lsRefreshFlag && fileExists {
+		if !lsRefresh && fileExists {
 			table := tablewriter.NewWriter(os.Stdout)
 			table.Header(tableHeader)
 			for _, d := range devicesFromCfg {
@@ -852,7 +858,7 @@ func main() {
 					continue
 				}
 				since := connectedSince(connectedDevices, d.Realm)
-				if *lsDetailedFlag {
+				if lsDetailed {
 					_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
 				} else {
 					_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since})
@@ -892,7 +898,7 @@ func main() {
 			d = devices[i]
 			nameCount[d.Name]++
 			since := connectedSince(connectedDevices, d.Realm)
-			if *lsDetailedFlag {
+			if lsDetailed {
 				_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
 			} else {
 				_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since})
@@ -1089,19 +1095,12 @@ func main() {
 		}
 		fmt.Print(string(data))
 
-	case configSet.FullCommand():
-		if *configSetKey != "alias" {
-			fmt.Fprintln(os.Stderr, "unsupported key to set")
+	case aliasCmd.FullCommand():
+		if *aliasUnset == (*aliasName != "") {
+			fmt.Fprintln(os.Stderr, "specify either an alias name or --unset")
+			return
 		}
-		if err := updateDeviceAlias(cfgDirectory, *configSetDevice, *configSetValue); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-
-	case configUnset.FullCommand():
-		if *configUnsetKey != "alias" {
-			fmt.Fprintln(os.Stderr, "unsupported key to unset")
-		}
-		if err := updateDeviceAlias(cfgDirectory, *configUnsetDevice, ""); err != nil {
+		if err := updateDeviceAlias(cfgDirectory, *aliasDevice, *aliasName); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
