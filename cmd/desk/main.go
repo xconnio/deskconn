@@ -106,7 +106,9 @@ func main() {
 	aliasName := aliasCmd.Arg("name", "Alias to set").String()
 	aliasUnset := aliasCmd.Flag("unset", "Remove the machine's alias").Bool()
 
-	loginCmd := app.Command("login", "Login and store credentials")
+	accountCmd := app.Command("account", "Log in to and out of your account")
+
+	loginCmd := accountCmd.Command("login", "Login and store credentials")
 	loginUsername := loginCmd.Flag("username", "Username").Short('u').String()
 	loginPassword := loginCmd.Flag("password", "Password").Short('p').String()
 	loginPasswordStdin := loginCmd.Flag("password-stdin", "Read password from stdin").Bool()
@@ -199,9 +201,9 @@ func main() {
 	lsCmd.Flag("refresh", "Refresh machine list from cloud").BoolVar(&lsRefresh)
 	lsCmd.Flag("detailed", "Show detailed output").BoolVar(&lsDetailed)
 
-	whoamiCMD := app.Command("whoami", "Show current user")
+	whoamiCMD := accountCmd.Command("whoami", "Show current user")
 
-	logoutCmd := app.Command("logout", "Logout")
+	logoutCmd := accountCmd.Command("logout", "Logout")
 
 	configCmd := app.Command("config", "Manage desk configuration")
 	configShow := configCmd.Command("show", "Show config")
