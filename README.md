@@ -229,6 +229,10 @@ Don't run `desk self update` on these builds: it installs the official release, 
 
 ## CLI reference
 
+Run `desk` or `desk --help` for a compact overview of daily commands and management groups.
+Use `desk <command> --help` for command details (for example, `desk file --help`), or
+`desk --help-long` for all commands and flags, including standalone authentication options.
+
 ### Account
 
 ```

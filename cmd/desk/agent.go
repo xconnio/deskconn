@@ -37,7 +37,7 @@ type agentCommands struct {
 }
 
 func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agentCommands {
-	agentCmd := app.Command("agent", "Pull and resume Claude Code CLI sessions directly with another machine")
+	agentCmd := app.Command("agent", "List, pull, and resume Claude Code sessions")
 
 	lsCmd := agentCmd.Command("ls", "List Claude Code sessions for this project, on this machine or another one")
 	// Unlike machineArg, machine is optional here: omitting it lists this machine's own sessions.
