@@ -37,8 +37,8 @@ completes.
 
 ### Authentication
 
-All cloud connections use CryptoSign (Ed25519). `desk login` generates a keypair, registers the public key with the
-account service, and stores the private key in `~/.deskconn/id_ed25519`.
+All cloud connections use CryptoSign (Ed25519). `desk account login` generates a keypair, registers the public key with
+the account service, and stores the private key in `~/.deskconn/id_ed25519`.
 
 ## Installation
 
@@ -69,7 +69,7 @@ daemon picks these up automatically and connects to the cloud router.
 ### 3. Log in from the CLI
 
 ```bash
-desk login --username <username> --password <password>
+desk account login --username <username> --password <password>
 ```
 
 You'll then be prompted for the one-time password emailed to you. Once verified, desk generates an Ed25519
@@ -232,9 +232,9 @@ Don't run `desk self update` on these builds: it installs the official release, 
 ### Account
 
 ```
-desk login    [--username] [--password] [--password-stdin]
-desk logout
-desk whoami
+desk account login  [--username] [--password] [--password-stdin]
+desk account logout
+desk account whoami
 ```
 
 ### Machines
