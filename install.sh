@@ -120,7 +120,7 @@ esac
 # server apart without them being exported explicitly. Capture them from the
 # installer's own environment: on a real desktop session they'll be set here;
 # on a headless server they won't, and deskconnd will register server-only
-# APIs (no screenshot/display RPCs).
+# APIs (no wallpaper/display RPCs).
 DESKCONND_ENV_LINES="Environment=TERM=xterm-256color"
 if [ -n "${DISPLAY:-}" ]; then
     DESKCONND_ENV_LINES="$DESKCONND_ENV_LINES
@@ -148,7 +148,7 @@ rm -f "$EXEC_DIR/xlink"
 
 cat > "$SYSTEMD_USER_DIR/deskconnd.service" <<EOL
 [Unit]
-Description=deskconnd daemon (connectivity, shell, files, screen, printer, VPN control, ...)
+Description=deskconnd daemon (connectivity, shell, files, VPN control, ...)
 After=network.target
 
 [Service]

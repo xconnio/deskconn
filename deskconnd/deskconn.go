@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/common"
@@ -22,10 +23,6 @@ type Deskconn struct {
 	keys                 *keyManager
 	agentForwardSessions *agentForwardSessions
 	files                *FileBrowser
-	screen               *Screen
-	mpris                *MPRIS
-	audio                *Audio
-	printer              *Printer
 	wallpaper            *Wallpaper
 	processes            *ProcessMonitor
 	appRegistry          *AppRegistry
@@ -42,16 +39,14 @@ type Deskconn struct {
 	indexQuery *xconn.RegisterResponse
 }
 
-func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment bool, cfgDirectory string) *Deskconn {
+// NewDeskconn returns the machine's APIs. sessionBus, nil on a headless server, serves the
+// wallpaper.
+func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool) *Deskconn {
 	d := &Deskconn{
 		shellSession:         newInteractiveShellSession(),
 		keys:                 newKeyManager(),
 		agentForwardSessions: newAgentForwardSessions(),
 		files:                NewFileBrowser(),
-		screen:               screen,
-		mpris:                mpris,
-		audio:                audio,
-		printer:              NewPrinter(),
 		processes:            NewProcessMonitor(),
 		appRegistry:          NewAppRegistry(),
 		desktop:              desktopEnvironment,
@@ -59,8 +54,8 @@ func NewDeskconn(screen *Screen, mpris *MPRIS, audio *Audio, desktopEnvironment 
 		externalApps:         map[uint64][]externalApp{},
 	}
 	d.shellSession.agentForward = d.agentForwardSessions
-	if screen != nil {
-		d.wallpaper = NewWallpaper(screen.SessionBus())
+	if sessionBus != nil {
+		d.wallpaper = NewWallpaper(sessionBus)
 	}
 	return d
 }
@@ -79,8 +74,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		common.ProcedureFileSearch:       d.handleFileSearch,
 		common.ProcedureGitStatus:        d.handleGitStatus,
 		common.ProcedureGitOriginal:      d.handleGitOriginal,
-		common.ProcedurePrinterList:      d.printer.handleListPrinters,
-		common.ProcedurePrinterPrint:     d.printer.handlePrint(),
 		common.ProcedureMachineInfo:      d.handleMachineInfo,
 		common.ProcedureMachineIsDesktop: d.handleMachineIsDesktop,
 		common.ProcedureProcessList:      d.handleProcessList,
@@ -98,29 +91,13 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	handlers[common.ProcedureCapabilitiesList] = d.handleCapabilitiesList
 	handlers[common.ProcedureAppsRegister] = d.handleAppsRegister
 
-	// Display-related RPCs depend on a session D-Bus connection (screen,
-	// wallpaper, MPRIS) or PulseAudio (audio), neither of which is available
-	// on a headless server. Skip registering them there.
-	if d.desktop {
+	// The wallpaper depends on a session D-Bus connection, which isn't available on a
+	// headless server. Skip registering it there. Screen, MPRIS, audio, screenshot and
+	// printer procedures are served by remotecontrol-app.
+	if d.desktop && d.wallpaper != nil {
 		maps.Copy(handlers, map[string]xconn.InvocationHandler{
-			common.ProcedureScreenBrightnessGet:  d.brightnessGetHandler,
-			common.ProcedureScreenBrightnessSet:  d.brightnessSetHandler,
-			common.ProcedureScreenLock:           d.lockScreenLockHandler,
-			common.ProcedureScreenIsLocked:       d.lockScreenIsLockedHandler,
-			common.ProcedureMPRISPlayers:         d.handleListPlayers,
-			common.ProcedureMPRISPlayPause:       d.handlePlayPause,
-			common.ProcedureMPRISPlay:            d.handlePlay,
-			common.ProcedureMPRISPause:           d.handlePause,
-			common.ProcedureMPRISNext:            d.handleNext,
-			common.ProcedureMPRISPrevious:        d.handlePrevious,
-			common.ProcedureAudioMute:            d.handleAudioMute,
-			common.ProcedureAudioUnmute:          d.handleAudioUnmute,
-			common.ProcedureAudioToggleMute:      d.handleAudioToggleMute,
-			common.ProcedureAudioIsMuted:         d.handleAudioIsMuted,
-			common.ProcedureScreenshot:           d.handleScreenshot,
-			common.ProcedureScreenshotPermission: d.handleScreenShotPermission,
-			common.ProcedureWallpaperGet:         d.wallpaper.HandleGet,
-			common.ProcedureWallpaperChecksum:    d.wallpaper.HandleChecksum,
+			common.ProcedureWallpaperGet:      d.wallpaper.HandleGet,
+			common.ProcedureWallpaperChecksum: d.wallpaper.HandleChecksum,
 		})
 	}
 
@@ -139,186 +116,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	}
 
 	return nil
-}
-
-func (d *Deskconn) brightnessGetHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	brightness, err := d.screen.GetBrightness()
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-
-	return xconn.NewInvocationResult(brightness)
-}
-
-func (d *Deskconn) brightnessSetHandler(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	brightness, err := inv.ArgInt64(0)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err)
-	}
-
-	if err := d.screen.SetBrightness(int(brightness)); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err)
-	}
-
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) lockScreenLockHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	if err := d.screen.Lock(); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err)
-	}
-
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) lockScreenIsLockedHandler(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	isLocked, err := d.screen.IsLocked()
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err)
-	}
-
-	return xconn.NewInvocationResult(isLocked)
-}
-
-func (d *Deskconn) handleListPlayers(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	players, err := d.mpris.ListPlayers()
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	return xconn.NewInvocationResult(players)
-}
-
-func (d *Deskconn) handlePlayPause(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	player, err := inv.ArgString(0)
-
-	var playPauseErr error
-	if err != nil {
-		playPauseErr = d.mpris.PlayPause()
-	} else {
-		playPauseErr = d.mpris.PlayPausePlayer(player)
-	}
-
-	if playPauseErr != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, playPauseErr.Error())
-	}
-
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) handlePlay(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	player, err := inv.ArgString(0)
-
-	var playErr error
-	if err != nil {
-		playErr = d.mpris.Play()
-	} else {
-		playErr = d.mpris.PlayPlayer(player)
-	}
-
-	if playErr != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, playErr.Error())
-	}
-
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) handlePause(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	player, err := inv.ArgString(0)
-
-	var pauseErr error
-	if err != nil {
-		pauseErr = d.mpris.Pause()
-	} else {
-		pauseErr = d.mpris.PausePlayer(player)
-	}
-
-	if pauseErr != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, pauseErr.Error())
-	}
-
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) handleNext(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	player, err := inv.ArgString(0)
-
-	var nextErr error
-	if err != nil {
-		nextErr = d.mpris.Next()
-	} else {
-		nextErr = d.mpris.NextPlayer(player)
-	}
-
-	if nextErr != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, nextErr.Error())
-	}
-
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) handlePrevious(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	player, err := inv.ArgString(0)
-
-	var previousErr error
-	if err != nil {
-		previousErr = d.mpris.Previous()
-	} else {
-		previousErr = d.mpris.PreviousPlayer(player)
-	}
-
-	if previousErr != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, previousErr.Error())
-	}
-
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) handleAudioMute(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	if err := d.audio.Mute(); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) handleAudioUnmute(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	if err := d.audio.Unmute(); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	return xconn.NewInvocationResult()
-}
-
-func (d *Deskconn) handleAudioToggleMute(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	muted, err := d.audio.ToggleMute()
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	return xconn.NewInvocationResult(muted)
-}
-
-func (d *Deskconn) handleAudioIsMuted(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	muted, err := d.audio.IsMuted()
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	return xconn.NewInvocationResult(muted)
-}
-
-func (d *Deskconn) handleScreenshot(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	data, err := d.screen.Screenshot()
-	if err != nil {
-		log.WithError(err).Error("screenshot failed")
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	return xconn.NewInvocationResult(data)
-}
-
-func (d *Deskconn) handleScreenShotPermission(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	_, err := CaptureScreenshot(d.screen.sessionBus)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-
-	return xconn.NewInvocationResult()
 }
 
 func (d *Deskconn) handleSessionLeave(event *xconn.Event) {

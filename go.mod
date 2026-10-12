@@ -8,9 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/godbus/dbus/v5 v5.2.0
-	github.com/jfreymuth/pulse v0.1.1
 	github.com/olekukonko/tablewriter v1.1.3
-	github.com/phin1x/go-ipp v1.7.0
 	github.com/pion/webrtc/v4 v4.1.6
 	github.com/sergi/go-diff v1.4.0
 	github.com/shirou/gopsutil v3.21.11+incompatible
