@@ -68,7 +68,8 @@ func main() {
 	}
 
 	versionString := fmt.Sprintf("desk %s", version)
-	app := kingpin.New("desk", "Deskconn control CLI")
+	app := kingpin.New("desk", "Control your machines remotely.")
+	configureHelp(app)
 	standaloneURL := app.Flag("url", "Connect directly to a standalone deskconnd at this URL "+
 		"(quic://host:port, or https://host:port for WebTransport) instead of a machine on your account").
 		Envar("DESKCONN_URL").String()
@@ -82,23 +83,22 @@ func main() {
 	standalonePassword := app.Flag("secret", "Password to authenticate with --url instead of "+
 		"--private-key (prompted for if neither is given)").Envar("DESKCONN_SECRET").String()
 
-	keygenCmd := app.Command("keygen", "Generate a key pair for standalone machines "+
-		"(public key for deskconnd --public-key, private key for --private-key)")
+	keygenCmd := app.Command("keygen", "Generate a key pair for standalone machines")
 
-	machineCmd := app.Command("machine", "Manage the machines on your account")
+	machineCmd := app.Command("machine", "Manage machines and connections")
 
 	machineLsCmd := machineCmd.Command("ls", "List machines")
 	var lsRefresh, lsDetailed bool
 	machineLsCmd.Flag("refresh", "Refresh machine list from cloud").BoolVar(&lsRefresh)
 	machineLsCmd.Flag("detailed", "Show detailed output").BoolVar(&lsDetailed)
 
-	attachCmd := machineCmd.Command("attach", "Attach this machine to your account")
+	attachCmd := machineCmd.Command("attach", "Register this machine with your account")
 	attachName := attachCmd.Flag("name", "Machine name").Short('n').String()
 	attachUsername := attachCmd.Flag("username", "Username").Short('u').String()
 	attachPassword := attachCmd.Flag("password", "Password").Short('p').String()
 	attachPasswordStdin := attachCmd.Flag("password-stdin", "Read password from stdin").Bool()
 
-	detachCmd := machineCmd.Command("detach", "Detach this machine from your account (asks to confirm first)")
+	detachCmd := machineCmd.Command("detach", "Remove this machine from your account (asks for confirmation)")
 
 	aliasCmd := machineCmd.Command("alias", "Set or unset a machine's alias")
 	aliasMachine := aliasCmd.Arg("machine", "ID, name or alias of machine").Required().
@@ -106,14 +106,14 @@ func main() {
 	aliasName := aliasCmd.Arg("name", "Alias to set").String()
 	aliasUnset := aliasCmd.Flag("unset", "Remove the machine's alias").Bool()
 
-	accountCmd := app.Command("account", "Log in to and out of your account")
+	accountCmd := app.Command("account", "Manage CLI authentication")
 
-	loginCmd := accountCmd.Command("login", "Login and store credentials")
+	loginCmd := accountCmd.Command("login", "Sign in to access your machines")
 	loginUsername := loginCmd.Flag("username", "Username").Short('u').String()
 	loginPassword := loginCmd.Flag("password", "Password").Short('p').String()
 	loginPasswordStdin := loginCmd.Flag("password-stdin", "Read password from stdin").Bool()
 
-	fileCmd := app.Command("file", "File operations")
+	fileCmd := app.Command("file", "Browse, copy, and edit files")
 
 	lsFileCmd := fileCmd.Command("ls", "List files on a machine")
 	lsFileTarget := lsFileCmd.Arg("target", "Remote path as machine:path (e.g. m1:/tmp)").Required().
@@ -154,7 +154,7 @@ func main() {
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	editModeFlag := modeFlag(editCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	shellCmd := app.Command("shell", "Start an interactive shell, or run a command if one is given")
+	shellCmd := app.Command("shell", "Open a shell or run a command")
 	shellMachineName := machineArg(shellCmd, "ID, name or alias of machine", cfgDirectory)
 	shellCommand := shellCmd.Arg("command", "Command to run instead of an interactive shell").Strings()
 	shellModeFlag := modeFlag(shellCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
@@ -162,7 +162,7 @@ func main() {
 		"Forward the local SSH agent to the remote shell (like ssh -A). Only use with hosts you trust.",
 	).Short('A').Bool()
 
-	portCmd := app.Command("port", "Port forwarding operations")
+	portCmd := app.Command("port", "Forward ports")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote machine")
 	portForwardMachine := machineArg(portForwardCmd, "ID, name or alias of machine", cfgDirectory)
 	portForwardPorts := portForwardCmd.Arg("ports", "Port mapping as localport:remoteport").String()
@@ -179,7 +179,7 @@ func main() {
 	portReverseModeFlag := modeFlag(portReverseCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	vpnCmd := app.Command("vpn", "Route internet traffic through a remote machine, or serve as one")
+	vpnCmd := app.Command("vpn", "Route traffic through a machine or serve as an exit node")
 	vpnConnectCmd := vpnCmd.Command("connect", "Connect to a machine and tunnel all traffic through it")
 	vpnConnectMachine := machineArg(vpnConnectCmd, "ID, name or alias of machine", cfgDirectory)
 	vpnServeCmd := vpnCmd.Command("serve", "Let other machines route their traffic through this machine")
@@ -197,13 +197,13 @@ func main() {
 		HintAction(machineCompletions(cfgDirectory)).String()
 	disconnectAllFlag := disconnectCmd.Flag("all", "Disconnect all machines").Bool()
 
-	lsCmd := app.Command("ls", "List machines (shortcut for `machine ls`)")
+	lsCmd := app.Command("ls", "List your machines (shortcut for 'machine ls')")
 	lsCmd.Flag("refresh", "Refresh machine list from cloud").BoolVar(&lsRefresh)
 	lsCmd.Flag("detailed", "Show detailed output").BoolVar(&lsDetailed)
 
-	whoamiCMD := accountCmd.Command("whoami", "Show current user")
+	whoamiCMD := accountCmd.Command("whoami", "Show your account")
 
-	logoutCmd := accountCmd.Command("logout", "Logout")
+	logoutCmd := accountCmd.Command("logout", "Sign out of the CLI")
 
 	infoCmd := machineCmd.Command("info", "Show machine resource usage")
 	infoMachine := machineArg(infoCmd, "ID, name or alias of machine", cfgDirectory)
@@ -219,7 +219,7 @@ func main() {
 	logsSince := logsCmd.Flag("since", "Show entries since duration ago (e.g. 1h, 30m)").String()
 	logsModeFlag := modeFlag(logsCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	selfCmd := app.Command("self", "Manage the installed desk CLI.")
+	selfCmd := app.Command("self", "Manage the installed CLI")
 	selfVersionCmd := selfCmd.Command("version", "Show the installed desk version")
 	selfUpdateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
 	selfRemoveCmd := selfCmd.Command("remove", "Remove desk from this machine")
@@ -227,13 +227,24 @@ func main() {
 
 	agentCmds := registerAgentCommands(app, cfgDirectory)
 
-	if len(os.Args) == 2 && os.Args[1] == "self" {
-		app.Usage([]string{"self"})
+	if len(os.Args) == 1 {
+		app.Usage(nil)
 		return
+	}
+	if len(os.Args) == 2 {
+		for _, command := range app.Model().Commands {
+			if command.Name == os.Args[1] && len(command.Commands) > 0 {
+				app.Usage(os.Args[1:])
+				return
+			}
+		}
 	}
 
 	parsedCmd, parseErr := app.Parse(os.Args[1:])
 	if parseErr != nil {
+		if errors.Is(parseErr, kingpin.ErrCommandNotSpecified) {
+			return
+		}
 		fmt.Fprintf(os.Stderr, "error: %s\n\n", parseErr)
 		ctx, _ := app.ParseContext(os.Args[1:])
 		if ctx != nil {
