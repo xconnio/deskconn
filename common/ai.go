@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// AISessionSummary describes one session file found on a device.
+// AISessionSummary describes one session file found on a machine.
 type AISessionSummary struct {
 	Tool      string    `json:"tool"`
 	SessionID string    `json:"session_id"`

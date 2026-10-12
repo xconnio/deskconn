@@ -1,7 +1,7 @@
 package common
 
 // LogControlMsg is the client's one-time request, sent right after key
-// exchange. There's no ack: the device just starts streaming (or streams a
+// exchange. There's no ack: the machine just starts streaming (or streams a
 // single "error: ...\n" chunk, then closes) immediately.
 type LogControlMsg struct {
 	Source string `json:"source,omitempty"`

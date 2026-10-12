@@ -69,7 +69,7 @@ func TestBrightnessGetSet(t *testing.T) {
 	require.LessOrEqual(t, updated, 100)
 }
 
-func TestDeviceInfoIncludesBattery(t *testing.T) {
+func TestMachineInfoIncludesBattery(t *testing.T) {
 	tmp := t.TempDir()
 	dev := filepath.Join(tmp, "BAT0")
 	require.NoError(t, os.Mkdir(dev, 0755))
@@ -86,26 +86,26 @@ func TestDeviceInfoIncludesBattery(t *testing.T) {
 	d := deskconnd.NewDeskconn(nil, nil, nil, false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
-	callResp := caller.Call(common.ProcedureDeviceInfo).Do()
+	callResp := caller.Call(common.ProcedureMachineInfo).Do()
 	require.NoError(t, callResp.Err)
 
 	rawData, err := callResp.ArgBytes(0)
 	require.NoError(t, err)
 
-	var deviceInfo common.DeviceInfo
-	require.NoError(t, json.Unmarshal(rawData, &deviceInfo))
-	require.NotNil(t, deviceInfo.Battery)
-	require.Equal(t, "Full", deviceInfo.Battery.Status)
-	require.Equal(t, 100, deviceInfo.Battery.Percentage)
+	var machineInfo common.MachineInfo
+	require.NoError(t, json.Unmarshal(rawData, &machineInfo))
+	require.NotNil(t, machineInfo.Battery)
+	require.Equal(t, "Full", machineInfo.Battery.Status)
+	require.Equal(t, 100, machineInfo.Battery.Percentage)
 }
 
-func TestDeviceIsDesktop(t *testing.T) {
+func TestMachineIsDesktop(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	d := deskconnd.NewDeskconn(nil, nil, nil, true, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
-	callResp := caller.Call(common.ProcedureDeviceIsDesktop).Do()
+	callResp := caller.Call(common.ProcedureMachineIsDesktop).Do()
 	require.NoError(t, callResp.Err)
 
 	isDesktop, err := callResp.ArgBool(0)
@@ -113,13 +113,13 @@ func TestDeviceIsDesktop(t *testing.T) {
 	require.True(t, isDesktop)
 }
 
-func TestDeviceIsDesktopFalseOnServer(t *testing.T) {
+func TestMachineIsDesktopFalseOnServer(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
 	d := deskconnd.NewDeskconn(nil, nil, nil, false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
-	callResp := caller.Call(common.ProcedureDeviceIsDesktop).Do()
+	callResp := caller.Call(common.ProcedureMachineIsDesktop).Do()
 	require.NoError(t, callResp.Err)
 
 	isDesktop, err := callResp.ArgBool(0)

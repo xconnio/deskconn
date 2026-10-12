@@ -103,8 +103,8 @@ func main() {
 	detachCmd := machineCmd.Command("detach", "Detach this machine from your account")
 
 	aliasCmd := machineCmd.Command("alias", "Set or unset a machine's alias")
-	aliasDevice := aliasCmd.Arg("machine", "ID, name or alias of machine").Required().
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	aliasMachine := aliasCmd.Arg("machine", "ID, name or alias of machine").Required().
+		HintAction(machineCompletions(cfgDirectory)).String()
 	aliasName := aliasCmd.Arg("name", "Alias to set").String()
 	aliasUnset := aliasCmd.Flag("unset", "Remove the machine's alias").Bool()
 
@@ -155,7 +155,7 @@ func main() {
 	editModeFlag := modeFlag(editCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	shellCmd := app.Command("shell", "Start an interactive shell, or run a command if one is given")
-	shellDeviceName := deviceArg(shellCmd, "ID, name or alias of machine", cfgDirectory)
+	shellMachineName := machineArg(shellCmd, "ID, name or alias of machine", cfgDirectory)
 	shellCommand := shellCmd.Arg("command", "Command to run instead of an interactive shell").Strings()
 	shellModeFlag := modeFlag(shellCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 	shellForwardAgent := shellCmd.Flag("agent-forward",
@@ -164,7 +164,7 @@ func main() {
 
 	portCmd := app.Command("port", "Port forwarding operations")
 	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote machine")
-	portForwardDevice := deviceArg(portForwardCmd, "ID, name or alias of machine", cfgDirectory)
+	portForwardMachine := machineArg(portForwardCmd, "ID, name or alias of machine", cfgDirectory)
 	portForwardPorts := portForwardCmd.Arg("ports", "Port mapping as localport:remoteport").String()
 	portForwardLocalFlag := portForwardCmd.Flag("local", "Local port to listen on").Short('l').String()
 	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote machine to connect to").Short('r').String()
@@ -172,7 +172,7 @@ func main() {
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	portReverseCmd := portCmd.Command("reverse", "Reverse-forward a remote port to a local port")
-	portReverseDevice := deviceArg(portReverseCmd, "ID, name or alias of machine", cfgDirectory)
+	portReverseMachine := machineArg(portReverseCmd, "ID, name or alias of machine", cfgDirectory)
 	portReversePorts := portReverseCmd.Arg("ports", "Port mapping as remoteport:localport").String()
 	portReverseRemoteFlag := portReverseCmd.Flag("remote", "Port on the remote machine to listen on").Short('r').String()
 	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
@@ -181,20 +181,20 @@ func main() {
 
 	vpnCmd := app.Command("vpn", "Route internet traffic through a remote machine, or serve as one")
 	vpnConnectCmd := vpnCmd.Command("connect", "Connect to a machine and tunnel all traffic through it")
-	vpnConnectDevice := deviceArg(vpnConnectCmd, "ID, name or alias of machine", cfgDirectory)
+	vpnConnectMachine := machineArg(vpnConnectCmd, "ID, name or alias of machine", cfgDirectory)
 	vpnStartCmd := vpnCmd.Command("start", "Let other machines route their traffic through this machine")
 	vpnStopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
 
 	pingCmd := app.Command("ping", "Ping a machine and measure round-trip time")
-	pingDevice := deviceArg(pingCmd, "ID, name or alias of machine", cfgDirectory)
+	pingMachine := machineArg(pingCmd, "ID, name or alias of machine", cfgDirectory)
 	pingCount := pingCmd.Flag("count", "Number of pings to send (0 = infinite)").Short('c').Default("0").Int()
 
 	connectCmd := app.Command("connect", "Establish a persistent connection to a machine")
-	connectDevice := deviceArg(connectCmd, "ID, name or alias of machine", cfgDirectory)
+	connectMachine := machineArg(connectCmd, "ID, name or alias of machine", cfgDirectory)
 
 	disconnectCmd := app.Command("disconnect", "Disconnect a persistent connection")
-	disconnectDevice := disconnectCmd.Arg("machine", "ID, name or alias of machine").
-		HintAction(deviceCompletions(cfgDirectory)).String()
+	disconnectMachine := disconnectCmd.Arg("machine", "ID, name or alias of machine").
+		HintAction(machineCompletions(cfgDirectory)).String()
 	disconnectAllFlag := disconnectCmd.Flag("all", "Disconnect all machines").Bool()
 
 	lsCmd := app.Command("ls", "List machines (shortcut for `machine ls`)")
@@ -210,11 +210,11 @@ func main() {
 	configEdit := configCmd.Command("edit", "Edit full config")
 
 	infoCmd := machineCmd.Command("info", "Show machine resource usage")
-	infoDevice := deviceArg(infoCmd, "ID, name or alias of machine", cfgDirectory)
+	infoMachine := machineArg(infoCmd, "ID, name or alias of machine", cfgDirectory)
 	infoModeFlag := modeFlag(infoCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	logsCmd := machineCmd.Command("logs", "Stream logs from a machine")
-	logsDevice := deviceArg(logsCmd, "ID, name or alias of machine", cfgDirectory)
+	logsMachine := machineArg(logsCmd, "ID, name or alias of machine", cfgDirectory)
 	logsSource := logsCmd.Arg("source",
 		"Service name (e.g. nginx) or file path (e.g. /var/log/syslog); omit for system journal").String()
 	logsFollow := logsCmd.Flag("follow", "Follow log output").Short('f').Bool()
@@ -328,8 +328,8 @@ func main() {
 		}
 
 	case lsFileCmd.FullCommand():
-		device, path := parseDevicePath(*lsFileTarget)
-		realm, err := deviceRealm(device, cfgDirectory)
+		machine, path := parseMachinePath(*lsFileTarget)
+		realm, err := machineRealm(machine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -343,13 +343,13 @@ func main() {
 		}
 
 	case mvCmd.FullCommand():
-		srcDevice, srcPath := parseDevicePath(*mvSrc)
-		dstDevice, dstPath := parseDevicePath(*mvDst)
-		if srcDevice != dstDevice {
+		srcMachine, srcPath := parseMachinePath(*mvSrc)
+		dstMachine, dstPath := parseMachinePath(*mvDst)
+		if srcMachine != dstMachine {
 			fmt.Fprintln(os.Stderr, "cross-machine move not supported")
 			return
 		}
-		realm, err := deviceRealm(srcDevice, cfgDirectory)
+		realm, err := machineRealm(srcMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -365,13 +365,13 @@ func main() {
 		dstRemote := isRemotePath(*cpDst)
 		switch {
 		case srcRemote && dstRemote:
-			srcDevice, srcPath := parseDevicePath(*cpSrc)
-			dstDevice, dstPath := parseDevicePath(*cpDst)
-			if srcDevice != dstDevice {
+			srcMachine, srcPath := parseMachinePath(*cpSrc)
+			dstMachine, dstPath := parseMachinePath(*cpDst)
+			if srcMachine != dstMachine {
 				fmt.Fprintln(os.Stderr, "cross-machine copy not supported")
 				return
 			}
-			realm, err := deviceRealm(srcDevice, cfgDirectory)
+			realm, err := machineRealm(srcMachine, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -382,15 +382,15 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		case !srcRemote && dstRemote:
-			dstDevice, dstPath := parseDevicePath(*cpDst)
-			realm, err := deviceRealm(dstDevice, cfgDirectory)
+			dstMachine, dstPath := parseMachinePath(*cpDst)
+			realm, err := machineRealm(dstMachine, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 			switch *cpModeFlag {
 			case ModeQUIC:
-				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -401,7 +401,7 @@ func main() {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			case ModeP2P:
-				p2pSess, err := deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
+				p2pSess, err := deskconn.ConnectMachineRealmP2PSession(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -422,7 +422,7 @@ func main() {
 					}
 					return
 				}
-				p2pSess, p2pErr := deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
+				p2pSess, p2pErr := deskconn.ConnectMachineRealmP2PSession(context.Background(), realm, cfgDirectory)
 				if p2pErr == nil {
 					defer func() { _ = p2pSess.Close() }()
 					if err := deskconn.UploadFilesP2P(deskconn.P2PChannels(p2pSess), *cpSrc, dstPath,
@@ -432,7 +432,7 @@ func main() {
 					return
 				}
 				fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
-				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -444,15 +444,15 @@ func main() {
 				}
 			}
 		case srcRemote && !dstRemote:
-			srcDevice, srcPath := parseDevicePath(*cpSrc)
-			realm, err := deviceRealm(srcDevice, cfgDirectory)
+			srcMachine, srcPath := parseMachinePath(*cpSrc)
+			realm, err := machineRealm(srcMachine, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 			switch *cpModeFlag {
 			case ModeQUIC:
-				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -463,7 +463,7 @@ func main() {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			case ModeP2P:
-				p2pSess, err := deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
+				p2pSess, err := deskconn.ConnectMachineRealmP2PSession(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -484,7 +484,7 @@ func main() {
 					}
 					return
 				}
-				p2pSess, p2pErr := deskconn.ConnectDeviceRealmP2PSession(context.Background(), realm, cfgDirectory)
+				p2pSess, p2pErr := deskconn.ConnectMachineRealmP2PSession(context.Background(), realm, cfgDirectory)
 				if p2pErr == nil {
 					defer func() { _ = p2pSess.Close() }()
 					if err := deskconn.DownloadFilesP2P(deskconn.P2PChannels(p2pSess), srcPath, *cpDst, *cpRecursive,
@@ -494,7 +494,7 @@ func main() {
 					return
 				}
 				fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
-				quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+				quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					return
@@ -510,8 +510,8 @@ func main() {
 		}
 
 	case rmCmd.FullCommand():
-		device, path := parseDevicePath(*rmTarget)
-		realm, err := deviceRealm(device, cfgDirectory)
+		machine, path := parseMachinePath(*rmTarget)
+		realm, err := machineRealm(machine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -523,19 +523,19 @@ func main() {
 		}
 
 	case catCmd.FullCommand():
-		device, path := parseDevicePath(*catTarget)
+		machine, path := parseMachinePath(*catTarget)
 		if path == "" {
 			fmt.Fprintln(os.Stderr, "path is required")
 			return
 		}
-		realm, err := deviceRealm(device, cfgDirectory)
+		realm, err := machineRealm(machine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 		switch *catModeFlag {
 		case ModeQUIC:
-			quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -545,7 +545,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		case ModeP2P:
-			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
+			p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -566,7 +566,7 @@ func main() {
 		}
 
 	case editCmd.FullCommand():
-		device, path := parseDevicePath(*editTarget)
+		machine, path := parseMachinePath(*editTarget)
 		if path == "" {
 			fmt.Fprintln(os.Stderr, "path is required")
 			return
@@ -575,7 +575,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s: not a text file, editing is not supported\n", path)
 			return
 		}
-		realm, err := deviceRealm(device, cfgDirectory)
+		realm, err := machineRealm(machine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -584,7 +584,7 @@ func main() {
 		var original []byte
 		switch *editModeFlag {
 		case ModeQUIC:
-			quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -596,7 +596,7 @@ func main() {
 				return
 			}
 		case ModeP2P:
-			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
+			p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
@@ -673,7 +673,7 @@ func main() {
 		fmt.Println("file updated")
 
 	case shellCmd.FullCommand():
-		realm, err := deviceRealm(*shellDeviceName, cfgDirectory)
+		realm, err := machineRealm(*shellMachineName, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -722,13 +722,13 @@ func main() {
 			return
 		}
 
-		realm, err := deviceRealm(*portForwardDevice, cfgDirectory)
+		realm, err := machineRealm(*portForwardMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 
-		fmt.Printf("Forwarding 127.0.0.1:%s -> %s:%s\n", localPort, *portForwardDevice, remotePort)
+		fmt.Printf("Forwarding 127.0.0.1:%s -> %s:%s\n", localPort, *portForwardMachine, remotePort)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -777,13 +777,13 @@ func main() {
 			return
 		}
 
-		realm, err := deviceRealm(*portReverseDevice, cfgDirectory)
+		realm, err := machineRealm(*portReverseMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 
-		fmt.Printf("Reverse forwarding %s:%s -> 127.0.0.1:%s\n", *portReverseDevice, remotePort, localPort)
+		fmt.Printf("Reverse forwarding %s:%s -> 127.0.0.1:%s\n", *portReverseMachine, remotePort, localPort)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -813,18 +813,18 @@ func main() {
 			log.Fatal(err)
 		}
 
-		devicesCallResp := session.Call(common.ProcedureConnectedDevices).Do()
-		if devicesCallResp.Err != nil {
-			fmt.Fprintln(os.Stderr, devicesCallResp.Err)
+		machinesCallResp := session.Call(common.ProcedureConnectedMachines).Do()
+		if machinesCallResp.Err != nil {
+			fmt.Fprintln(os.Stderr, machinesCallResp.Err)
 			return
 		}
-		connectedDevices, ok := devicesCallResp.Args()[0].(map[string]any)
+		connectedMachines, ok := machinesCallResp.Args()[0].(map[string]any)
 		if !ok {
 			fmt.Fprintln(os.Stderr, "expected a map of strings")
 			return
 		}
 		fileExists := true
-		devicesFromCfg, err := common.DevicesFromCfg(cfgDirectory)
+		machinesFromCfg, err := common.MachinesFromCfg(cfgDirectory)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				fileExists = false
@@ -843,11 +843,11 @@ func main() {
 		if !lsRefresh && fileExists {
 			table := tablewriter.NewWriter(os.Stdout)
 			table.Header(tableHeader)
-			for _, d := range devicesFromCfg {
+			for _, d := range machinesFromCfg {
 				if d.Name == "" && d.Authid == "" && d.Alias == "" {
 					continue
 				}
-				since := connectedSince(connectedDevices, d.Realm)
+				since := connectedSince(connectedMachines, d.Realm)
 				if lsDetailed {
 					_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
 				} else {
@@ -861,7 +861,7 @@ func main() {
 			return
 		}
 
-		devices, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
+		machines, err := deskconn.FetchMachinesFromCloud(cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -870,24 +870,24 @@ func main() {
 		table := tablewriter.NewWriter(os.Stdout)
 		table.Header(tableHeader)
 
-		cfgMap := make(map[string]common.Device, len(devicesFromCfg))
-		for _, d := range devicesFromCfg {
+		cfgMap := make(map[string]common.Machine, len(machinesFromCfg))
+		for _, d := range machinesFromCfg {
 			cfgMap[d.Authid] = d
 		}
 
 		nameCount := make(map[string]int)
-		for i, d := range devices {
+		for i, d := range machines {
 			count := nameCount[d.Name]
 			if count > 0 {
 				newName := fmt.Sprintf("%s-%s", d.Name, d.Authid[:6])
-				devices[i].Name = newName
+				machines[i].Name = newName
 			}
-			if localDevice, ok := cfgMap[d.Authid]; ok {
-				devices[i].Alias = localDevice.Alias
+			if localMachine, ok := cfgMap[d.Authid]; ok {
+				machines[i].Alias = localMachine.Alias
 			}
-			d = devices[i]
+			d = machines[i]
 			nameCount[d.Name]++
-			since := connectedSince(connectedDevices, d.Realm)
+			since := connectedSince(connectedMachines, d.Realm)
 			if lsDetailed {
 				_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
 			} else {
@@ -900,7 +900,7 @@ func main() {
 			return
 		}
 
-		if err := deskconn.CacheDevices(cfgDirectory, devices); err != nil {
+		if err := deskconn.CacheMachines(cfgDirectory, machines); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
@@ -941,14 +941,14 @@ func main() {
 		}
 
 	case vpnConnectCmd.FullCommand():
-		vpnRealm, err := deviceRealm(*vpnConnectDevice, cfgDirectory)
+		vpnRealm, err := machineRealm(*vpnConnectMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 
 		vpnCtx, vpnCancel := context.WithCancel(context.Background())
-		runVPNConnect(vpnCtx, cfgDirectory, vpnRealm, *vpnConnectDevice)
+		runVPNConnect(vpnCtx, cfgDirectory, vpnRealm, *vpnConnectMachine)
 		vpnCancel()
 
 	case vpnStartCmd.FullCommand():
@@ -960,7 +960,7 @@ func main() {
 		runVPNStop(context.Background(), cfgDirectory)
 
 	case pingCmd.FullCommand():
-		realm, err := deviceRealm(*pingDevice, cfgDirectory)
+		realm, err := machineRealm(*pingMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -971,7 +971,7 @@ func main() {
 			return
 		}
 
-		fmt.Printf("PING %s\n", *pingDevice)
+		fmt.Printf("PING %s\n", *pingMachine)
 
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -1018,14 +1018,14 @@ func main() {
 		if sent > 0 {
 			loss = (sent - received) * 100 / sent
 		}
-		fmt.Printf("\n--- %s ping statistics ---\n", *pingDevice)
+		fmt.Printf("\n--- %s ping statistics ---\n", *pingMachine)
 		fmt.Printf("%d packets transmitted, %d received, %d%% packet loss\n", sent, received, loss)
 		if received > 0 {
 			fmt.Printf("rtt min/avg/max = %d/%d/%d ms\n", minMs, totalMs/int64(received), maxMs)
 		}
 
 	case connectCmd.FullCommand():
-		realm, err := deviceRealm(*connectDevice, cfgDirectory)
+		realm, err := machineRealm(*connectMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -1040,7 +1040,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 			return
 		}
-		fmt.Printf("connected to %s\n", *connectDevice)
+		fmt.Printf("connected to %s\n", *connectMachine)
 
 	case disconnectCmd.FullCommand():
 		session, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
@@ -1057,11 +1057,11 @@ func main() {
 			fmt.Println("disconnected all machines")
 			return
 		}
-		if *disconnectDevice == "" {
+		if *disconnectMachine == "" {
 			fmt.Fprintln(os.Stderr, "specify a machine or use --all")
 			return
 		}
-		realm, err := deviceRealm(*disconnectDevice, cfgDirectory)
+		realm, err := machineRealm(*disconnectMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -1071,7 +1071,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, callResp.Err)
 			return
 		}
-		fmt.Printf("disconnected %s\n", *disconnectDevice)
+		fmt.Printf("disconnected %s\n", *disconnectMachine)
 
 	case configShow.FullCommand():
 		data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
@@ -1090,7 +1090,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "specify either an alias name or --unset")
 			return
 		}
-		if err := updateDeviceAlias(cfgDirectory, *aliasDevice, *aliasName); err != nil {
+		if err := updateMachineAlias(cfgDirectory, *aliasMachine, *aliasName); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
@@ -1116,7 +1116,7 @@ func main() {
 		_ = cmd.Run()
 
 	case infoCmd.FullCommand():
-		realm, err := deviceRealm(*infoDevice, cfgDirectory)
+		realm, err := machineRealm(*infoMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -1125,28 +1125,28 @@ func main() {
 		var callResp xconn.CallResponse
 		switch *infoModeFlag {
 		case ModeQUIC:
-			quicSess, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+			quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 			defer quicSess.Connection().Close()
-			callResp = quicSess.Call(common.ProcedureDeviceInfo).Do()
+			callResp = quicSess.Call(common.ProcedureMachineInfo).Do()
 		case ModeP2P:
-			p2pSess, err := deskconn.ConnectDeviceRealmP2P(context.Background(), realm, cfgDirectory)
+			p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 			defer func() { _ = p2pSess.Leave() }()
-			callResp = p2pSess.Call(common.ProcedureDeviceInfo).Do()
+			callResp = p2pSess.Call(common.ProcedureMachineInfo).Do()
 		default:
 			localSession, err := xconn.ConnectAnonymous(context.Background(), uri, common.LocalRealm)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
-			callResp = localSession.Call(common.ProcedureProxyDeviceInfo).Args(realm).Do()
+			callResp = localSession.Call(common.ProcedureProxyMachineInfo).Args(realm).Do()
 		}
 
 		if callResp.Err != nil {
@@ -1158,7 +1158,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		var info common.DeviceInfo
+		var info common.MachineInfo
 		if err := json.Unmarshal(rawData, &info); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -1191,7 +1191,7 @@ func main() {
 		}
 
 	case logsCmd.FullCommand():
-		realm, err := deviceRealm(*logsDevice, cfgDirectory)
+		realm, err := machineRealm(*logsMachine, cfgDirectory)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -1419,7 +1419,7 @@ func confirmPrompt(prompt string, defaultYes bool) (bool, error) {
 	}
 }
 
-// detachIfAttached detaches this device from the cloud account if it is currently
+// detachIfAttached detaches this machine from the cloud account if it is currently
 // attached. It is a no-op otherwise.
 func detachIfAttached() error {
 	credFile, err := common.CredentialsFilePath()
@@ -1694,14 +1694,14 @@ func installCompletions(deskBin string) error {
 }
 
 // fixBashCompletionWordBreaks clears ':' from COMP_WORDBREAKS so bash
-// completes "device:path" as one word instead of splitting at the colon.
+// completes "machine:path" as one word instead of splitting at the colon.
 func fixBashCompletionWordBreaks(script string) string {
 	const marker = "_desk_bash_autocomplete() {\n"
 	return strings.Replace(script, marker, marker+"    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}\n", 1)
 }
 
 // fixBashCompletionSpacing makes path completions behave like "cd": the menu shows only the last
-// path segment (-o filenames), and no trailing space is added after directories/"device:" prefixes.
+// path segment (-o filenames), and no trailing space is added after directories/"machine:" prefixes.
 // Leaf files are left to bash's default space-append.
 func fixBashCompletionSpacing(script string) string {
 	const marker = `    COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )` + "\n"
@@ -1762,15 +1762,15 @@ func attach(flagUsername, flagPassword, name string, useStdin bool) error {
 		return err
 	}
 
-	deviceName, err := resolveDeviceName(name)
+	machineName, err := resolveMachineName(name)
 	if err != nil {
 		return err
 	}
 
-	return deskconn.Attach(username, password, deviceName)
+	return deskconn.Attach(username, password, machineName)
 }
 
-func resolveDeviceName(name string) (string, error) {
+func resolveMachineName(name string) (string, error) {
 	if name != "" {
 		return name, nil
 	}
@@ -1795,7 +1795,7 @@ func resolveDeviceName(name string) (string, error) {
 	return input, nil
 }
 
-func promptAttachDevice(username, password string) error {
+func promptAttachMachine(username, password string) error {
 	file, err := common.CredentialsFilePath()
 	if err != nil {
 		return err
@@ -1812,12 +1812,12 @@ func promptAttachDevice(username, password string) error {
 		return nil
 	}
 
-	deviceName, err := resolveDeviceName("")
+	machineName, err := resolveMachineName("")
 	if err != nil {
 		return err
 	}
 
-	if err := deskconn.Attach(username, password, deviceName); err != nil {
+	if err := deskconn.Attach(username, password, machineName); err != nil {
 		return err
 	}
 
@@ -1826,12 +1826,12 @@ func promptAttachDevice(username, password string) error {
 		return err
 	}
 
-	devices, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
+	machines, err := deskconn.FetchMachinesFromCloud(cfgDirectory)
 	if err != nil {
 		return fmt.Errorf("failed to fetch machines: %w", err)
 	}
 
-	return deskconn.CacheDevices(cfgDirectory, devices)
+	return deskconn.CacheMachines(cfgDirectory, machines)
 }
 
 func detach(cfgDirectory string) error {
@@ -1840,7 +1840,7 @@ func detach(cfgDirectory string) error {
 		return err
 	}
 
-	authID, name, err := selectDevice(session)
+	authID, name, err := selectMachine(session)
 	if err != nil {
 		return err
 	}
@@ -1884,13 +1884,13 @@ func login(flagUsername, flagPassword string, useStdin bool) error {
 		return err
 	}
 
-	devices, err := deskconn.Login(quicSess.Session, username, otp)
+	machines, err := deskconn.Login(quicSess.Session, username, otp)
 	if err != nil {
 		return err
 	}
 
-	if len(devices) == 0 {
-		return promptAttachDevice(username, password)
+	if len(machines) == 0 {
+		return promptAttachMachine(username, password)
 	}
 
 	return nil
@@ -1919,8 +1919,8 @@ func logout(cfgDirectory string) error {
 	return deskconn.RemoveCredentialsFiles(cfgDirectory)
 }
 
-// standaloneRequested reports whether the CLI is pointed at a standalone device (--url or
-// DESKCONN_URL). It has to be known before the command line is parsed: device arguments
+// standaloneRequested reports whether the CLI is pointed at a standalone machine (--url or
+// DESKCONN_URL). It has to be known before the command line is parsed: machine arguments
 // aren't defined then.
 func standaloneRequested() bool {
 	if os.Getenv("DESKCONN_URL") != "" {
@@ -1937,17 +1937,17 @@ func standaloneRequested() bool {
 	return false
 }
 
-// deviceArg defines cmd's machine argument. With --url there is only one machine, so the
+// machineArg defines cmd's machine argument. With --url there is only one machine, so the
 // argument isn't defined at all and the result is empty.
-func deviceArg(cmd *kingpin.CmdClause, help, cfgDirectory string) *string {
+func machineArg(cmd *kingpin.CmdClause, help, cfgDirectory string) *string {
 	if standaloneRequested() {
 		return new(string)
 	}
-	return cmd.Arg("machine", help).Required().HintAction(deviceCompletions(cfgDirectory)).String()
+	return cmd.Arg("machine", help).Required().HintAction(machineCompletions(cfgDirectory)).String()
 }
 
 // modeFlag defines cmd's --mode flag. With --url it defaults to a direct connection: the
-// local daemon that some commands go through by default doesn't know the standalone device.
+// local daemon that some commands go through by default doesn't know the standalone machine.
 func modeFlag(cmd *kingpin.CmdClause, help string) *string {
 	flag := cmd.Flag("mode", help)
 	if standaloneRequested() {
@@ -1956,46 +1956,46 @@ func modeFlag(cmd *kingpin.CmdClause, help string) *string {
 	return flag.Enum(ModeQUIC, ModeP2P)
 }
 
-func deviceRealm(deviceName, cfgDirectory string) (string, error) {
+func machineRealm(machineName, cfgDirectory string) (string, error) {
 	if standaloneRequested() {
 		return common.StandaloneRealm, nil
 	}
-	devices, err := common.DevicesFromCfg(cfgDirectory)
+	machines, err := common.MachinesFromCfg(cfgDirectory)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			devices, err := deskconn.FetchDevicesFromCloud(cfgDirectory)
+			machines, err := deskconn.FetchMachinesFromCloud(cfgDirectory)
 			if err != nil {
 				return "", err
 			}
 
-			if err := deskconn.CacheDevices(cfgDirectory, devices); err != nil {
+			if err := deskconn.CacheMachines(cfgDirectory, machines); err != nil {
 				return "", err
 			}
 
-			return deviceRealm(deviceName, cfgDirectory)
+			return machineRealm(machineName, cfgDirectory)
 		}
 		return "", err
 	}
 
-	for _, d := range devices {
-		if d.Name == deviceName {
+	for _, d := range machines {
+		if d.Name == machineName {
 			return d.Realm, nil
 		}
-		if d.Authid == deviceName {
+		if d.Authid == machineName {
 			return d.Realm, nil
 		}
-		if d.Alias == deviceName {
-			return d.Realm, nil
-		}
-	}
-
-	for _, d := range devices {
-		if strings.HasPrefix(d.Authid, deviceName) {
+		if d.Alias == machineName {
 			return d.Realm, nil
 		}
 	}
 
-	return "", fmt.Errorf("machine not found: %s", deviceName)
+	for _, d := range machines {
+		if strings.HasPrefix(d.Authid, machineName) {
+			return d.Realm, nil
+		}
+	}
+
+	return "", fmt.Errorf("machine not found: %s", machineName)
 }
 
 func readCredentials(flagUsername, flagPassword string, useStdin bool) (username, password string, err error) {
@@ -2060,7 +2060,7 @@ func readOTP() (string, error) {
 	return otp, nil
 }
 
-// readStandalonePassword prompts for authID's password on the standalone device, when
+// readStandalonePassword prompts for authID's password on the standalone machine, when
 // neither --private-key nor --secret was given and a command first connects.
 func readStandalonePassword(authID string) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
@@ -2167,7 +2167,7 @@ func selectOption(callResp xconn.CallResponse, title string, idField string, pro
 	}
 }
 
-func selectDevice(session *xconn.Session) (authid string, name string, err error) {
+func selectMachine(session *xconn.Session) (authid string, name string, err error) {
 	callResp := session.Call(deskconn.ProcedureListDesktop).Do()
 
 	if callResp.Err != nil {
@@ -2182,15 +2182,15 @@ func selectDevice(session *xconn.Session) (authid string, name string, err error
 		return "", "", err
 	}
 
-	deviceDict, err := callResp.ArgDict(idx)
+	machineDict, err := callResp.ArgDict(idx)
 	if err != nil {
 		return "", "", err
 	}
-	authid, err = deviceDict.String("authid")
+	authid, err = machineDict.String("authid")
 	if err != nil {
 		return "", "", err
 	}
-	name, err = deviceDict.String("name")
+	name, err = machineDict.String("name")
 	if err != nil {
 		return "", "", err
 	}
@@ -2198,14 +2198,14 @@ func selectDevice(session *xconn.Session) (authid string, name string, err error
 	return authid, name, nil
 }
 
-func deviceCompletions(cfgDirectory string) func() []string {
+func machineCompletions(cfgDirectory string) func() []string {
 	return func() []string {
-		devices, err := common.DevicesFromCfg(cfgDirectory)
+		machines, err := common.MachinesFromCfg(cfgDirectory)
 		if err != nil {
 			return nil
 		}
 		var names []string
-		for _, d := range devices {
+		for _, d := range machines {
 			if d.Name != "" {
 				names = append(names, d.Name)
 			}
@@ -2214,14 +2214,14 @@ func deviceCompletions(cfgDirectory string) func() []string {
 	}
 }
 
-func devicePathCompletions(cfgDirectory string) func() []string {
+func machinePathCompletions(cfgDirectory string) func() []string {
 	return func() []string {
-		devices, err := common.DevicesFromCfg(cfgDirectory)
+		machines, err := common.MachinesFromCfg(cfgDirectory)
 		if err != nil {
 			return nil
 		}
 		var names []string
-		for _, d := range devices {
+		for _, d := range machines {
 			if d.Name != "" {
 				names = append(names, d.Name+":")
 			}
@@ -2231,14 +2231,14 @@ func devicePathCompletions(cfgDirectory string) func() []string {
 }
 
 // remotePathCompletions falls back to local filename completion when no
-// "device:" prefix is typed, and browses the remote directory once one is.
+// "machine:" prefix is typed, and browses the remote directory once one is.
 func remotePathCompletions(cfgDirectory string) func() []string {
 	return func() []string {
 		current := currentCompletionArg()
 		if !isRemotePath(current) {
-			return devicePathCompletions(cfgDirectory)()
+			return machinePathCompletions(cfgDirectory)()
 		}
-		return remoteDevicePathCompletions(cfgDirectory, current)
+		return remoteMachinePathCompletions(cfgDirectory, current)
 	}
 }
 
@@ -2252,10 +2252,10 @@ func currentCompletionArg() string {
 	return os.Args[len(os.Args)-1]
 }
 
-// remoteDevicePathCompletions lists entries of the directory being typed in current.
-func remoteDevicePathCompletions(cfgDirectory, current string) []string {
-	device, path := parseDevicePath(current)
-	realm, err := deviceRealm(device, cfgDirectory)
+// remoteMachinePathCompletions lists entries of the directory being typed in current.
+func remoteMachinePathCompletions(cfgDirectory, current string) []string {
+	machine, path := parseMachinePath(current)
+	realm, err := machineRealm(machine, cfgDirectory)
 	if err != nil {
 		return nil
 	}
@@ -2275,7 +2275,7 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 	}
 	defer func() { _ = localSession.Leave() }()
 
-	if !deviceHasPersistentSession(localSession, realm) {
+	if !machineHasPersistentSession(localSession, realm) {
 		_ = localSession.Call(common.ProcedureConnect).Args(realm).Do()
 		return nil
 	}
@@ -2303,7 +2303,7 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 		if !strings.HasPrefix(entry.Name, prefix) {
 			continue
 		}
-		completion := device + ":" + dir + entry.Name
+		completion := machine + ":" + dir + entry.Name
 		if entry.IsDir {
 			completion += "/"
 		}
@@ -2312,8 +2312,8 @@ func remoteDevicePathCompletions(cfgDirectory, current string) []string {
 	return out
 }
 
-func deviceHasPersistentSession(localSession *xconn.Session, realm string) bool {
-	resp := localSession.Call(common.ProcedureConnectedDevices).Do()
+func machineHasPersistentSession(localSession *xconn.Session, realm string) bool {
+	resp := localSession.Call(common.ProcedureConnectedMachines).Do()
 	if resp.Err != nil || len(resp.Args()) == 0 {
 		return false
 	}
@@ -2329,7 +2329,7 @@ func isRemotePath(s string) bool {
 	return strings.ContainsRune(s, ':')
 }
 
-func parseDevicePath(s string) (device, path string) {
+func parseMachinePath(s string) (machine, path string) {
 	idx := strings.IndexByte(s, ':')
 	if idx < 0 {
 		return s, ""
@@ -2340,7 +2340,7 @@ func parseDevicePath(s string) (device, path string) {
 func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
 	switch mode {
 	case ModeQUIC:
-		quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -2348,7 +2348,7 @@ func fileOp(ctx context.Context, uri, realm, cfgDirectory, procedure string, pay
 		_, err = deskconn.CallFileOp(quicSess.Session, procedure, payload)
 		return err
 	case ModeP2P:
-		p2pSess, err := deskconn.ConnectDeviceRealmP2P(ctx, realm, cfgDirectory)
+		p2pSess, err := deskconn.ConnectMachineRealmP2P(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -2372,8 +2372,8 @@ func shortID(id string) string {
 	return id[:6]
 }
 
-func connectedSince(connectedDevices map[string]any, realm string) string {
-	v, ok := connectedDevices[realm]
+func connectedSince(connectedMachines map[string]any, realm string) string {
+	v, ok := connectedMachines[realm]
 	if !ok {
 		return ""
 	}
@@ -2424,7 +2424,7 @@ func formatBytes(b uint64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
+func updateMachineAlias(cfgDirectory, machineKey, alias string) error {
 	configFile := filepath.Join(cfgDirectory, "config.yml")
 
 	data, err := os.ReadFile(configFile)
@@ -2440,24 +2440,24 @@ func updateDeviceAlias(cfgDirectory, deviceKey, alias string) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	devices := config.Devices
-	for _, d := range devices {
+	machines := config.Machines
+	for _, d := range machines {
 		if (d.Alias == alias && d.Alias != "") || d.Authid == alias || d.Name == alias {
 			return fmt.Errorf("alias '%s' already in use", alias)
 		}
 	}
 
 	updated := false
-	for i, d := range devices {
-		if d.Authid == deviceKey || d.Name == deviceKey || d.Alias == deviceKey {
-			devices[i].Alias = alias
+	for i, d := range machines {
+		if d.Authid == machineKey || d.Name == machineKey || d.Alias == machineKey {
+			machines[i].Alias = alias
 			updated = true
 			break
 		}
 	}
 
 	if !updated {
-		return fmt.Errorf("machine %s not found", deviceKey)
+		return fmt.Errorf("machine %s not found", machineKey)
 	}
 
 	out, err := yaml.Marshal(config)

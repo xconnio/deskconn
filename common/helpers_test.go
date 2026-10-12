@@ -36,14 +36,14 @@ func TestCfgDirectory(t *testing.T) {
 	require.True(t, info.IsDir())
 }
 
-func TestDevicesFromCfgSuccess(t *testing.T) {
+func TestMachinesFromCfgSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := map[string]any{
-		"devices": []map[string]any{
+		"machines": []map[string]any{
 			{
 				"authid": "user1",
 				"id":     "dev1",
-				"name":   "My Device",
+				"name":   "My Machine",
 				"realm":  "realm1",
 				"organization": map[string]any{
 					"id":   "org1",
@@ -56,37 +56,49 @@ func TestDevicesFromCfgSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"), data, 0600))
 
-	devices, err := common.DevicesFromCfg(tmpDir)
+	machines, err := common.MachinesFromCfg(tmpDir)
 	require.NoError(t, err)
-	require.Len(t, devices, 1)
-	require.Equal(t, "user1", devices[0].Authid)
-	require.Equal(t, "dev1", devices[0].ID)
-	require.Equal(t, "My Device", devices[0].Name)
-	require.Equal(t, "realm1", devices[0].Realm)
-	require.Equal(t, "org1", devices[0].Organization.ID)
+	require.Len(t, machines, 1)
+	require.Equal(t, "user1", machines[0].Authid)
+	require.Equal(t, "dev1", machines[0].ID)
+	require.Equal(t, "My Machine", machines[0].Name)
+	require.Equal(t, "realm1", machines[0].Realm)
+	require.Equal(t, "org1", machines[0].Organization.ID)
 }
 
-func TestDevicesFromCfgEmptyDevices(t *testing.T) {
+func TestMachinesFromCfgLegacyDevicesKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"),
+		[]byte("devices:\n  - authid: user1\n    realm: realm1\n"), 0600))
+
+	machines, err := common.MachinesFromCfg(tmpDir)
+	require.NoError(t, err)
+	require.Len(t, machines, 1)
+	require.Equal(t, "user1", machines[0].Authid)
+	require.Equal(t, "realm1", machines[0].Realm)
+}
+
+func TestMachinesFromCfgEmptyMachines(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
-		filepath.Join(tmpDir, "config.yml"), []byte("devices: []\n"), 0600))
+		filepath.Join(tmpDir, "config.yml"), []byte("machines: []\n"), 0600))
 
-	devices, err := common.DevicesFromCfg(tmpDir)
+	machines, err := common.MachinesFromCfg(tmpDir)
 	require.NoError(t, err)
-	require.Empty(t, devices)
+	require.Empty(t, machines)
 }
 
-func TestDevicesFromCfgMissingFile(t *testing.T) {
-	_, err := common.DevicesFromCfg(t.TempDir())
+func TestMachinesFromCfgMissingFile(t *testing.T) {
+	_, err := common.MachinesFromCfg(t.TempDir())
 	require.Error(t, err)
 }
 
-func TestDevicesFromCfgInvalidYAML(t *testing.T) {
+func TestMachinesFromCfgInvalidYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
 		filepath.Join(tmpDir, "config.yml"), []byte("not: [valid yaml\n"), 0600))
 
-	_, err := common.DevicesFromCfg(tmpDir)
+	_, err := common.MachinesFromCfg(tmpDir)
 	require.Error(t, err)
 }
 

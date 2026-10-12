@@ -29,7 +29,7 @@ const (
 	ErrAuthenticationFailed = "wamp.error.authentication_failed"
 )
 
-func Login(session *xconn.Session, username, otp string) ([]common.Device, error) {
+func Login(session *xconn.Session, username, otp string) ([]common.Machine, error) {
 	cfgDirectory, err := common.CfgDirectory()
 	if err != nil {
 		return nil, err
@@ -82,16 +82,16 @@ func Login(session *xconn.Session, username, otp string) ([]common.Device, error
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	devices, err := fetchDevices(cloudSession)
+	machines, err := fetchMachines(cloudSession)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch machines: %w", err)
 	}
 
-	if err := CacheDevices(cfgDirectory, devices); err != nil {
+	if err := CacheMachines(cfgDirectory, machines); err != nil {
 		return nil, err
 	}
 
-	return devices, nil
+	return machines, nil
 }
 
 func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
@@ -145,20 +145,20 @@ func RemoveCredentialsFiles(cfgDirectory string) error {
 		}
 	}
 
-	// Drop the cloud devices but keep direct devices and other settings.
+	// Drop the cloud machines but keep direct machines and other settings.
 	cfgPath := filepath.Join(cfgDirectory, "config.yml")
 	if _, err := os.Stat(cfgPath); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	if err := CacheDevices(cfgDirectory, nil); err != nil {
+	if err := CacheMachines(cfgDirectory, nil); err != nil {
 		return os.Remove(cfgPath) // unreadable config: drop it, as before
 	}
 	return nil
 }
 
-// ConnectDeviceRealmP2P connects directly to a device via WebRTC P2P, using QUIC for signaling.
-func ConnectDeviceRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xconn.Session, error) {
-	webrtcSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+// ConnectMachineRealmP2P connects directly to a machine via WebRTC P2P, using QUIC for signaling.
+func ConnectMachineRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xconn.Session, error) {
+	webrtcSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -166,18 +166,20 @@ func ConnectDeviceRealmP2P(ctx context.Context, realm, cfgDirectory string) (*xc
 	return webrtcSess.Session, nil
 }
 
-// ConnectDeviceRealmP2PSession is like ConnectDeviceRealmP2P but returns the
+// ConnectMachineRealmP2PSession is like ConnectMachineRealmP2P but returns the
 // full WebRTC session instead of just the WAMP session on top of it, giving
 // access to the shared PeerConnection: OpenChannel (for raw, non-WAMP data
 // channels such as the IP tunnel) and Connection (e.g. to inspect the
 // selected ICE candidate pair).
-func ConnectDeviceRealmP2PSession(ctx context.Context, realm, cfgDirectory string) (*xconnwebrtc.WebRTCSession, error) {
+func ConnectMachineRealmP2PSession(
+	ctx context.Context, realm, cfgDirectory string,
+) (*xconnwebrtc.WebRTCSession, error) {
 	authenticator, err := clientAuthenticator(realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
 
-	quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -205,40 +207,40 @@ func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
 	return webrtcSess.Session, nil
 }
 
-func FetchDevicesFromCloud(cfgDirectory string) ([]common.Device, error) {
+func FetchMachinesFromCloud(cfgDirectory string) ([]common.Machine, error) {
 	cloudSession, err := ConnectCloudRealm(cfgDirectory)
 	if err != nil {
 		if strings.Contains(err.Error(), ErrAuthenticationFailed) {
 			_ = RemoveCredentialsFiles(cfgDirectory)
-			return []common.Device{}, fmt.Errorf("invalid credentials, please login again")
+			return []common.Machine{}, fmt.Errorf("invalid credentials, please login again")
 		}
-		return []common.Device{}, err
+		return []common.Machine{}, err
 	}
 
-	return fetchDevices(cloudSession)
+	return fetchMachines(cloudSession)
 }
 
-// fetchDevices lists the devices on the account authenticated on session.
-func fetchDevices(session *xconn.Session) ([]common.Device, error) {
+// fetchMachines lists the machines on the account authenticated on session.
+func fetchMachines(session *xconn.Session) ([]common.Machine, error) {
 	callResp := session.Call(ProcedureListDesktop).Do()
 	if callResp.Err != nil {
-		return []common.Device{}, callResp.Err
+		return []common.Machine{}, callResp.Err
 	}
 
-	var devices []common.Device
+	var machines []common.Machine
 	jsonData, err := json.Marshal(callResp.Args())
 	if err != nil {
-		return []common.Device{}, err
+		return []common.Machine{}, err
 	}
-	if err := json.Unmarshal(jsonData, &devices); err != nil {
-		return []common.Device{}, err
+	if err := json.Unmarshal(jsonData, &machines); err != nil {
+		return []common.Machine{}, err
 	}
 
-	return devices, nil
+	return machines, nil
 }
 
-// CacheDevices replaces the devices in config.yml, keeping its other sections.
-func CacheDevices(cfgDirectory string, devices []common.Device) error {
+// CacheMachines replaces the machines in config.yml, keeping its other sections.
+func CacheMachines(cfgDirectory string, machines []common.Machine) error {
 	cfgPath := filepath.Join(cfgDirectory, "config.yml")
 
 	var config common.Config
@@ -250,7 +252,7 @@ func CacheDevices(cfgDirectory string, devices []common.Device) error {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	config.Devices = devices
+	config.Machines = machines
 	b, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
@@ -260,18 +262,18 @@ func CacheDevices(cfgDirectory string, devices []common.Device) error {
 }
 
 // CallFileOp performs one key-exchange-then-encrypted-call round trip
-// against deviceSession -- used both by direct CLI calls and, with its own
+// against machineSession -- used both by direct CLI calls and, with its own
 // key cache, deskconnd's ProxyFileOpHandler.
-func CallFileOp(deviceSession *xconn.Session, procedure string, payload []byte) ([]byte, error) {
-	enc, err := common.ClientKeyExchange(deviceSession)
+func CallFileOp(machineSession *xconn.Session, procedure string, payload []byte) ([]byte, error) {
+	enc, err := common.ClientKeyExchange(machineSession)
 	if err != nil {
 		return nil, err
 	}
 
-	return common.EncryptedCall(deviceSession, procedure, payload, enc)
+	return common.EncryptedCall(machineSession, procedure, payload, enc)
 }
 
-// clientAuthenticator returns the authenticator this machine uses on realm's device: the
+// clientAuthenticator returns the authenticator this machine uses on realm's machine: the
 // one for the standalone target (desk --url), otherwise the cloud login's.
 func clientAuthenticator(realm, cfgDirectory string) (auth.ClientAuthenticator, error) {
 	if target, ok := common.StandaloneTargetFor(realm); ok {

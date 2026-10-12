@@ -53,7 +53,7 @@ func (cryptosignAuthenticator) Authenticate(request auth.Request) (auth.Response
 }
 
 // startEchoProxy serves the stream proxy in front of a persistent QUIC connection to a
-// device that echoes every raw stream.
+// machine that echoes every raw stream.
 func startEchoProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconnd.ClientSessions) {
 	t.Helper()
 	dir := t.TempDir()
@@ -65,7 +65,7 @@ func startEchoProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconn
 		Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix", AllowCall: true}},
 	}}}))
 	t.Cleanup(router.Close)
-	deviceURL, certHash, streams := listenQUIC(t, router, cryptosignAuthenticator{})
+	machineURL, certHash, streams := listenQUIC(t, router, cryptosignAuthenticator{})
 	common.SafeGo(func() {
 		for stream := range streams {
 			common.SafeGo(func() { _, _ = io.Copy(stream, stream) })
@@ -78,12 +78,12 @@ func startEchoProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconn
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, err := common.ConnectStandalone(ctx, deviceURL, certHash, proxyTestRealm, authenticator)
+	conn, err := common.ConnectStandalone(ctx, machineURL, certHash, proxyTestRealm, authenticator)
 	require.NoError(t, err)
 
 	clientSessions = deskconnd.NewClientSessions()
 	sessCtx, sessCancel := context.WithCancel(context.Background())
-	clientSessions.StoreDeviceSession(proxyTestRealm, conn.Session, nil, conn, sessCtx, sessCancel)
+	clientSessions.StoreMachineSession(proxyTestRealm, conn.Session, nil, conn, sessCtx, sessCancel)
 	t.Cleanup(clientSessions.DisconnectAll)
 
 	proxyListener, err := net.Listen("unix", filepath.Join(dir, common.StreamProxySocket))

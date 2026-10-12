@@ -9,13 +9,13 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	deviceInfo, err := GetDeviceInfo()
+func (d *Deskconn) handleMachineInfo(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+	machineInfo, err := GetMachineInfo()
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
 
-	data, err := json.Marshal(deviceInfo)
+	data, err := json.Marshal(machineInfo)
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
@@ -23,7 +23,7 @@ func (d *Deskconn) handleDeviceInfo(_ context.Context, _ *xconn.Invocation) *xco
 	return xconn.NewInvocationResult(data)
 }
 
-func (d *Deskconn) handleDeviceIsDesktop(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleMachineIsDesktop(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 	return xconn.NewInvocationResult(d.desktop)
 }
 

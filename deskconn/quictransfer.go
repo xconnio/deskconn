@@ -14,9 +14,9 @@ import (
 
 // relayErrorMsg is deskconn-router's error frame shape (see writeRelayError
 // in deskconn-router's relay.go). The router can write one of these as the
-// very first reply on a client-opened stream -- before the device (and so
+// very first reply on a client-opened stream -- before the machine (and so
 // the key exchange) is ever reached -- e.g. when the realm is missing or
-// the target device isn't currently connected. QuicClientKeyExchange checks
+// the target machine isn't currently connected. QuicClientKeyExchange checks
 // for it so that case surfaces as the router's actual message instead of a
 // confusing "invalid peer public key length: 0".
 type relayErrorMsg struct {
@@ -213,7 +213,7 @@ func quicWriteOneChunk(stream net.Conn, sendKey, receiveKey []byte, rootArg stri
 }
 
 // DownloadFilesQUIC downloads remotePath (a file, or if recursive a
-// directory) from the device over parallel QUIC streams, all opened on
+// directory) from the machine over parallel QUIC streams, all opened on
 // sess's single shared connection (numWorkers <= 0 uses the default). realm
 // is needed by deskconn-router to route each stream (see RoutingFrame).
 func DownloadFilesQUIC(sess xconn.MultiplexedSession, realm, remotePath, localPath string,
@@ -229,7 +229,7 @@ func DownloadFilesQUIC(sess xconn.MultiplexedSession, realm, remotePath, localPa
 }
 
 // UploadFilesQUIC uploads localPath (a file, or if recursive a directory)
-// to the device over parallel QUIC streams, all opened on sess's single
+// to the machine over parallel QUIC streams, all opened on sess's single
 // shared connection (numWorkers <= 0 uses the default). realm is needed by
 // deskconn-router to route each stream (see RoutingFrame).
 func UploadFilesQUIC(sess xconn.MultiplexedSession, realm, localPath, remotePath string,

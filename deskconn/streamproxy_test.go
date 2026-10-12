@@ -53,20 +53,20 @@ func (anyKeyAuthenticator) Authenticate(request auth.Request) (auth.Response, er
 }
 
 // startStreamProxy stands up the whole default-mode path short of the cloud: a
-// device serving raw streams over QUIC through xconn's relay to deskconnd's real
+// machine serving raw streams over QUIC through xconn's relay to deskconnd's real
 // handlers, a ClientSessions holding a persistent connection to it, and deskconnd's
 // stream proxy in front of that. It returns the config directory to dial the proxy in.
 func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconnd.ClientSessions) {
 	t.Helper()
 	dir := t.TempDir()
 
-	// Device: deskconnd's relay listener, fed by xlink's QUIC-stream relay.
+	// Machine: deskconnd's relay listener, fed by xlink's QUIC-stream relay.
 	relaySock := filepath.Join(dir, "xlink-streams.sock")
 	relayListener, err := net.Listen("unix", relaySock)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = relayListener.Close() })
-	device := deskconnd.NewDeskconn(nil, nil, nil, false, dir)
-	common.SafeGo(func() { device.ServeStreamRelay(relayListener) })
+	machine := deskconnd.NewDeskconn(nil, nil, nil, false, dir)
+	common.SafeGo(func() { machine.ServeStreamRelay(relayListener) })
 
 	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 		Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix", AllowCall: true}},
 	}}}))
 	t.Cleanup(router.Close)
-	deviceURL, certHash, streams := listenQUIC(t, router, anyKeyAuthenticator{})
+	machineURL, certHash, streams := listenQUIC(t, router, anyKeyAuthenticator{})
 	common.SafeGo(func() {
 		for stream := range streams {
 			common.SafeGo(func() { xconnd.RelayStream(stream.Conn, relaySock) })
@@ -89,12 +89,12 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, err := common.ConnectStandalone(ctx, deviceURL, certHash, streamProxyTestRealm, authenticator)
+	conn, err := common.ConnectStandalone(ctx, machineURL, certHash, streamProxyTestRealm, authenticator)
 	require.NoError(t, err)
 
 	clientSessions = deskconnd.NewClientSessions()
 	sessCtx, sessCancel := context.WithCancel(context.Background())
-	clientSessions.StoreDeviceSession(streamProxyTestRealm, conn.Session, nil, conn, sessCtx, sessCancel)
+	clientSessions.StoreMachineSession(streamProxyTestRealm, conn.Session, nil, conn, sessCtx, sessCancel)
 	t.Cleanup(clientSessions.DisconnectAll)
 
 	proxyListener, err := net.Listen("unix", filepath.Join(dir, common.StreamProxySocket))
@@ -134,7 +134,7 @@ func TestDaemonStreamsTransferFiles(t *testing.T) {
 
 func TestDaemonStreamsReusesPersistentConnection(t *testing.T) {
 	cfgDirectory, clientSessions := startStreamProxy(t)
-	before := clientSessions.DeviceSessions()
+	before := clientSessions.MachineSessions()
 
 	daemon, err := deskconn.DialDaemonStreams(context.Background(), streamProxyTestRealm, cfgDirectory)
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestDaemonStreamsReusesPersistentConnection(t *testing.T) {
 	require.NoError(t, os.WriteFile(src, []byte("hello"), 0600))
 	require.NoError(t, deskconn.UploadFilesDaemon(daemon, src, filepath.Join(t.TempDir(), "b.txt"), false, 0))
 
-	require.Equal(t, before, clientSessions.DeviceSessions(), "the proxy must not replace the persistent connection")
+	require.Equal(t, before, clientSessions.MachineSessions(), "the proxy must not replace the persistent connection")
 }
 
 func TestDaemonStreamsP2PUnavailable(t *testing.T) {

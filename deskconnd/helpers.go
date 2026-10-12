@@ -24,7 +24,7 @@ func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessio
 	if err != nil {
 		return "", nil, nil, xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 	}
-	sess, err = clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+	sess, err = clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 	if err != nil {
 		return "", nil, nil, xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
@@ -32,9 +32,9 @@ func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessio
 }
 
 // proxyKeyCache caches the client-role SessionKeys ProxyFileOpHandler
-// derives per outbound device session, so repeated proxied calls to the
-// same device don't re-run the key exchange every time. It's keyed by the
-// session itself: session IDs aren't unique across devices.
+// derives per outbound machine session, so repeated proxied calls to the
+// same machine don't re-run the key exchange every time. It's keyed by the
+// session itself: session IDs aren't unique across machines.
 type proxyKeyCache struct {
 	mu   sync.Mutex
 	keys map[*xconn.Session]*common.SessionKeys
@@ -57,7 +57,7 @@ func (c *proxyKeyCache) store(session *xconn.Session, enc *common.SessionKeys) {
 	c.keys[session] = enc
 }
 
-// keysRejected reports whether the device refused a call because it doesn't have the
+// keysRejected reports whether the machine refused a call because it doesn't have the
 // keys it was encrypted with, e.g. after another client's key exchange replaced them.
 func keysRejected(err error) bool {
 	msg := err.Error()
@@ -68,30 +68,30 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 	km := newProxyKeyCache()
 
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		procedure, payload, deviceSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
+		procedure, payload, machineSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
 		if invErr != nil {
 			return invErr
 		}
 		realm, _ := inv.ArgString(0)
-		defer clientSessions.holdSession(realm, deviceSession)()
+		defer clientSessions.holdSession(realm, machineSession)()
 
-		enc, cached := km.fetch(deviceSession)
+		enc, cached := km.fetch(machineSession)
 		for {
 			if enc == nil {
 				var err error
-				enc, err = common.ClientKeyExchange(deviceSession)
+				enc, err = common.ClientKeyExchange(machineSession)
 				if err != nil {
 					return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 				}
-				km.store(deviceSession, enc)
+				km.store(machineSession, enc)
 			}
 
-			result, err := common.EncryptedCall(deviceSession, procedure, payload, enc)
+			result, err := common.EncryptedCall(machineSession, procedure, payload, enc)
 			if err == nil {
 				return xconn.NewInvocationResult(result)
 			}
-			// Cached keys the device no longer has: exchange again and retry once. The
-			// device rejected the request before running it, so nothing is repeated.
+			// Cached keys the machine no longer has: exchange again and retry once. The
+			// machine rejected the request before running it, so nothing is repeated.
 			if cached && keysRejected(err) {
 				enc, cached = nil, false
 				continue
@@ -101,22 +101,22 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 	}
 }
 
-func ProxyDeviceInfoHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+func ProxyMachineInfoHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		realm, err := inv.ArgString(0)
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 		}
 
-		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		callResp := deviceSess.Call(common.ProcedureDeviceInfo).Do()
+		callResp := machineSess.Call(common.ProcedureMachineInfo).Do()
 		if callResp.Err != nil {
-			_ = deviceSess.Leave()
-			clientSessions.DeleteDeviceSession(realm)
+			_ = machineSess.Leave()
+			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
 		}
 
@@ -131,16 +131,16 @@ func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn
 			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 		}
 
-		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
 		start := time.Now()
-		callResp := deviceSess.Call(common.ProcedurePing).Do()
+		callResp := machineSess.Call(common.ProcedurePing).Do()
 		if callResp.Err != nil {
-			_ = deviceSess.Leave()
-			clientSessions.DeleteDeviceSession(realm)
+			_ = machineSess.Leave()
+			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
 		}
 
@@ -155,15 +155,15 @@ func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string
 			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 		}
 
-		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		callResp := deviceSess.Call(common.ProcedurePrinterList).Do()
+		callResp := machineSess.Call(common.ProcedurePrinterList).Do()
 		if callResp.Err != nil {
-			_ = deviceSess.Leave()
-			clientSessions.DeleteDeviceSession(realm)
+			_ = machineSess.Leave()
+			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
 		}
 
@@ -190,15 +190,15 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 		}
 
-		deviceSess, err := clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		callResp := deviceSess.Call(common.ProcedurePrinterPrint).Args(printer, filename, data).Do()
+		callResp := machineSess.Call(common.ProcedurePrinterPrint).Args(printer, filename, data).Do()
 		if callResp.Err != nil {
-			_ = deviceSess.Leave()
-			clientSessions.DeleteDeviceSession(realm)
+			_ = machineSess.Leave()
+			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
 		}
 
@@ -248,14 +248,14 @@ func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
 
 func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		remotePath, publicKey, deviceSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
+		remotePath, publicKey, machineSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
 		if invErr != nil {
 			return invErr
 		}
 		realm, _ := inv.ArgString(0)
-		defer clientSessions.holdSession(realm, deviceSession)()
+		defer clientSessions.holdSession(realm, machineSession)()
 
-		callResp := deviceSession.Call(common.ProcedureFileCat).
+		callResp := machineSession.Call(common.ProcedureFileCat).
 			ProgressReceiver(func(pr *xconn.ProgressResult) {
 				_ = inv.SendProgress(pr.Args(), nil)
 			}).

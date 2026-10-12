@@ -12,36 +12,36 @@ import (
 	"github.com/xconnio/deskconn/deskconn"
 )
 
-func TestCacheDevicesPreservesOtherSections(t *testing.T) {
+func TestCacheMachinesPreservesOtherSections(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"),
-		[]byte("devices:\n  - authid: old\nprinting:\n  mode: accept\nscreenshot:\n  enabled: true\n"), 0600))
+		[]byte("machines:\n  - authid: old\nprinting:\n  mode: accept\nscreenshot:\n  enabled: true\n"), 0600))
 
-	require.NoError(t, deskconn.CacheDevices(tmpDir, []common.Device{{Authid: "new"}}))
+	require.NoError(t, deskconn.CacheMachines(tmpDir, []common.Machine{{Authid: "new"}}))
 
 	data, err := os.ReadFile(filepath.Join(tmpDir, "config.yml"))
 	require.NoError(t, err)
 	var config common.Config
 	require.NoError(t, yaml.Unmarshal(data, &config))
-	require.Len(t, config.Devices, 1)
-	require.Equal(t, "new", config.Devices[0].Authid)
+	require.Len(t, config.Machines, 1)
+	require.Equal(t, "new", config.Machines[0].Authid)
 	require.Equal(t, common.PrintModeAccept, config.Printing.Mode)
 	require.True(t, config.Screenshot.Enabled)
 }
 
-func TestCacheDevicesMissingFile(t *testing.T) {
+func TestCacheMachinesMissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	require.NoError(t, deskconn.CacheDevices(tmpDir, []common.Device{{Authid: "new"}}))
+	require.NoError(t, deskconn.CacheMachines(tmpDir, []common.Machine{{Authid: "new"}}))
 
-	devices, err := common.DevicesFromCfg(tmpDir)
+	machines, err := common.MachinesFromCfg(tmpDir)
 	require.NoError(t, err)
-	require.Len(t, devices, 1)
+	require.Len(t, machines, 1)
 }
 
 func TestRemoveCredentialsFilesKeepsSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "id_ed25519"), []byte("x"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"), []byte(`devices:
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"), []byte(`machines:
   - authid: cloud
 printing:
   mode: accept
@@ -55,7 +55,7 @@ printing:
 	require.NoError(t, err)
 	var config common.Config
 	require.NoError(t, yaml.Unmarshal(data, &config))
-	require.Empty(t, config.Devices, "logout drops the account's devices")
+	require.Empty(t, config.Machines, "logout drops the account's machines")
 	require.Equal(t, common.PrintModeAccept, config.Printing.Mode, "and keeps local settings")
 }
 
