@@ -161,20 +161,22 @@ func (p *interactiveShellSession) isBusy(shellID string) (bool, error) {
 	return fgpgid != shellPgid, nil
 }
 
-func (p *interactiveShellSession) handleShellIsBusy() func(_ context.Context,
-	inv *xconn.Invocation) *xconn.InvocationResult {
-	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		shellID, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-		}
-
-		busy, err := p.isBusy(shellID)
-		if err != nil {
-			return xconn.NewInvocationResult(false)
-		}
-		return xconn.NewInvocationResult(busy)
+func (d *Deskconn) handleShellIsBusy(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, errResult := d.callerKeys(inv)
+	if errResult != nil {
+		return errResult
 	}
+
+	var shellID string
+	if errResult = decryptArgs(enc, inv, &shellID); errResult != nil {
+		return errResult
+	}
+
+	busy, err := d.shellSession.isBusy(shellID)
+	if err != nil {
+		busy = false
+	}
+	return encryptResult(enc, busy)
 }
 
 // resolveStartDir picks the start dir: prevShellID's live cwd if given and

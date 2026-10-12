@@ -2,7 +2,6 @@ package deskconnd
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 
@@ -10,17 +9,20 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
+// handleFileCat streams a file's contents. Its argument is the path as an encrypted JSON
+// string, and each progress result is one encrypted chunk of the file, both with the
+// caller's key-exchange keys.
 func (d *Deskconn) handleFileCat(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	remotePath, err := inv.ArgString(0)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-
-	enc, invErr := serverStreamKeyExchange(inv, 1)
-	if invErr != nil {
-		return invErr
+	enc, errResult := d.callerKeys(inv)
+	if errResult != nil {
+		return errResult
 	}
 	sendKey := enc.sendKey
+
+	var remotePath string
+	if errResult = decryptArgs(enc, inv, &remotePath); errResult != nil {
+		return errResult
+	}
 
 	resolvedPath, info, pathErr := resolveAndStatPath(remotePath)
 	if pathErr != nil {
@@ -28,13 +30,12 @@ func (d *Deskconn) handleFileCat(ctx context.Context, inv *xconn.Invocation) *xc
 	}
 
 	if info.IsDir() {
-		return xconn.NewInvocationError(common.ErrInvalidArgument,
-			fmt.Sprintf("%s: is a directory", remotePath))
+		return xconn.NewInvocationError(common.ErrInvalidArgument, "path is a directory")
 	}
 
 	f, err := os.Open(resolvedPath)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewInvocationError(common.ErrOperationFailed, withoutPath(err).Error())
 	}
 	defer f.Close()
 
@@ -59,7 +60,7 @@ func (d *Deskconn) handleFileCat(ctx context.Context, inv *xconn.Invocation) *xc
 			break
 		}
 		if readErr != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, readErr.Error())
+			return xconn.NewInvocationError(common.ErrOperationFailed, withoutPath(readErr).Error())
 		}
 	}
 

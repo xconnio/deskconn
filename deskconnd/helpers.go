@@ -2,6 +2,7 @@ package deskconnd
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -75,33 +76,45 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 		realm, _ := inv.ArgString(0)
 		defer clientSessions.holdSession(realm, machineSession)()
 
-		enc, cached := km.fetch(machineSession)
-		for {
-			if enc == nil {
-				var err error
-				enc, err = common.ClientKeyExchange(machineSession)
-				if err != nil {
-					return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-				}
-				km.store(machineSession, enc)
-			}
-
-			result, err := common.EncryptedCall(machineSession, procedure, payload, enc)
-			if err == nil {
-				return xconn.NewInvocationResult(result)
-			}
-			// Cached keys the machine no longer has: exchange again and retry once. The
-			// machine rejected the request before running it, so nothing is repeated.
-			if cached && keysRejected(err) {
-				enc, cached = nil, false
-				continue
-			}
+		result, err := km.call(machineSession, procedure, payload)
+		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
+		return xconn.NewInvocationResult(result)
+	}
+}
+
+// call makes an encrypted call to procedure on machineSession with the session's cached
+// keys, exchanging keys first if there are none.
+func (c *proxyKeyCache) call(machineSession *xconn.Session, procedure string, payload []byte) ([]byte, error) {
+	enc, cached := c.fetch(machineSession)
+	for {
+		if enc == nil {
+			var err error
+			enc, err = common.ClientKeyExchange(machineSession)
+			if err != nil {
+				return nil, err
+			}
+			c.store(machineSession, enc)
+		}
+
+		result, err := common.EncryptedCall(machineSession, procedure, payload, enc)
+		if err == nil {
+			return result, nil
+		}
+		// Cached keys the machine no longer has: exchange again and retry once. The
+		// machine rejected the request before running it, so nothing is repeated.
+		if cached && keysRejected(err) {
+			enc, cached = nil, false
+			continue
+		}
+		return nil, err
 	}
 }
 
 func ProxyMachineInfoHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	km := newProxyKeyCache()
+
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		realm, err := inv.ArgString(0)
 		if err != nil {
@@ -113,14 +126,14 @@ func ProxyMachineInfoHandler(clientSessions *ClientSessions, cfgDirectory string
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		callResp := machineSess.Call(common.ProcedureMachineInfo).Do()
-		if callResp.Err != nil {
+		result, err := km.call(machineSess, common.ProcedureMachineInfo, nil)
+		if err != nil {
 			_ = machineSess.Leave()
 			clientSessions.DeleteMachineSession(realm)
-			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		return xconn.NewInvocationResult(callResp.Args()...)
+		return xconn.NewInvocationResult(result)
 	}
 }
 
@@ -246,25 +259,82 @@ func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
 	}
 }
 
+// ProxyCatHandler streams a file from realm's machine to the local CLI: it encrypts the
+// path and decrypts the chunks with its cached keys for that machine, so they reach the
+// CLI in plain text over the local socket.
 func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
+	km := newProxyKeyCache()
+
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		remotePath, publicKey, machineSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
-		if invErr != nil {
-			return invErr
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 		}
-		realm, _ := inv.ArgString(0)
+		remotePath, err := inv.ArgString(1)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		}
+		machineSession, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		}
 		defer clientSessions.holdSession(realm, machineSession)()
 
-		callResp := machineSession.Call(common.ProcedureFileCat).
-			ProgressReceiver(func(pr *xconn.ProgressResult) {
-				_ = inv.SendProgress(pr.Args(), nil)
-			}).
-			Args(remotePath, publicKey).
-			DoContext(ctx)
+		enc, cached := km.fetch(machineSession)
+		for {
+			if enc == nil {
+				enc, err = common.ClientKeyExchange(machineSession)
+				if err != nil {
+					return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+				}
+				km.store(machineSession, enc)
+			}
 
-		if callResp.Err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+			pathJSON, err := json.Marshal(remotePath)
+			if err != nil {
+				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			}
+			encryptedPath, err := common.EncryptPayload(pathJSON, enc.SendKey)
+			if err != nil {
+				return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			}
+
+			callCtx, cancel := context.WithCancel(ctx)
+			var chunkErr error
+			callResp := machineSession.Call(common.ProcedureFileCat).
+				ProgressReceiver(func(pr *xconn.ProgressResult) {
+					if chunkErr != nil {
+						return
+					}
+					encrypted, err := pr.ArgBytes(0)
+					if err == nil {
+						var chunk []byte
+						if chunk, err = common.DecryptPayload(encrypted, enc.ReceiveKey); err == nil {
+							err = inv.SendProgress([]any{chunk}, nil)
+						}
+					}
+					if err != nil {
+						chunkErr = err
+						cancel()
+					}
+				}).
+				Args(encryptedPath).
+				DoContext(callCtx)
+			cancel()
+
+			if chunkErr != nil {
+				return xconn.NewInvocationError(common.ErrOperationFailed, chunkErr.Error())
+			}
+			if callResp.Err != nil {
+				// Cached keys the machine no longer has: it rejected the call before sending
+				// anything, so exchange again and retry once.
+				if cached && keysRejected(callResp.Err) {
+					enc, cached = nil, false
+					continue
+				}
+				return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+			}
+			return xconn.NewInvocationResult()
 		}
-		return xconn.NewInvocationResult()
 	}
 }

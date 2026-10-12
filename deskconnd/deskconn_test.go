@@ -3,6 +3,7 @@ package deskconnd_test
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -46,10 +47,9 @@ func TestMachineInfoIncludesBattery(t *testing.T) {
 	d := deskconnd.NewDeskconn(nil, false)
 	require.NoError(t, d.Register(callee))
 
-	callResp := caller.Call(common.ProcedureMachineInfo).Do()
-	require.NoError(t, callResp.Err)
-
-	rawData, err := callResp.ArgBytes(0)
+	enc, err := common.ClientKeyExchange(caller)
+	require.NoError(t, err)
+	rawData, err := common.EncryptedCall(caller, common.ProcedureMachineInfo, nil, enc)
 	require.NoError(t, err)
 
 	var machineInfo common.MachineInfo
@@ -85,4 +85,63 @@ func TestMachineIsDesktopFalseOnServer(t *testing.T) {
 	isDesktop, err := callResp.ArgBool(0)
 	require.NoError(t, err)
 	require.False(t, isDesktop)
+}
+
+func TestEncryptedProceduresRequireKeyExchange(t *testing.T) {
+	callee, caller := setupRouterAndConnectSessions(t)
+
+	d := deskconnd.NewDeskconn(nil, false)
+	require.NoError(t, d.Register(callee))
+
+	for _, procedure := range []string{
+		common.ProcedureMachineInfo,
+		common.ProcedureProcessList,
+		common.ProcedureProcessSignal,
+		common.ProcedureAppList,
+		common.ProcedureAppIcon,
+		common.ProcedureShellIsBusy,
+	} {
+		callResp := caller.Call(procedure).Do()
+		require.ErrorContains(t, callResp.Err, "call key exchange first", procedure)
+	}
+}
+
+func TestEncryptedProcedures(t *testing.T) {
+	callee, caller := setupRouterAndConnectSessions(t)
+
+	d := deskconnd.NewDeskconn(nil, false)
+	require.NoError(t, d.Register(callee))
+
+	enc, err := common.ClientKeyExchange(caller)
+	require.NoError(t, err)
+
+	call := func(procedure string, args any) []byte {
+		t.Helper()
+		payload, err := json.Marshal(args)
+		require.NoError(t, err)
+		result, err := common.EncryptedCall(caller, procedure, payload, enc)
+		require.NoError(t, err, procedure)
+		return result
+	}
+
+	var procs []map[string]any
+	require.NoError(t, json.Unmarshal(call(common.ProcedureProcessList, nil), &procs))
+	require.NotEmpty(t, procs)
+
+	var apps []any
+	require.NoError(t, json.Unmarshal(call(common.ProcedureAppList, nil), &apps))
+
+	var busy bool
+	require.NoError(t, json.Unmarshal(call(common.ProcedureShellIsBusy, "no-such-shell"), &busy))
+	require.False(t, busy)
+
+	sleeper := exec.Command("sleep", "30")
+	require.NoError(t, sleeper.Start())
+	t.Cleanup(func() { _ = sleeper.Process.Kill(); _ = sleeper.Wait() })
+
+	var results []map[string]any
+	require.NoError(t, json.Unmarshal(call(common.ProcedureProcessSignal,
+		map[string]any{"pids": []int{sleeper.Process.Pid}, "signal": "term"}), &results))
+	require.Len(t, results, 1)
+	require.Equal(t, true, results[0]["ok"])
 }

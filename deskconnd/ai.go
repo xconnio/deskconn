@@ -2,7 +2,6 @@ package deskconnd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,41 +11,14 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-func aiDecryptArgs(enc *encryptionKeys, inv *xconn.Invocation, out any) *xconn.InvocationResult {
-	encrypted, err := inv.ArgBytes(0)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-	if err := json.Unmarshal(plaintext, out); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-	return nil
-}
-
-func aiEncryptResult(enc *encryptionKeys, result any) *xconn.InvocationResult {
-	resultBytes, err := json.Marshal(result)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	return xconn.NewInvocationResult(encryptedResult)
-}
-
 func (d *Deskconn) handleAISessionList(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	enc, ok := d.keys.fetch(inv.Caller())
-	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+	enc, errResult := d.callerKeys(inv)
+	if errResult != nil {
+		return errResult
 	}
 
 	var path string
-	if errResult := aiDecryptArgs(enc, inv, &path); errResult != nil {
+	if errResult = decryptArgs(enc, inv, &path); errResult != nil {
 		return errResult
 	}
 
@@ -55,17 +27,17 @@ func (d *Deskconn) handleAISessionList(_ context.Context, inv *xconn.Invocation)
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
 
-	return aiEncryptResult(enc, common.SummarizeAISessions(sessions))
+	return encryptResult(enc, common.SummarizeAISessions(sessions))
 }
 
 func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	enc, ok := d.keys.fetch(inv.Caller())
-	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+	enc, errResult := d.callerKeys(inv)
+	if errResult != nil {
+		return errResult
 	}
 
 	var args common.AISessionPullArgs
-	if errResult := aiDecryptArgs(enc, inv, &args); errResult != nil {
+	if errResult = decryptArgs(enc, inv, &args); errResult != nil {
 		return errResult
 	}
 
@@ -112,7 +84,7 @@ func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation)
 		bundles = append(bundles, common.AISessionBundle{Tool: tool, Tarball: tarball})
 	}
 
-	return aiEncryptResult(enc, bundles)
+	return encryptResult(enc, bundles)
 }
 
 // aiLocalSessions discovers this machine's current Claude Code sessions for the project at
