@@ -22,25 +22,25 @@ func TestClientSessionsFanOutsUpgradeToAllSubscribers(t *testing.T) {
 	cs := deskconnd.NewClientSessions()
 	initialCtx, initialCancel := context.WithCancel(context.Background())
 	t.Cleanup(initialCancel)
-	cs.StoreDeviceSession("device-realm", initial, nil, nil, initialCtx, initialCancel)
+	cs.StoreMachineSession("machine-realm", initial, nil, nil, initialCtx, initialCancel)
 
 	// Two concurrent callers sharing the cached connection — e.g. deskconn shell -A's shell
 	// call and its agent-forward call — both ask for the current session and subscribe.
-	sess1, upgradeCh1, err := cs.EnsureDeviceSessionWithUpgrade(context.Background(), "device-realm", "")
+	sess1, upgradeCh1, err := cs.EnsureMachineSessionWithUpgrade(context.Background(), "machine-realm", "")
 	require.NoError(t, err)
 	require.Same(t, initial, sess1)
 
-	sess2, upgradeCh2, err := cs.EnsureDeviceSessionWithUpgrade(context.Background(), "device-realm", "")
+	sess2, upgradeCh2, err := cs.EnsureMachineSessionWithUpgrade(context.Background(), "machine-realm", "")
 	require.NoError(t, err)
 	require.Same(t, initial, sess2)
 
 	// Simulate the background P2P upgrade replacing the cached session, exactly like
-	// upgradeToWebRTC's success path does via StoreDeviceSession.
+	// upgradeToWebRTC's success path does via StoreMachineSession.
 	upgraded, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
 	upgradedCtx, upgradedCancel := context.WithCancel(context.Background())
 	t.Cleanup(upgradedCancel)
-	cs.StoreDeviceSession("device-realm", upgraded, nil, nil, upgradedCtx, upgradedCancel)
+	cs.StoreMachineSession("machine-realm", upgraded, nil, nil, upgradedCtx, upgradedCancel)
 
 	select {
 	case got := <-upgradeCh1:

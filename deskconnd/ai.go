@@ -115,7 +115,7 @@ func (d *Deskconn) handleAISessionPull(_ context.Context, inv *xconn.Invocation)
 	return aiEncryptResult(enc, bundles)
 }
 
-// aiLocalSessions discovers this device's current Claude Code sessions for the project at
+// aiLocalSessions discovers this machine's current Claude Code sessions for the project at
 // path. Both sides of a call are expected to use the same absolute path for the same project.
 func aiLocalSessions(path string) ([]common.AISessionFile, error) {
 	homeDir, err := os.UserHomeDir()

@@ -46,18 +46,18 @@ func CfgDirectory() (string, error) {
 	return cfgDirectory, nil
 }
 
-func DevicesFromCfg(cfgDirectory string) ([]Device, error) {
+func MachinesFromCfg(cfgDirectory string) ([]Machine, error) {
 	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 	if err != nil {
-		return []Device{}, err
+		return []Machine{}, err
 	}
 
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return []Device{}, err
+		return []Machine{}, err
 	}
 
-	return config.Devices, nil
+	return config.Machines, nil
 }
 
 func ReadCredentials(cfgDirectory string) (string, string, error) {
@@ -89,10 +89,10 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 	return authid, privKey, nil
 }
 
-// ConnectDeviceRealmQUIC connects to realm's device: directly over QUIC or WebTransport for
+// ConnectMachineRealmQUIC connects to realm's machine: directly over QUIC or WebTransport for
 // the standalone target the CLI was pointed at (see SetStandaloneTarget), otherwise through
 // the cloud over QUIC.
-func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*DeviceConn, error) {
+func ConnectMachineRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*MachineConn, error) {
 	if target, ok := StandaloneTargetFor(realm); ok {
 		authenticator, err := target.Authenticator()
 		if err != nil {
@@ -118,7 +118,7 @@ func ConnectDeviceRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*D
 	if err != nil {
 		return nil, err
 	}
-	return NewQUICDeviceConn(sess), nil
+	return NewQUICMachineConn(sess), nil
 }
 
 // ICEServers returns the STUN server plus, when DESKCONN_TURN_URL is set, a TURN server
@@ -144,7 +144,7 @@ func ICEServers() []xconnwebrtc.ICEServer {
 	})
 }
 
-// ConnectWebrtcSession negotiates a WebRTC session to realm's device, signaling over
+// ConnectWebrtcSession negotiates a WebRTC session to realm's machine, signaling over
 // session, and joins realm over it with authenticator.
 func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator auth.ClientAuthenticator,
 	onDisconnect func()) (*xconnwebrtc.WebRTCSession, error) {

@@ -36,7 +36,7 @@ const (
 // half.
 const (
 	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
-	ProcedureProxyDeviceInfo   = "io.xconn.deskconn.deskconnd.proxy.device.info"
+	ProcedureProxyMachineInfo  = "io.xconn.deskconn.deskconnd.proxy.machine.info"
 	ProcedureProxyPing         = "io.xconn.deskconn.deskconnd.proxy.ping"
 	ProcedureProxyCat          = "io.xconn.deskconn.deskconnd.proxy.file.cat"
 	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
@@ -48,15 +48,15 @@ const (
 	ProcedureConnect           = "io.xconn.deskconn.connect"
 	ProcedureDisconnect        = "io.xconn.deskconn.disconnect"
 	ProcedureDisconnectAll     = "io.xconn.deskconn.disconnect_all"
-	ProcedureConnectedDevices  = "io.xconn.deskconn.connected_devices"
+	ProcedureConnectedMachines = "io.xconn.deskconn.connected_machines"
 
 	LocalRealm = "io.xconn.deskconn.local"
 
-	// StandaloneRealm is the device realm xlink serves in standalone mode.
+	// StandaloneRealm is the machine realm xlink serves in standalone mode.
 	StandaloneRealm = "io.xconn.deskconn.standalone"
 )
 
-// These are the device-facing procedures deskconnd's app-layer handlers
+// These are the machine-facing procedures deskconnd's app-layer handlers
 // register (see deskconnd's Deskconn.Register), and that the CLI (this
 // root package) calls directly in --mode quic/p2p. They're wire-protocol
 // identifiers shared between the CLI and deskconnd regardless of which
@@ -97,12 +97,12 @@ const (
 	ProcedureScreenshot           = "io.xconn.deskconn.deskconnd.screenshot"
 	ProcedureScreenshotPermission = "io.xconn.deskconn.deskconnd.screenshot.permission"
 
-	ProcedureDeviceInfo      = "io.xconn.deskconn.deskconnd.device.info"
-	ProcedureDeviceIsDesktop = "io.xconn.deskconn.deskconnd.device.is_desktop"
-	ProcedureProcessList     = "io.xconn.deskconn.deskconnd.process.list"
-	ProcedureProcessSignal   = "io.xconn.deskconn.deskconnd.process.signal"
-	ProcedureAppList         = "io.xconn.deskconn.deskconnd.app.list"
-	ProcedureAppIcon         = "io.xconn.deskconn.deskconnd.app.icon"
+	ProcedureMachineInfo      = "io.xconn.deskconn.deskconnd.machine.info"
+	ProcedureMachineIsDesktop = "io.xconn.deskconn.deskconnd.machine.is_desktop"
+	ProcedureProcessList      = "io.xconn.deskconn.deskconnd.process.list"
+	ProcedureProcessSignal    = "io.xconn.deskconn.deskconnd.process.signal"
+	ProcedureAppList          = "io.xconn.deskconn.deskconnd.app.list"
+	ProcedureAppIcon          = "io.xconn.deskconn.deskconnd.app.icon"
 
 	ProcedureAISessionList = "io.xconn.deskconn.deskconnd.ai.session.list"
 	ProcedureAISessionPull = "io.xconn.deskconn.deskconnd.ai.session.pull"
@@ -118,8 +118,8 @@ const (
 )
 
 const (
-	AgentFwdOpStart   agentFwdOp = "start"   // client->device: begin forwarding, self-reporting AuthID
-	AgentFwdOpConnect agentFwdOp = "connect" // device->client: connID accepted
+	AgentFwdOpStart   agentFwdOp = "start"   // client->machine: begin forwarding, self-reporting AuthID
+	AgentFwdOpConnect agentFwdOp = "connect" // machine->client: connID accepted
 	AgentFwdOpClose   agentFwdOp = "close"
 )
 
@@ -287,7 +287,7 @@ func VPNFallbackDNS() []string {
 // Envelope kind bytes, own namespace like every other raw-stream feature's.
 const (
 	LogMsgControl byte = iota // encrypted JSON LogControlMsg, client's one-time request
-	LogMsgData                // encrypted log bytes, device -> client
+	LogMsgData                // encrypted log bytes, machine -> client
 	LogMsgPing                // no payload, either direction, keeps ShellIdleTimeout from firing
 )
 
@@ -300,8 +300,8 @@ const (
 )
 
 const (
-	PortRevOpListen  portReverseOp = "listen"  // client->device: start listening on RemotePort
-	PortRevOpConnect portReverseOp = "connect" // device->client: connID accepted, client should dial its local port
+	PortRevOpListen  portReverseOp = "listen"  // client->machine: start listening on RemotePort
+	PortRevOpConnect portReverseOp = "connect" // machine->client: connID accepted, client should dial its local port
 	PortRevOpClose   portReverseOp = "close"
 )
 
@@ -378,7 +378,7 @@ const (
 // StreamProxySocket is deskconnd's stream proxy socket, in the config directory.
 const StreamProxySocket = "deskconn-streams.sock"
 
-// StreamProxyConnectTimeout bounds connecting to the device for a stream proxy request.
+// StreamProxyConnectTimeout bounds connecting to the machine for a stream proxy request.
 const StreamProxyConnectTimeout = 30 * time.Second
 
 // Socket and channel buffer sizes for the stream proxy, chosen so a proxied stream

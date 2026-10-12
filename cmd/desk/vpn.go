@@ -32,13 +32,13 @@ func closeSessionWithTimeout(session *xconnwebrtc.WebRTCSession) {
 	}
 }
 
-// runVPNConnect routes this machine's internet traffic through device: it
+// runVPNConnect routes this machine's internet traffic through machine: it
 // dials it directly (P2P) and runs the tunnel here, so on Ctrl-C we wait
 // for its own teardown to actually finish before exiting. This process
 // also launches vpnd (see deskconn.LaunchVPNHelper), since it's the one
 // with a terminal for sudo to prompt on, and waits for it to exit.
-func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
-	fmt.Printf("Connecting to %q...\n", device)
+func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string) {
+	fmt.Printf("Connecting to %q...\n", machine)
 
 	ctx, cancel := context.WithCancel(cliCtx)
 	defer cancel()
@@ -47,7 +47,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	session, err := deskconn.ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+	session, err := deskconn.ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -75,7 +75,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 	fmt.Println("Waiting for the remote machine to accept the tunnel...")
 	errCh := make(chan error, 1)
 	onReady := func() {
-		fmt.Printf("Tunnel up: routing this machine's internet traffic through %q. Press Ctrl-C to stop.\n", device)
+		fmt.Printf("Tunnel up: routing this machine's internet traffic through %q. Press Ctrl-C to stop.\n", machine)
 	}
 	common.SafeGo(func() { errCh <- deskconn.ConnectVPNClient(ctx, session, helper, onReady) })
 
@@ -98,7 +98,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, device string) {
 	fmt.Println("Tunnel down")
 }
 
-// runVPNStart arms this machine to let other devices route their traffic
+// runVPNStart arms this machine to let other machines route their traffic
 // through it, then returns right away -- serving continues in the
 // background (deskconnd + vpnd) until "desk vpn stop" or the
 // daemon shuts down. deskconnd has no capability or terminal of its own

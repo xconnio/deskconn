@@ -63,7 +63,7 @@ func startStandalone(t *testing.T, keys []string, passwords map[string]string) (
 		common.CertificateFingerprint(cert)
 }
 
-func connectStandalone(t *testing.T, target *common.StandaloneTarget) (*common.DeviceConn, error) {
+func connectStandalone(t *testing.T, target *common.StandaloneTarget) (*common.MachineConn, error) {
 	t.Helper()
 	authenticator, err := target.Authenticator()
 	require.NoError(t, err)

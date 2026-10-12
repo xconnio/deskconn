@@ -16,7 +16,7 @@ import (
 )
 
 // collectLogData reads envelopes from client until the stream closes (the
-// device finished or errored), concatenating every LogMsgData payload and
+// machine finished or errored), concatenating every LogMsgData payload and
 // ignoring pings.
 func collectLogData(t *testing.T, client net.Conn, receiveKey []byte, timeout time.Duration) []byte {
 	t.Helper()
@@ -201,9 +201,9 @@ func TestLogsFollowIgnoresPing(t *testing.T) {
 }
 
 // TestLogsFollowStopsOnDisconnect confirms that closing the client during a
-// --follow session actually stops the device's file watch, mirroring
+// --follow session actually stops the machine's file watch, mirroring
 // TestPortForwardClosesBackendOnClientDisconnect's spirit: a fsnotify.Watcher
-// leak here would show up as the device goroutine never returning, which
+// leak here would show up as the machine goroutine never returning, which
 // -race (run across the whole suite) would catch as a leaked goroutine
 // holding the watcher open indefinitely if this regressed.
 func TestLogsFollowStopsOnDisconnect(t *testing.T) {
@@ -232,7 +232,7 @@ func TestLogsFollowStopsOnDisconnect(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("device's log stream handler did not return after client disconnect")
+		t.Fatal("machine's log stream handler did not return after client disconnect")
 	}
 }
 

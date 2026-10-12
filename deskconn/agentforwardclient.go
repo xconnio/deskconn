@@ -15,9 +15,9 @@ import (
 )
 
 // RunAgentForward is the client entry point for `desk shell -A`. It
-// opens one session-level raw stream/channel, tells the device to start
-// forwarding, signals ready once the device acks, and for every external
-// connection the device reports, dials agentSock  and relays.
+// opens one session-level raw stream/channel, tells the machine to start
+// forwarding, signals ready once the machine acks, and for every external
+// connection the machine reports, dials agentSock  and relays.
 func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock string, ready chan<- error) error {
 	authenticator, err := clientAuthenticator(realm, cfgDirectory)
 	if err != nil {
@@ -28,7 +28,7 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 
 	switch mode {
 	case modeP2P:
-		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			ready <- err
 			return err
@@ -50,7 +50,7 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 			ready <- err
 			return err
 		}
-		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
 			return runAgentForwardP2P(ctx, P2PChannels(p2pSess), authID, agentSock, ready)
@@ -61,7 +61,7 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 }
 
 func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, authID, agentSock string, ready chan<- error) error {
-	quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		ready <- err
 		return err
@@ -187,7 +187,7 @@ func runAgentForwardP2P(ctx context.Context, p2pSess ChannelOpener,
 }
 
 // startAgentForward sends the initial "start forwarding" request and waits
-// for the device's ack, returning an error if it can't proceed.
+// for the machine's ack, returning an error if it can't proceed.
 func startAgentForward(conn shellConn, sendKey, receiveKey []byte, authID string) error {
 	env, err := common.BuildPortEnvelope(common.AgentFwdMsgControl,
 		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: authID}), sendKey)
@@ -285,7 +285,7 @@ func runAgentForwardClientLoop(ctx context.Context, readNext func() (byte, []byt
 }
 
 // pumpAgentForwardLocalConn reads localConn (the local ssh-agent socket
-// connection this client just dialed on the device's behalf) and forwards
+// connection this client just dialed on the machine's behalf) and forwards
 // its bytes back over writer, tagged with connID, until it errors or
 // closes.
 func pumpAgentForwardLocalConn(localConn net.Conn, connID uint64, sendKey []byte, writer *common.PortReverseWriter,

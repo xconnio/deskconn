@@ -11,10 +11,10 @@ import (
 )
 
 // ErrDaemonUnavailable means deskconnd's stream proxy can't be reached, so a default-mode
-// command should connect to the device itself.
+// command should connect to the machine itself.
 var ErrDaemonUnavailable = errors.New("deskconnd stream proxy unavailable")
 
-// DaemonStreams opens raw streams to a device on deskconnd's persistent connection to it:
+// DaemonStreams opens raw streams to a machine on deskconnd's persistent connection to it:
 // data channels if that connection is P2P, QUIC streams otherwise (see P2P).
 type DaemonStreams struct {
 	socketPath string
@@ -24,7 +24,7 @@ type DaemonStreams struct {
 	hold net.Conn
 }
 
-// DialDaemonStreams asks deskconnd for its connection to realm's device, which it
+// DialDaemonStreams asks deskconnd for its connection to realm's machine, which it
 // establishes first if needed. Close it when the operation is done.
 func DialDaemonStreams(ctx context.Context, realm, cfgDirectory string) (*DaemonStreams, error) {
 	d := &DaemonStreams{socketPath: filepath.Join(cfgDirectory, common.StreamProxySocket), realm: realm}
@@ -52,13 +52,13 @@ func (d *DaemonStreams) Close() error {
 	return d.hold.Close()
 }
 
-// OpenStream opens a raw QUIC stream to the device.
+// OpenStream opens a raw QUIC stream to the machine.
 func (d *DaemonStreams) OpenStream() (net.Conn, error) {
 	conn, _, err := d.open(context.Background(), common.StreamProxyRequest{Realm: d.realm, Kind: common.RelayKindQUIC})
 	return conn, err
 }
 
-// OpenMessageChannel opens a data channel to the device.
+// OpenMessageChannel opens a data channel to the machine.
 func (d *DaemonStreams) OpenMessageChannel(label string) (common.MessageChannel, error) {
 	conn, _, err := d.open(context.Background(),
 		common.StreamProxyRequest{Realm: d.realm, Kind: common.RelayKindWebRTC, Label: label})
@@ -78,7 +78,7 @@ func (d *DaemonStreams) open(ctx context.Context, req common.StreamProxyRequest)
 	if unixConn, ok := conn.(*net.UnixConn); ok {
 		_ = unixConn.SetWriteBuffer(common.StreamProxyUpstreamBuffer)
 	}
-	// Lets ctx interrupt the wait while deskconnd is still connecting to the device.
+	// Lets ctx interrupt the wait while deskconnd is still connecting to the machine.
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 
 	resp, err := proxyHandshake(conn, req)

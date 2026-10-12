@@ -19,7 +19,7 @@ const (
 	SchemeWebTransport = "https"
 )
 
-// ParseStandaloneURL checks a standalone device URL (see SchemeQUIC/SchemeWebTransport) and
+// ParseStandaloneURL checks a standalone machine URL (see SchemeQUIC/SchemeWebTransport) and
 // returns it, with WebTransport's path defaulting to xconnd.WebTransportPath.
 func ParseStandaloneURL(rawURL string) (*url.URL, error) {
 	u, err := url.Parse(rawURL)
@@ -41,7 +41,7 @@ func ParseStandaloneURL(rawURL string) (*url.URL, error) {
 	return u, nil
 }
 
-// StandaloneTLSConfig is how the client verifies a standalone device's certificate: pinned
+// StandaloneTLSConfig is how the client verifies a standalone machine's certificate: pinned
 // to certHash (its SHA-256 fingerprint, which deskconnd prints) when set, e.g. for a
 // self-signed certificate, otherwise against the system's trusted CAs.
 func StandaloneTLSConfig(certHash string) (*tls.Config, error) {
@@ -51,10 +51,10 @@ func StandaloneTLSConfig(certHash string) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS13}, nil
 }
 
-// ConnectStandalone connects to the standalone device at rawURL (see ParseStandaloneURL)
+// ConnectStandalone connects to the standalone machine at rawURL (see ParseStandaloneURL)
 // over QUIC or WebTransport, and joins realm.
 func ConnectStandalone(ctx context.Context, rawURL, certHash, realm string,
-	authenticator auth.ClientAuthenticator) (*DeviceConn, error) {
+	authenticator auth.ClientAuthenticator) (*MachineConn, error) {
 	u, err := ParseStandaloneURL(rawURL)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func ConnectStandalone(ctx context.Context, rawURL, certHash, realm string,
 		if err != nil {
 			return nil, err
 		}
-		conn := NewQUICDeviceConn(sess)
+		conn := NewQUICMachineConn(sess)
 		conn.close = closeSessionAndConn(sess.Close, conn.closeConn)
 		return conn, nil
 	}
@@ -81,7 +81,7 @@ func ConnectStandalone(ctx context.Context, rawURL, certHash, realm string,
 		return nil, err
 	}
 	closeConn := func() error { return sess.Connection().CloseWithError(0, "") }
-	return &DeviceConn{
+	return &MachineConn{
 		Session:    sess.Session,
 		openStream: sess.OpenStream,
 		closeConn:  closeConn,
@@ -98,18 +98,18 @@ func closeSessionAndConn(closeSession, closeConn func() error) func() error {
 	}
 }
 
-// DeviceConn is a connection to a device: one WAMP session plus raw streams opened
+// MachineConn is a connection to a machine: one WAMP session plus raw streams opened
 // alongside it, over QUIC (cloud or standalone) or WebTransport (standalone).
-type DeviceConn struct {
+type MachineConn struct {
 	*xconn.Session
 	openStream func() (net.Conn, error)
 	closeConn  func() error // the whole connection
 	close      func() error // this session
 }
 
-// NewQUICDeviceConn wraps a QUIC session.
-func NewQUICDeviceConn(s *xconn.QUICSession) *DeviceConn {
-	return &DeviceConn{
+// NewQUICMachineConn wraps a QUIC session.
+func NewQUICMachineConn(s *xconn.QUICSession) *MachineConn {
+	return &MachineConn{
 		Session:    s.Session,
 		openStream: s.OpenStream,
 		closeConn:  s.Connection().Close,
@@ -117,14 +117,14 @@ func NewQUICDeviceConn(s *xconn.QUICSession) *DeviceConn {
 	}
 }
 
-// OpenStream opens a raw stream to the device.
-func (c *DeviceConn) OpenStream() (net.Conn, error) { return c.openStream() }
+// OpenStream opens a raw stream to the machine.
+func (c *MachineConn) OpenStream() (net.Conn, error) { return c.openStream() }
 
 // Connection is the underlying connection shared by the session and its streams.
-func (c *DeviceConn) Connection() io.Closer { return closerFunc(c.closeConn) }
+func (c *MachineConn) Connection() io.Closer { return closerFunc(c.closeConn) }
 
-// Close leaves the WAMP session (and, for a standalone device, closes the connection).
-func (c *DeviceConn) Close() error { return c.close() }
+// Close leaves the WAMP session (and, for a standalone machine, closes the connection).
+func (c *MachineConn) Close() error { return c.close() }
 
 type closerFunc func() error
 

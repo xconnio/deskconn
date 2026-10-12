@@ -9,8 +9,8 @@ import (
 )
 
 // PrintMode is a purely local machine setting (read/written straight to
-// config.yml, no device/network round trip) so both the CLI (`desk
-// print enable/disable/status`) and the device-side print handler can read
+// config.yml, no machine/network round trip) so both the CLI (`desk
+// print enable/disable/status`) and the machine-side print handler can read
 // and change it directly.
 type PrintMode string
 

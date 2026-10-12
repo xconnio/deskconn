@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/xconnio/wampproto-go/auth"
 	xconnauth "github.com/xconnio/xconn-go/auth"
 )
@@ -13,7 +15,7 @@ type Organization struct {
 	Name string `json:"name" yaml:"name"`
 }
 
-type Device struct {
+type Machine struct {
 	Authid       string       `json:"authid" yaml:"authid"`
 	ID           string       `json:"id" yaml:"id"`
 	Name         string       `json:"name" yaml:"name"`
@@ -32,17 +34,35 @@ type ScreenshotConfig struct {
 }
 
 type Config struct {
-	Devices    []Device         `yaml:"devices"`
+	Machines   []Machine        `yaml:"machines"`
 	Printing   PrintingConfig   `yaml:"printing,omitempty"`
 	Screenshot ScreenshotConfig `yaml:"screenshot,omitempty"`
 }
 
-// StandaloneTarget is a standalone device the CLI connects to directly (desk --url),
-// instead of a device from the cloud account. It authenticates with PrivateKey if set,
+// UnmarshalYAML also accepts the "devices" key that config.yml used before machines were
+// renamed, so existing configs keep working; the next write saves them under "machines".
+func (c *Config) UnmarshalYAML(value *yaml.Node) error {
+	type plain Config
+	var raw struct {
+		plain          `yaml:",inline"`
+		LegacyMachines []Machine `yaml:"devices"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*c = Config(raw.plain)
+	if len(c.Machines) == 0 {
+		c.Machines = raw.LegacyMachines
+	}
+	return nil
+}
+
+// StandaloneTarget is a standalone machine the CLI connects to directly (desk --url),
+// instead of a machine from the cloud account. It authenticates with PrivateKey if set,
 // otherwise as user AuthID with Password, asking ReadPassword for it on first use if empty.
 type StandaloneTarget struct {
 	URL          string // quic://host:port, or https://host:port[/path] for WebTransport
-	CertHash     string // SHA-256 fingerprint to pin the device's certificate to, if set
+	CertHash     string // SHA-256 fingerprint to pin the machine's certificate to, if set
 	AuthID       string
 	PrivateKey   string // hex ed25519 seed
 	Password     string
@@ -97,7 +117,7 @@ func StandaloneTargetFor(realm string) (*StandaloneTarget, bool) {
 }
 
 // StreamProxyRequest is what the CLI sends on deskconnd's stream proxy socket. With an
-// empty Kind it only asks which transport the persistent connection to Realm's device
+// empty Kind it only asks which transport the persistent connection to Realm's machine
 // has; otherwise it opens a raw QUIC stream, or a data channel named Label, on it.
 type StreamProxyRequest struct {
 	Realm string    `json:"realm"`

@@ -12,7 +12,7 @@ import (
 	"github.com/xconnio/deskconn/common"
 )
 
-func GetDeviceInfo() (*common.DeviceInfo, error) {
+func GetMachineInfo() (*common.MachineInfo, error) {
 	physical, err := cpu.Counts(false)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func GetDeviceInfo() (*common.DeviceInfo, error) {
 		})
 	}
 
-	deviceInfo := &common.DeviceInfo{
+	machineInfo := &common.MachineInfo{
 		CPUModel:    cpuModel,
 		CPUPhysical: physical,
 		CPULogical:  logical,
@@ -162,10 +162,10 @@ func GetDeviceInfo() (*common.DeviceInfo, error) {
 	}
 
 	if battery, err := GetBatteryInfo(); err == nil {
-		deviceInfo.Battery = battery
+		machineInfo.Battery = battery
 	}
 
-	return deviceInfo, nil
+	return machineInfo, nil
 }
 
 // physicalInterfaces returns a set of interface names that correspond to real hardware (ethernet, WiFi).

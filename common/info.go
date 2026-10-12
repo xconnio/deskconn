@@ -17,7 +17,7 @@ type CPUTimes struct {
 	Steal   float64 `json:"steal"`
 }
 
-type DeviceInfo struct {
+type MachineInfo struct {
 	CPUModel    string    `json:"cpu_model"`
 	CPUPhysical int       `json:"cpu_physical"`
 	CPULogical  int       `json:"cpu_logical"`

@@ -21,7 +21,7 @@ func BuildPortEnvelope(kind byte, plaintext, key []byte) ([]byte, error) {
 }
 
 // PortForwardControlMsg is port forward's only control message: the
-// client's "dial this port" request, the device's ack/Error, or -- both
+// client's "dial this port" request, the machine's ack/Error, or -- both
 // fields empty -- a ping keeping ShellIdleTimeout from firing on a quiet
 // connection.
 type PortForwardControlMsg struct {
@@ -63,7 +63,7 @@ type PortReverseMsg struct {
 
 // RelayPortForwardQUIC bidirectionally relays tcpConn's bytes over stream,
 // encrypted, until either side closes or goes idle past ShellIdleTimeout.
-// Used by both the device (relaying to the dialed backend) and the client
+// Used by both the machine (relaying to the dialed backend) and the client
 // (relaying to the locally accepted connection) -- the relay itself doesn't
 // care which side opened the stream, so one implementation serves both.
 func RelayPortForwardQUIC(stream net.Conn, tcpConn net.Conn, sendKey, receiveKey []byte) {

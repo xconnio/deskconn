@@ -18,7 +18,7 @@ import (
 // *webrtc.PeerConnection, with no WAMP handshake required.
 type P2PChannelOpener = common.DataChannelOpener
 
-// ChannelOpener opens data channels to a device: on a P2P session of its own (see
+// ChannelOpener opens data channels to a machine: on a P2P session of its own (see
 // P2PChannels) or on deskconnd's persistent connection (see DaemonStreams).
 type ChannelOpener interface {
 	OpenMessageChannel(label string) (common.MessageChannel, error)
@@ -287,7 +287,7 @@ func p2pWriteOneChunk(channel common.MessageChannel, closed, sendReady <-chan st
 }
 
 // DownloadFilesP2P downloads remotePath (a file, or if recursive a
-// directory) from the device over parallel WebRTC data channels, all opened
+// directory) from the machine over parallel WebRTC data channels, all opened
 // on sess's single shared PeerConnection (numWorkers <= 0 uses the
 // default). Opening additional channels on an already-connected
 // PeerConnection needs no new ICE/DTLS handshake, so every worker's channel
@@ -306,7 +306,7 @@ func DownloadFilesP2P(sess ChannelOpener, remotePath, localPath string, recursiv
 }
 
 // UploadFilesP2P uploads localPath (a file, or if recursive a directory) to
-// the device over parallel WebRTC data channels, all opened on sess's
+// the machine over parallel WebRTC data channels, all opened on sess's
 // single shared PeerConnection (numWorkers <= 0 uses the default). Opening
 // additional channels on an already-connected PeerConnection needs no new
 // ICE/DTLS handshake, so every worker's channel comes up immediately once

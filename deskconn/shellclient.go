@@ -140,7 +140,7 @@ type shellHandshakeResult struct {
 
 func dialShellQUIC(ctx context.Context, realm, cfgDirectory string,
 	ctrl common.ShellControlMsg) (*shellHandshakeResult, error) {
-	quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func shellHandshakeQUIC(sess xconn.MultiplexedSession, realm string, ctrl common
 
 func dialShellP2P(ctx context.Context, realm, cfgDirectory string,
 	ctrl common.ShellControlMsg) (*shellHandshakeResult, error) {
-	p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+	p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +411,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	}
 
 	// shellReadLoop's error just means the connection closed, which is the
-	// normal way a session ends (the device closes it once the PTY exits) --
+	// normal way a session ends (the machine closes it once the PTY exits) --
 	// not a failure worth surfacing.
 	_ = shellReadLoop(active)
 	return nil
@@ -433,7 +433,7 @@ func migrateShell(active *activeShellConn, primary *shellHandshakeResult,
 }
 
 // awaitDaemonP2P waits, for up to P2PRequestTimeout, for deskconnd's connection to
-// realm's device to upgrade to P2P.
+// realm's machine to upgrade to P2P.
 func awaitDaemonP2P(ctx context.Context, realm, cfgDirectory string) (*DaemonStreams, error) {
 	ctx, cancel := context.WithTimeout(ctx, common.P2PRequestTimeout)
 	defer cancel()
@@ -465,7 +465,7 @@ func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
 }
 
 // RunExec is the client entry point for anything that runs one command on a
-// device's PTY and exits when it finishes (desk shell <command>, file ls, agent
+// machine's PTY and exits when it finishes (desk shell <command>, file ls, agent
 // resume) -- as opposed to RunShell's open-ended interactive session.
 func RunExec(ctx context.Context, mode, realm, cfgDirectory string, commandWithArgs []string) error {
 	var command string

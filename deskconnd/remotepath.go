@@ -14,7 +14,7 @@ import (
 const fileChunkSize = 1024 * 1024 // 1mb
 
 // resolvePath resolves a remote path argument (as given by a caller,
-// relative to the device's home directory unless already absolute) to a
+// relative to the machine's home directory unless already absolute) to a
 // clean absolute path on this machine.
 func resolvePath(remotePath string) (string, error) {
 	if filepath.IsAbs(remotePath) {

@@ -11,7 +11,7 @@ import (
 )
 
 // EnableScreenshot/DisableScreenshot/ScreenshotEnabled are purely local
-// machine settings (config.yml read/write, no device/network round trip),
+// machine settings (config.yml read/write, no machine/network round trip),
 // so the CLI (`desk screenshot enable/disable`) calls them directly.
 func EnableScreenshot(cfgDirectory string) error {
 	return updateScreenshotConfig(cfgDirectory, true)
@@ -45,7 +45,7 @@ func updateScreenshotConfig(cfgDirectory string, enabled bool) error {
 }
 
 // RevokeScreenshotPermission clears the screenshot entry from the portal
-// permission store. Called directly by the CLI when the device rejects a
+// permission store. Called directly by the CLI when the machine rejects a
 // permission-check call.
 func RevokeScreenshotPermission(conn *dbus.Conn) error {
 	obj := conn.Object("org.freedesktop.impl.portal.PermissionStore",

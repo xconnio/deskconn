@@ -13,7 +13,7 @@ import (
 	"github.com/xconnio/deskconn/common"
 )
 
-// ServeStreamProxy serves the CLI's raw streams on the persistent device connections:
+// ServeStreamProxy serves the CLI's raw streams on the persistent machine connections:
 // see common.StreamProxyRequest.
 func ServeStreamProxy(ln net.Listener, clientSessions *ClientSessions, cfgDirectory string) {
 	for {
@@ -48,7 +48,7 @@ func handleStreamProxyConn(conn net.Conn, clientSessions *ClientSessions, cfgDir
 
 	ctx, cancel := context.WithTimeout(context.Background(), common.StreamProxyConnectTimeout)
 	defer cancel()
-	quic, rtc, err := clientSessions.deviceTransports(ctx, req.Realm, cfgDirectory)
+	quic, rtc, err := clientSessions.machineTransports(ctx, req.Realm, cfgDirectory)
 	if err != nil {
 		fail(err)
 		return

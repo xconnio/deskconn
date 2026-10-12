@@ -14,10 +14,10 @@ import (
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-// quicConn is a device's QUIC connection plus a count of the operations running on it.
+// quicConn is a machine's QUIC connection plus a count of the operations running on it.
 // Once retired (its session upgraded to P2P) it closes as soon as that count is zero.
 type quicConn struct {
-	*common.DeviceConn
+	*common.MachineConn
 	closeConn func() error
 
 	mu      sync.Mutex
@@ -26,8 +26,8 @@ type quicConn struct {
 	closed  bool
 }
 
-func newQUICConn(conn *common.DeviceConn) *quicConn {
-	return &quicConn{DeviceConn: conn, closeConn: conn.Connection().Close}
+func newQUICConn(conn *common.MachineConn) *quicConn {
+	return &quicConn{MachineConn: conn, closeConn: conn.Connection().Close}
 }
 
 // acquire reports whether the connection can still be used, and counts the caller as a
@@ -69,7 +69,7 @@ func (q *quicConn) closeIf(force bool) {
 	}
 }
 
-type deviceSession struct {
+type machineSession struct {
 	session     *xconn.Session
 	connectedAt time.Time
 	ctx         context.Context
@@ -91,7 +91,7 @@ type deviceSession struct {
 }
 
 // subscribeUpgrade registers interest in this session entry being replaced.
-func (ds *deviceSession) subscribeUpgrade() <-chan *xconn.Session {
+func (ds *machineSession) subscribeUpgrade() <-chan *xconn.Session {
 	ch := make(chan *xconn.Session, 1)
 	ds.Lock()
 	ds.upgradeSubs = append(ds.upgradeSubs, ch)
@@ -101,7 +101,7 @@ func (ds *deviceSession) subscribeUpgrade() <-chan *xconn.Session {
 
 // closeTransports closes a dropped entry's connections: its QUIC connection, unless its
 // successor keeps the same one, and its PeerConnection (leaving the session doesn't).
-func (ds *deviceSession) closeTransports(keepQUIC *quicConn) {
+func (ds *machineSession) closeTransports(keepQUIC *quicConn) {
 	if ds.quic != nil && ds.quic != keepQUIC {
 		ds.quic.closeIf(true)
 	}
@@ -113,7 +113,7 @@ func (ds *deviceSession) closeTransports(keepQUIC *quicConn) {
 // notifyReplaced delivers newSession to every subscriber registered via subscribeUpgrade and
 // closes their channels. Called once, right after this entry stops being the realm's current
 // one in ClientSessions.sessions.
-func (ds *deviceSession) notifyReplaced(newSession *xconn.Session) {
+func (ds *machineSession) notifyReplaced(newSession *xconn.Session) {
 	ds.Lock()
 	subs := ds.upgradeSubs
 	ds.upgradeSubs = nil
@@ -125,7 +125,7 @@ func (ds *deviceSession) notifyReplaced(newSession *xconn.Session) {
 }
 
 type ClientSessions struct {
-	sessions     map[string]*deviceSession
+	sessions     map[string]*machineSession
 	disconnected map[string]struct{}
 	loggedIn     bool
 
@@ -134,7 +134,7 @@ type ClientSessions struct {
 
 func NewClientSessions() *ClientSessions {
 	return &ClientSessions{
-		sessions:     make(map[string]*deviceSession),
+		sessions:     make(map[string]*machineSession),
 		disconnected: make(map[string]struct{}),
 	}
 }
@@ -166,23 +166,23 @@ func (c *ClientSessions) SessionContext(realm string) (context.Context, bool) {
 	return session.ctx, true
 }
 
-// StoreDeviceSession installs session as realm's current device session. If it replaces an
+// StoreMachineSession installs session as realm's current machine session. If it replaces an
 // existing entry (a QUIC-to-P2P upgrade, or a reconnect after a network blip), every caller
-// that subscribed to that old entry via EnsureDeviceSessionWithUpgrade is notified with the
+// that subscribed to that old entry via EnsureMachineSessionWithUpgrade is notified with the
 // new session — not just whichever caller happened to trigger the replacement — so every
-// long-lived proxied call sharing this device connection can independently re-issue itself
+// long-lived proxied call sharing this machine connection can independently re-issue itself
 // on the new session.
-func (c *ClientSessions) StoreDeviceSession(realm string, session *xconn.Session,
-	webrtcSession *xconnwebrtc.WebRTCSession, quic *common.DeviceConn, ctx context.Context,
+func (c *ClientSessions) StoreMachineSession(realm string, session *xconn.Session,
+	webrtcSession *xconnwebrtc.WebRTCSession, quic *common.MachineConn, ctx context.Context,
 	cancel context.CancelFunc) {
 	var conn *quicConn
 	if quic != nil {
 		conn = newQUICConn(quic)
 	}
-	c.storeDeviceSession(realm, session, webrtcSession, conn, ctx, cancel)
+	c.storeMachineSession(realm, session, webrtcSession, conn, ctx, cancel)
 }
 
-func (c *ClientSessions) storeDeviceSession(realm string, session *xconn.Session,
+func (c *ClientSessions) storeMachineSession(realm string, session *xconn.Session,
 	webrtcSession *xconnwebrtc.WebRTCSession, quic *quicConn, ctx context.Context,
 	cancel context.CancelFunc) {
 	c.Lock()
@@ -190,7 +190,7 @@ func (c *ClientSessions) storeDeviceSession(realm string, session *xconn.Session
 	if hadOld {
 		old.cancel()
 	}
-	c.sessions[realm] = &deviceSession{
+	c.sessions[realm] = &machineSession{
 		session:       session,
 		webrtcSession: webrtcSession,
 		quic:          quic,
@@ -206,7 +206,7 @@ func (c *ClientSessions) storeDeviceSession(realm string, session *xconn.Session
 	}
 }
 
-func (c *ClientSessions) DeviceSessions() map[string]int64 {
+func (c *ClientSessions) MachineSessions() map[string]int64 {
 	c.Lock()
 	defer c.Unlock()
 	result := make(map[string]int64, len(c.sessions))
@@ -216,7 +216,7 @@ func (c *ClientSessions) DeviceSessions() map[string]int64 {
 	return result
 }
 
-func (c *ClientSessions) DeleteDeviceSession(realm string) {
+func (c *ClientSessions) DeleteMachineSession(realm string) {
 	c.Lock()
 	session, ok := c.sessions[realm]
 	if ok {
@@ -252,7 +252,7 @@ func (c *ClientSessions) DisconnectAll() {
 		c.disconnected[realm] = struct{}{}
 	}
 	sessions := c.sessions
-	c.sessions = make(map[string]*deviceSession)
+	c.sessions = make(map[string]*machineSession)
 	c.Unlock()
 
 	for _, entry := range sessions {
@@ -262,29 +262,29 @@ func (c *ClientSessions) DisconnectAll() {
 	}
 }
 
-// EnsureDeviceSession returns the cached session if connected, otherwise connects via QUIC
+// EnsureMachineSession returns the cached session if connected, otherwise connects via QUIC
 // and starts a background upgrade to WebRTC P2P.
-func (c *ClientSessions) EnsureDeviceSession(ctx context.Context, realm,
+func (c *ClientSessions) EnsureMachineSession(ctx context.Context, realm,
 	cfgDirectory string) (*xconn.Session, error) {
-	sess, _, err := c.ensureDeviceSession(ctx, realm, cfgDirectory, false)
+	sess, _, err := c.ensureMachineSession(ctx, realm, cfgDirectory, false)
 	return sess, err
 }
 
-// EnsureDeviceSessionWithUpgrade is like EnsureDeviceSession but also subscribes to the
+// EnsureMachineSessionWithUpgrade is like EnsureMachineSession but also subscribes to the
 // realm's session entry being replaced — by the background QUIC-to-P2P upgrade this starts,
 // or by a later reconnect after a network blip — and returns that subscription. Every
 // concurrent caller gets its own subscription and is independently notified, for a proxied
 // call that needs to re-issue itself on the new session after a transport swap rather than
 // just learning its own call ended. Callers that use this must eventually stop reading it
 // (the call ending is enough — the channel is buffered so a delivery to an abandoned
-// subscriber never blocks), unlike EnsureDeviceSession, which is for callers with no such
+// subscriber never blocks), unlike EnsureMachineSession, which is for callers with no such
 // lifecycle to hang a subscription off.
-func (c *ClientSessions) EnsureDeviceSessionWithUpgrade(ctx context.Context, realm,
+func (c *ClientSessions) EnsureMachineSessionWithUpgrade(ctx context.Context, realm,
 	cfgDirectory string) (*xconn.Session, <-chan *xconn.Session, error) {
-	return c.ensureDeviceSession(ctx, realm, cfgDirectory, true)
+	return c.ensureMachineSession(ctx, realm, cfgDirectory, true)
 }
 
-func (c *ClientSessions) ensureDeviceSession(ctx context.Context, realm, cfgDirectory string,
+func (c *ClientSessions) ensureMachineSession(ctx context.Context, realm, cfgDirectory string,
 	subscribe bool) (*xconn.Session, <-chan *xconn.Session, error) {
 	c.Lock()
 	delete(c.disconnected, realm)
@@ -313,18 +313,18 @@ func (c *ClientSessions) ensureDeviceSession(ctx context.Context, realm, cfgDire
 // with nil, the same "give up" signal a failed P2P upgrade sends) once the outcome is known,
 // so nobody who subscribed to it is left waiting on a channel that would otherwise never fire.
 func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirectory string,
-	staleEntry *deviceSession, subscribe bool) (*xconn.Session, <-chan *xconn.Session, error) {
-	deviceConn, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+	staleEntry *machineSession, subscribe bool) (*xconn.Session, <-chan *xconn.Session, error) {
+	machineConn, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		if staleEntry != nil {
 			staleEntry.notifyReplaced(nil)
 		}
 		return nil, nil, err
 	}
-	quicSess := newQUICConn(deviceConn)
+	quicSess := newQUICConn(machineConn)
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-	entry := &deviceSession{
+	entry := &machineSession{
 		session:     quicSess.Session,
 		quic:        quicSess,
 		connectedAt: time.Now(),
@@ -389,7 +389,7 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *quicConn, realm, cfgDirectory
 		return
 	}
 
-	c.storeDeviceSession(realm, webrtcSess.Session, webrtcSess, quicSess, sessCtx, cancel)
+	c.storeMachineSession(realm, webrtcSess.Session, webrtcSess, quicSess, sessCtx, cancel)
 	quicSess.retire()
 	log.Printf("p2p upgrade %s: upgraded to WebRTC", realm)
 
@@ -412,8 +412,8 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 	retryDelay := 1 * time.Second
 	maxDelay := 30 * time.Second
 	for c.LoggedIn() && !c.isDisconnected(realm) {
-		c.DeleteDeviceSession(realm)
-		deviceConn, err := common.ConnectDeviceRealmQUIC(context.Background(), realm, cfgDirectory)
+		c.DeleteMachineSession(realm)
+		machineConn, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			log.Printf("failed to connect cloud: %v", err)
 			retryDelay *= 2
@@ -424,19 +424,19 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 			continue
 		}
 		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-		newSess := newQUICConn(deviceConn)
-		c.storeDeviceSession(realm, newSess.Session, nil, newSess, sessCtx, cancel)
+		newSess := newQUICConn(machineConn)
+		c.storeMachineSession(realm, newSess.Session, nil, newSess, sessCtx, cancel)
 		log.Printf("reconnect %s: reconnected via QUIC", realm)
 		common.SafeGo(func() { c.upgradeToWebRTC(newSess, realm, cfgDirectory) }) //nolint
 		return
 	}
 }
 
-// deviceTransports returns what raw streams to realm's device can be opened on, connecting
+// machineTransports returns what raw streams to realm's machine can be opened on, connecting
 // first if needed: quic (retired, possibly closed, once rtc is set) and rtc.
-func (c *ClientSessions) deviceTransports(ctx context.Context, realm,
+func (c *ClientSessions) machineTransports(ctx context.Context, realm,
 	cfgDirectory string) (quic *quicConn, rtc *xconnwebrtc.WebRTCSession, err error) {
-	if _, err := c.EnsureDeviceSession(ctx, realm, cfgDirectory); err != nil {
+	if _, err := c.EnsureMachineSession(ctx, realm, cfgDirectory); err != nil {
 		return nil, nil, err
 	}
 
@@ -477,7 +477,7 @@ func (c *ClientSessions) Logout() {
 	c.Lock()
 	c.loggedIn = false
 	sessions := c.sessions
-	c.sessions = make(map[string]*deviceSession)
+	c.sessions = make(map[string]*machineSession)
 	c.Unlock()
 
 	for _, session := range sessions {

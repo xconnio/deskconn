@@ -24,13 +24,13 @@ func parseAISessionListResult(respBytes []byte) ([]common.AISessionSummary, erro
 	return sessions, nil
 }
 
-func CallAISessionList(deviceSession *xconn.Session, path string) ([]common.AISessionSummary, error) {
+func CallAISessionList(machineSession *xconn.Session, path string) ([]common.AISessionSummary, error) {
 	payload, err := json.Marshal(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	respBytes, err := CallFileOp(deviceSession, common.ProcedureAISessionList, payload)
+	respBytes, err := CallFileOp(machineSession, common.ProcedureAISessionList, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -58,13 +58,13 @@ func parseAISessionPullResult(respBytes []byte) ([]common.AISessionBundle, error
 	return bundles, nil
 }
 
-func CallAISessionPull(deviceSession *xconn.Session, path, tool, sessionID string) ([]common.AISessionBundle, error) {
+func CallAISessionPull(machineSession *xconn.Session, path, tool, sessionID string) ([]common.AISessionBundle, error) {
 	payload, err := json.Marshal(common.AISessionPullArgs{Path: path, Tool: tool, SessionID: sessionID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	respBytes, err := CallFileOp(deviceSession, common.ProcedureAISessionPull, payload)
+	respBytes, err := CallFileOp(machineSession, common.ProcedureAISessionPull, payload)
 	if err != nil {
 		return nil, err
 	}

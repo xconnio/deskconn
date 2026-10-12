@@ -75,7 +75,7 @@ func TestCurrentPrintModeEmptyModeField(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(cfgDir, "config.yml"),
-		[]byte("devices: []\n"),
+		[]byte("machines: []\n"),
 		0600,
 	))
 
@@ -111,18 +111,18 @@ func TestSetPrintModePreservesExistingConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	type minConfig struct {
-		Devices []map[string]string `yaml:"devices"`
+		Machines []map[string]string `yaml:"machines"`
 	}
-	seed := minConfig{Devices: []map[string]string{{"authid": "dev1", "id": "id1"}}}
+	seed := minConfig{Machines: []map[string]string{{"authid": "dev1", "id": "id1"}}}
 	data, err := yaml.Marshal(seed)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.yml"), data, 0600))
 
 	require.NoError(t, deskconn.SetPrintMode(common.PrintModeAccept))
 
-	devices, err := common.DevicesFromCfg(cfgDir)
+	machines, err := common.MachinesFromCfg(cfgDir)
 	require.NoError(t, err)
-	require.Len(t, devices, 1, "SetPrintMode must not erase other config sections")
+	require.Len(t, machines, 1, "SetPrintMode must not erase other config sections")
 }
 
 func TestEnablePrinting(t *testing.T) {

@@ -30,7 +30,7 @@ func IsEditableExtension(name string) bool {
 }
 
 // BuildEditPatch computes a unified diff between original and edited,
-// formatted for ProcedureFileEdit to apply on the device.
+// formatted for ProcedureFileEdit to apply on the machine.
 func BuildEditPatch(original, edited []byte) string {
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(string(original), string(edited), false)

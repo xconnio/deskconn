@@ -144,7 +144,7 @@ func TestPortForwardIgnoresPing(t *testing.T) {
 	require.Equal(t, []byte("still works"), plaintext)
 }
 
-// TestPortForwardClosesBackendOnClientDisconnect confirms the device's
+// TestPortForwardClosesBackendOnClientDisconnect confirms the machine's
 // dialed backend connection closes soon after the client disconnects,
 // without waiting for ShellIdleTimeout -- net.Pipe's Close immediately
 // errors the peer's blocked Read.
@@ -178,7 +178,7 @@ func TestPortForwardClosesBackendOnClientDisconnect(t *testing.T) {
 	select {
 	case backendConn = <-backendAcceptedCh:
 	case <-time.After(2 * time.Second):
-		t.Fatal("device never dialed the backend")
+		t.Fatal("machine never dialed the backend")
 	}
 	t.Cleanup(func() { _ = backendConn.Close() })
 
@@ -193,7 +193,7 @@ func TestPortForwardClosesBackendOnClientDisconnect(t *testing.T) {
 }
 
 func TestPortReverseListenFailureReportsError(t *testing.T) {
-	// Occupy a port so the device's listen call fails.
+	// Occupy a port so the machine's listen call fails.
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = occupied.Close() })

@@ -117,7 +117,7 @@ func parseRightsFD(oob []byte) (int, error) {
 }
 
 // OpenTUN mirrors the package-level OpenTUN, but has the helper create the
-// device and hands back the resulting file descriptor.
+// machine and hands back the resulting file descriptor.
 func (c *VPNHelperClient) OpenTUN(name string) (tun *os.File, ifaceName string, err error) {
 	resp, fd, err := c.call(VPNOpOpenTUN, VPNOpenTUNArgs{Name: name})
 	if err != nil {

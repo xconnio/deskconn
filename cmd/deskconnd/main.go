@@ -21,7 +21,7 @@ import (
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
-// lanPort is where xlink serves the device realm to clients on the local network.
+// lanPort is where xlink serves the machine realm to clients on the local network.
 const lanPort = 18080
 
 // Standalone transports (--transport).
@@ -134,7 +134,7 @@ func main() {
 	defer streamListener.Close()
 	common.SafeGo(func() { deskconnApis.ServeStreamRelay(streamListener) })
 
-	// Stream proxy listener: the CLI's raw streams on the persistent device connections.
+	// Stream proxy listener: the CLI's raw streams on the persistent machine connections.
 	proxySockPath := filepath.Join(cfgDirectory, common.StreamProxySocket)
 	_ = os.Remove(proxySockPath)
 	proxyListener, err := net.Listen("unix", proxySockPath)
@@ -142,7 +142,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer proxyListener.Close()
-	// Owner only: connecting gives access to the user's devices.
+	// Owner only: connecting gives access to the user's machines.
 	if err := os.Chmod(proxySockPath, 0600); err != nil {
 		log.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func main() {
 	}
 	log.Println("registered procedures with xlink")
 
-	// xlink exposes the app layer's device procedures to remote clients and relays their
+	// xlink exposes the app layer's machine procedures to remote clients and relays their
 	// raw streams and WebRTC data channels to streamSockPath.
 	xlinkApp := &xconnd.App{
 		Session: appSession,
@@ -195,8 +195,8 @@ func main() {
 			common.ProcedureAudioIsMuted,
 			common.ProcedureScreenshot,
 			common.ProcedureScreenshotPermission,
-			common.ProcedureDeviceInfo,
-			common.ProcedureDeviceIsDesktop,
+			common.ProcedureMachineInfo,
+			common.ProcedureMachineIsDesktop,
 			common.ProcedureProcessList,
 			common.ProcedureProcessSignal,
 			common.ProcedureAppList,
@@ -224,7 +224,7 @@ func main() {
 			return
 		}
 
-		// Standalone: serve the device realm over QUIC and/or WebTransport to --public-key
+		// Standalone: serve the machine realm over QUIC and/or WebTransport to --public-key
 		// holders and --user accounts, with no cloud account.
 		if err := xconnd.RunStandalone(ctx, xlinkApp, standaloneConfig); err != nil {
 			log.Fatalf("standalone: %v", err)
@@ -240,7 +240,7 @@ func main() {
 	<-xlinkDone
 }
 
-// newStandaloneConfig serves the standalone device realm over transport (see the transport*
+// newStandaloneConfig serves the standalone machine realm over transport (see the transport*
 // constants) with the certificate in certFile/keyFile, or else a self-signed one kept in
 // cfgDirectory, whose fingerprint clients pin with desk --cert-hash.
 func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
@@ -273,7 +273,7 @@ func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
 	return config, nil
 }
 
-// newCloudConfig is how xlink attaches this device to the deskconn cloud.
+// newCloudConfig is how xlink attaches this machine to the deskconn cloud.
 func newCloudConfig(cfgDirectory string) (*xconnd.CloudConfig, error) {
 	credentialsFile, err := common.CredentialsFilePath()
 	if err != nil {
@@ -315,7 +315,7 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Des
 	clientSessions *deskconnd.ClientSessions, cfgDirectory string) error {
 	handlers := map[string]xconn.InvocationHandler{
 		common.ProcedureProxyFileOp:       deskconnd.ProxyFileOpHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyDeviceInfo:   deskconnd.ProxyDeviceInfoHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyMachineInfo:  deskconnd.ProxyMachineInfoHandler(clientSessions, cfgDirectory),
 		common.ProcedureProxyPing:         deskconnd.ProxyPingHandler(clientSessions, cfgDirectory),
 		common.ProcedureProxyCat:          deskconnd.ProxyCatHandler(clientSessions, cfgDirectory),
 		common.ProcedureProxyVPNStart:     deskconnd.ProxyVPNStartHandler(deskconnApis),
@@ -335,7 +335,7 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Des
 			if err != nil {
 				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 			}
-			_, err = clientSessions.EnsureDeviceSession(ctx, realm, cfgDirectory)
+			_, err = clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 			if err != nil {
 				return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 			}
@@ -353,8 +353,8 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Des
 			clientSessions.DisconnectAll()
 			return xconn.NewInvocationResult()
 		},
-		common.ProcedureConnectedDevices: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-			return xconn.NewInvocationResult(clientSessions.DeviceSessions())
+		common.ProcedureConnectedMachines: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			return xconn.NewInvocationResult(clientSessions.MachineSessions())
 		},
 	}
 

@@ -82,7 +82,7 @@ func ReadEncryptedMsg(r io.Reader, v any, key []byte) error {
 
 // RoutingFrame is the first message on every client-opened QUIC stream.
 // deskconn-router's connBroker reads exactly these fields to route the
-// stream to the right device, then bridges the rest of the stream through
+// stream to the right machine, then bridges the rest of the stream through
 // unmodified -- so it must be sent in the clear, before the key exchange
 // (see KeyExchangeMsg) and the encrypted real request that follow it.
 type RoutingFrame struct {

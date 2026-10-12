@@ -19,7 +19,7 @@ import (
 
 // RunPortForward is the client entry point for `desk port forward`. It
 // listens on localPort and, for each accepted local connection, opens a
-// fresh raw stream/channel and asks the device to dial remotePort, then
+// fresh raw stream/channel and asks the machine to dial remotePort, then
 // relays. mode picks "quic"/"p2p" directly, or "" uses deskconnd's persistent
 // connection, falling back (without deskconnd) to trying P2P first, then QUIC
 // -- matching file transfer's default-mode policy.
@@ -32,14 +32,14 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 
 	switch mode {
 	case modeP2P:
-		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
 		return acceptPortForwardLoopP2P(ctx, ln, P2PChannels(p2pSess), remotePort)
 	case modeQUIC:
-		quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -57,13 +57,13 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			return err
 		}
-		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
 			return acceptPortForwardLoopP2P(ctx, ln, P2PChannels(p2pSess), remotePort)
 		}
 		fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
-		quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -165,8 +165,8 @@ func forwardOneConnectionP2P(p2pSess ChannelOpener, localConn net.Conn, remotePo
 
 // completePortForwardHandshake sends the "dial this port" request over conn
 // (either transport, via shellConn from shellclient.go) and waits for the
-// device's ack, returning false (caller should give up) on any failure,
-// including the device reporting a dial error.
+// machine's ack, returning false (caller should give up) on any failure,
+// including the machine reporting a dial error.
 func completePortForwardHandshake(conn shellConn, sendKey, receiveKey []byte, remotePort string) bool {
 	env, err := common.BuildPortEnvelope(common.PortMsgControl,
 		common.MustJSON(common.PortForwardControlMsg{Port: remotePort}), sendKey)
@@ -196,14 +196,14 @@ func completePortForwardHandshake(conn shellConn, sendKey, receiveKey []byte, re
 }
 
 // RunPortReverse is the client entry point for `desk port reverse`. It
-// opens one session-level raw stream/channel, asks the device to listen on
-// remotePort, and for every external connection the device reports, dials
+// opens one session-level raw stream/channel, asks the machine to listen on
+// remotePort, and for every external connection the machine reports, dials
 // localhost:localPort and relays. Same mode/fallback policy as
 // RunPortForward.
 func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, localPort string) error {
 	switch mode {
 	case modeP2P:
-		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -223,7 +223,7 @@ func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			return err
 		}
-		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
 			return runPortReverseP2P(ctx, P2PChannels(p2pSess), remotePort, localPort)
@@ -234,7 +234,7 @@ func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 }
 
 func runPortReverseQUIC(ctx context.Context, realm, cfgDirectory, remotePort, localPort string) error {
-	quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -349,8 +349,8 @@ func runPortReverseP2P(ctx context.Context, p2pSess ChannelOpener, remotePort, l
 }
 
 // startPortReverseListen sends the initial "listen on remotePort" request
-// and waits for the device's ack, returning an error (including the
-// device's own reported listen failure) if it can't proceed.
+// and waits for the machine's ack, returning an error (including the
+// machine's own reported listen failure) if it can't proceed.
 func startPortReverseListen(conn shellConn, sendKey, receiveKey []byte, remotePort string) error {
 	env, err := common.BuildPortEnvelope(common.PortMsgControl,
 		common.MustJSON(common.PortReverseMsg{Op: common.PortRevOpListen, RemotePort: remotePort}), sendKey)
@@ -382,7 +382,7 @@ func startPortReverseListen(conn shellConn, sendKey, receiveKey []byte, remotePo
 // runPortReverseQUIC and runPortReverseP2P: readNext blocks for the next
 // decrypted envelope, writer is this session's single wire-write owner (see
 // PortReverseWriter), and sendKey encrypts what this loop sends back.
-// Mirrors handleQUICPortReverseStream/servePortReverseChannel's device-side
+// Mirrors handleQUICPortReverseStream/servePortReverseChannel's machine-side
 // loop.
 func runPortReverseClientLoop(ctx context.Context, readNext func() (byte, []byte, error),
 	writer *common.PortReverseWriter, sendKey []byte, localPort string) error {
@@ -450,7 +450,7 @@ func runPortReverseClientLoop(ctx context.Context, readNext func() (byte, []byte
 }
 
 // pumpPortReverseLocalConn reads localConn (the connection this client just
-// dialed to localhost:localPort on the device's behalf) and forwards its
+// dialed to localhost:localPort on the machine's behalf) and forwards its
 // bytes back over writer, tagged with connID, until it errors or closes.
 func pumpPortReverseLocalConn(localConn net.Conn, connID uint64, sendKey []byte, writer *common.PortReverseWriter,
 	mu *sync.Mutex, localConns map[uint64]net.Conn) {

@@ -15,7 +15,7 @@ import (
 // RunLogs is the client entry point for `desk machine logs`. It validates since
 // up front, opens one raw stream/channel, sends the one-time log
 // request, then writes every received chunk straight to stdout until the
-// device finishes or ctx is canceled. mode picks "quic"/"p2p" directly, or
+// machine finishes or ctx is canceled. mode picks "quic"/"p2p" directly, or
 // "" uses deskconnd's persistent connection, falling back (without deskconnd)
 // to trying P2P first, then QUIC.
 func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
@@ -28,7 +28,7 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 
 	switch mode {
 	case modeP2P:
-		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -48,7 +48,7 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			return err
 		}
-		p2pSess, err := ConnectDeviceRealmP2PSession(ctx, realm, cfgDirectory)
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
 			return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since)
@@ -60,7 +60,7 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 
 func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 	follow bool, tailN int64, since string) error {
-	quicSess, err := common.ConnectDeviceRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return err
 	}
