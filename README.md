@@ -297,13 +297,6 @@ desk port forward <machine> [-l LOCAL] [-r REMOTE] [--p2p]
 desk port reverse <machine> [-r REMOTE] [-l LOCAL] [--p2p]
 ```
 
-### Configuration
-
-```
-desk config show
-desk config edit
-```
-
 ### Self-update
 
 ```
