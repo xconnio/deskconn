@@ -60,7 +60,7 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// StandaloneTarget is a standalone machine the CLI connects to directly (desk --url),
+// StandaloneTarget is a standalone machine the CLI connects to directly (desk --profile),
 // instead of a machine from the cloud account. It authenticates with PrivateKey if set,
 // otherwise as user AuthID with Password, asking ReadPassword for it on first use if empty.
 type StandaloneTarget struct {

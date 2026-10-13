@@ -127,7 +127,7 @@ CA); without them deskconn-userd generates a self-signed certificate once and ke
 the certificate's SHA-256 fingerprint at startup:
 
 ```
-standalone: certificate SHA-256 fingerprint 3f9a1c… (clients that don't trust its issuer connect with desk --cert-hash 3f9a1c…)
+standalone: certificate SHA-256 fingerprint 3f9a1c… (clients that don't trust its issuer pin it with desk profile add --cert-hash 3f9a1c…)
 ```
 
 To allow username/password logins instead of (or as well as) keys, add `--user username:password`, repeated for more
@@ -137,33 +137,40 @@ accounts (or set `DESKCONND_USERS`, one `username:password` per line, to keep pa
 ~/.local/lib/exec/deskconn-userd --standalone --user alice:s3cret [--user <username:password> ...]
 ```
 
-### 3. Connect from the client
+### 3. Save it as a profile on the client
 
 ```bash
-export DESKCONN_URL=quic://203.0.113.5:18080 DESKCONN_CERT_HASH=3f9a1c… DESKCONN_PRIVATE_KEY=9f2d0b17…
-desk shell
-desk shell -- uname -a
-desk file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
-desk file cat :/etc/hostname
-desk port forward 8080:80
+desk profile add office \
+  --url quic://203.0.113.5:18080 \
+  --cert-hash 3f9a1c… \
+  --private-key 9f2d0b17…
 ```
 
-With a username/password account, give the username as `--authid` (default: the current user) and the password with
-`--secret` or `DESKCONN_SECRET`; if neither a key nor a password is given, desk prompts for the password:
+Then pick it with `--profile`. Commands take no machine argument, since the profile is the machine:
 
 ```bash
-export DESKCONN_URL=quic://203.0.113.5:18080 DESKCONN_CERT_HASH=3f9a1c… DESKCONN_AUTHID=alice
-desk shell
+desk --profile office shell
+desk --profile office shell -- uname -a
+desk --profile office file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
+desk --profile office file cat :/etc/hostname
+desk --profile office port forward 8080:80
+```
+
+For a username/password account, save the profile without `--private-key`, with the username as `--authid` (default:
+the current user). desk asks for the password each time it connects; it's never saved:
+
+```bash
+desk profile add office --url quic://203.0.113.5:18080 --cert-hash 3f9a1c… --authid alice
+desk --profile office shell
 # Password for alice:
 ```
 
-Use `https://host:18081` as the URL to connect over WebTransport instead. `--cert-hash` (or `DESKCONN_CERT_HASH`)
-pins the machine's certificate, which is what makes a self-signed one trusted; leave it out when the certificate is
-issued by a CA the client trusts.
+Use `https://host:18081` as the URL to connect over WebTransport instead. `--cert-hash` pins the machine's certificate,
+which is what makes a self-signed one trusted; leave it out when the certificate is issued by a CA the client trusts.
 
-The same works with flags: `desk --url quic://203.0.113.5:18080 --cert-hash 3f9a1c… --private-key 9f2d0b17… shell`. With `--url`,
-commands take no machine argument. `machine ping`, `machine connect`, `machine disconnect` and `ls` work on machines of
-your account only.
+Profiles are kept in `~/.deskconn/profiles.yml`, readable only by you. `desk profile ls` lists them and
+`desk profile remove <name>` deletes one. `machine ping`, `machine connect`, `machine disconnect` and `ls` work on
+machines of your account only.
 
 ## Self-hosting
 
@@ -266,9 +273,11 @@ desk machine disconnect [<machine>] [--all]
 Standalone machines (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
-desk keygen                                        # key pair: public for deskconn-userd --public-key, private for --private-key
-desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_CERT_HASH / DESKCONN_PRIVATE_KEY
-desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --authid <user> [--secret <pw>] <command>   # also DESKCONN_AUTHID / DESKCONN_SECRET
+desk keygen                # key pair: public for deskconn-userd --public-key, private for profile add --private-key
+desk profile add    <name> --url <quic://host:port|https://host:port> [--cert-hash <sha256>] [--private-key <hex>] [--authid <user>]
+desk profile remove <name>
+desk profile ls
+desk --profile <name> <command>
 ```
 
 ### Shell
@@ -343,6 +352,7 @@ All credentials and configuration are stored under `~/.deskconn/`:
 | `id_ed25519`            | CLI private key, username, and key expiry                               |
 | `id_ed25519.pub`        | CLI public key, username, and account name                              |
 | `config.yml`            | Machine list and aliases                                                |
+| `profiles.yml`          | Standalone machine profiles (`desk profile add`), including private keys |
 | `principals.json`       | Local CryptoSign principals (used by the local WAMP router)             |
 | `turn_credentials.json` | Cached TURN server credentials for WebRTC                               |
 | `deskconn.sock`         | Unix socket for local CLI–daemon communication                          |
