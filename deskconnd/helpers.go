@@ -3,6 +3,9 @@ package deskconnd
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -161,6 +164,28 @@ func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn
 	}
 }
 
+// ProxyCallHandler forwards a call to procedure on the machine whose realm is the first
+// argument, passing the remaining arguments through.
+func ProxyCallHandler(clientSessions *ClientSessions, cfgDirectory, procedure string) xconn.InvocationHandler {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		realm, err := inv.ArgString(0)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		}
+
+		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
+		if err != nil {
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		}
+
+		callResp := machineSess.Call(procedure).Args(inv.Args()[1:]...).Do()
+		if callResp.Err != nil {
+			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+		}
+		return xconn.NewInvocationResult(callResp.Args()...)
+	}
+}
+
 func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		realm, err := inv.ArgString(0)
@@ -174,7 +199,7 @@ func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string
 		}
 
 		var printers []any
-		if err := remoteControlCall(machineSess, common.ProcedurePrinterList, nil, &printers); err != nil {
+		if err := appCall(machineSess, printerAppID, common.ProcedurePrinterList, nil, &printers); err != nil {
 			_ = machineSess.Leave()
 			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
@@ -210,7 +235,7 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 
 		req := map[string]any{"printer": printer, "filename": filename, "data": data}
 		var jobID string
-		if err := remoteControlCall(machineSess, common.ProcedurePrinterPrint, req, &jobID); err != nil {
+		if err := appCall(machineSess, printerAppID, common.ProcedurePrinterPrint, req, &jobID); err != nil {
 			_ = machineSess.Leave()
 			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
@@ -220,11 +245,44 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 	}
 }
 
-// remoteControlCall calls one of remotecontrol-app's procedures on a machine, end-to-end
-// encrypted with remotecontrol-app's own key exchange: req, if not nil, is sent as JSON and
-// the JSON result is unmarshaled into out.
-func remoteControlCall(session *xconn.Session, procedure string, req, out any) error {
-	enc, err := common.ClientKeyExchangeWith(session, common.ProcedureRemoteControlKeyExchange)
+// printerAppID is the app remotecontrol-app serves printing as.
+const printerAppID = "printer"
+
+// listedApp is an app as ProcedureCapabilitiesList lists it.
+type listedApp struct {
+	ID          string `json:"id"`
+	Enabled     bool   `json:"enabled"`
+	KeyExchange string `json:"key_exchange"`
+}
+
+// appCall calls one of app appID's procedures on a machine, end-to-end encrypted with the
+// keys of the app's own key exchange (see ProcedureCapabilitiesList): req, if not nil, is
+// sent as JSON and the JSON result is unmarshaled into out.
+func appCall(session *xconn.Session, appID, procedure string, req, out any) error {
+	listResp := session.Call(common.ProcedureCapabilitiesList).Do()
+	if listResp.Err != nil {
+		return listResp.Err
+	}
+	if len(listResp.Args()) == 0 {
+		return errors.New("machine returned no apps list")
+	}
+	data, err := json.Marshal(listResp.Args()[0])
+	if err != nil {
+		return err
+	}
+	var apps []listedApp
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return err
+	}
+	i := slices.IndexFunc(apps, func(a listedApp) bool { return a.ID == appID })
+	if i < 0 {
+		return fmt.Errorf("%s isn't available on this machine", appID)
+	}
+	if !apps[i].Enabled {
+		return fmt.Errorf("%s is disabled on this machine", appID)
+	}
+
+	enc, err := common.ClientKeyExchangeWith(session, apps[i].KeyExchange)
 	if err != nil {
 		return err
 	}

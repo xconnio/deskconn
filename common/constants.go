@@ -33,16 +33,16 @@ const (
 // handlers) -- wire-protocol identifiers the CLI (root package) calls
 // directly and deskconnd's proxy handlers implement, so both sides need
 // the same string constants regardless of which process implements which
-// half.
+// half. They're outside ProcedurePrefix, so xlink doesn't expose them.
 const (
-	ProcedureProxyFileOp       = "io.xconn.deskconn.deskconnd.proxy.file.op"
-	ProcedureProxyMachineInfo  = "io.xconn.deskconn.deskconnd.proxy.machine.info"
-	ProcedureProxyPing         = "io.xconn.deskconn.deskconnd.proxy.ping"
-	ProcedureProxyCat          = "io.xconn.deskconn.deskconnd.proxy.file.cat"
-	ProcedureProxyPrinterList  = "io.xconn.deskconn.deskconnd.proxy.printer.list"
-	ProcedureProxyPrinterPrint = "io.xconn.deskconn.deskconnd.proxy.printer.print"
-	ProcedureProxyVPNStart     = "io.xconn.deskconn.deskconnd.proxy.vpn.start"
-	ProcedureProxyVPNStop      = "io.xconn.deskconn.deskconnd.proxy.vpn.stop"
+	ProcedureProxyFileOp       = "io.xconn.deskconn.local.proxy.file.op"
+	ProcedureProxyMachineInfo  = "io.xconn.deskconn.local.proxy.machine.info"
+	ProcedureProxyPing         = "io.xconn.deskconn.local.proxy.ping"
+	ProcedureProxyCat          = "io.xconn.deskconn.local.proxy.file.cat"
+	ProcedureProxyPrinterList  = "io.xconn.deskconn.local.proxy.printer.list"
+	ProcedureProxyPrinterPrint = "io.xconn.deskconn.local.proxy.printer.print"
+	ProcedureProxyVPNStart     = "io.xconn.deskconn.local.proxy.vpn.start"
+	ProcedureProxyVPNStop      = "io.xconn.deskconn.local.proxy.vpn.stop"
 	ProcedureLogin             = "io.xconn.deskconn.login"
 	ProcedureLogout            = "io.xconn.deskconn.logout"
 	ProcedureConnect           = "io.xconn.deskconn.connect"
@@ -63,39 +63,19 @@ const (
 // process implements the handler, so they live here rather than in the
 // host package.
 const (
-	ProcedureKeyExchange         = "io.xconn.deskconn.deskconnd.key.exchange"
-	ProcedureScreenBrightnessGet = "io.xconn.deskconn.deskconnd.screen.brightness.get"
-	ProcedureScreenBrightnessSet = "io.xconn.deskconn.deskconnd.screen.brightness.set"
-	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
-	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
-	ProcedureShellIsBusy         = "io.xconn.deskconn.deskconnd.shell.isbusy"
-	ProcedureFileBrowse          = "io.xconn.deskconn.deskconnd.file.browse"
-	ProcedurePrinterList         = "io.xconn.deskconn.deskconnd.printer.list"
-	ProcedurePrinterPrint        = "io.xconn.deskconn.deskconnd.printer.print"
-	ProcedureFileRename          = "io.xconn.deskconn.deskconnd.file.rename"
-	ProcedureFileDelete          = "io.xconn.deskconn.deskconnd.file.delete"
-	ProcedureFileCopy            = "io.xconn.deskconn.deskconnd.file.copy"
-	ProcedureFileEdit            = "io.xconn.deskconn.deskconnd.file.edit"
-	ProcedureFileSearch          = "io.xconn.deskconn.deskconnd.file.search"
-	ProcedurePing                = "io.xconn.deskconn.deskconnd.ping"
-	ProcedureIndexQuery          = "io.xconn.deskconn.deskconnd.index.query"
-	ProcedureWallpaperGet        = "io.xconn.deskconn.deskconnd.wallpaper.get"
-	ProcedureWallpaperChecksum   = "io.xconn.deskconn.deskconnd.wallpaper.checksum"
-
-	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
-	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
-	ProcedureMPRISPlay      = "io.xconn.deskconn.deskconnd.mpris.play"
-	ProcedureMPRISPause     = "io.xconn.deskconn.deskconnd.mpris.pause"
-	ProcedureMPRISNext      = "io.xconn.deskconn.deskconnd.mpris.next"
-	ProcedureMPRISPrevious  = "io.xconn.deskconn.deskconnd.mpris.previous"
-
-	ProcedureAudioMute       = "io.xconn.deskconn.deskconnd.audio.mute"
-	ProcedureAudioUnmute     = "io.xconn.deskconn.deskconnd.audio.unmute"
-	ProcedureAudioToggleMute = "io.xconn.deskconn.deskconnd.audio.togglemute"
-	ProcedureAudioIsMuted    = "io.xconn.deskconn.deskconnd.audio.ismuted"
-
-	ProcedureScreenshot           = "io.xconn.deskconn.deskconnd.screenshot"
-	ProcedureScreenshotPermission = "io.xconn.deskconn.deskconnd.screenshot.permission"
+	ProcedureKeyExchange       = "io.xconn.deskconn.deskconnd.key.exchange"
+	ProcedureShellIsBusy       = "io.xconn.deskconn.deskconnd.shell.isbusy"
+	ProcedureFileBrowse        = "io.xconn.deskconn.deskconnd.file.browse"
+	ProcedurePrinterList       = "io.xconn.deskconn.deskconnd.printer.list"
+	ProcedurePrinterPrint      = "io.xconn.deskconn.deskconnd.printer.print"
+	ProcedureFileRename        = "io.xconn.deskconn.deskconnd.file.rename"
+	ProcedureFileDelete        = "io.xconn.deskconn.deskconnd.file.delete"
+	ProcedureFileCopy          = "io.xconn.deskconn.deskconnd.file.copy"
+	ProcedureFileEdit          = "io.xconn.deskconn.deskconnd.file.edit"
+	ProcedureFileSearch        = "io.xconn.deskconn.deskconnd.file.search"
+	ProcedurePing              = "io.xconn.deskconn.deskconnd.ping"
+	ProcedureWallpaperGet      = "io.xconn.deskconn.deskconnd.wallpaper.get"
+	ProcedureWallpaperChecksum = "io.xconn.deskconn.deskconnd.wallpaper.checksum"
 
 	ProcedureMachineInfo      = "io.xconn.deskconn.deskconnd.machine.info"
 	ProcedureMachineIsDesktop = "io.xconn.deskconn.deskconnd.machine.is_desktop"
@@ -138,23 +118,37 @@ const (
 
 const ProcedureFileCat = "io.xconn.deskconn.deskconnd.file.cat"
 
-// ProcedureMediaIndexQuery is media-app's index query, registered on the local realm only:
-// deskconnd's ProcedureIndexQuery decrypts a client's query, forwards its JSON here and
-// encrypts the JSON result.
-const ProcedureMediaIndexQuery = "io.xconn.deskconn.media.index.query"
+// ProcedureCapabilitiesList lists the apps the frontend may show and whether each is
+// enabled. Apps served outside deskconnd, like media-app's, are listed while their process
+// is connected. ProcedureCapabilitiesSet enables or disables one: it's under
+// io.xconn.deskconn.admin., the procedures only a machine's owner and admins may call.
+const (
+	ProcedureCapabilitiesList = "io.xconn.deskconn.deskconnd.capabilities.list"
+	ProcedureCapabilitiesSet  = "io.xconn.deskconn.admin.capabilities.set"
+	// TopicCapabilitiesChanged is published on the local realm, with the apps' list, after
+	// an app is enabled or disabled.
+	TopicCapabilitiesChanged = "io.xconn.deskconn.deskconnd.capabilities.on_change"
+)
 
-// ProcedureCapabilitiesList lists the apps the frontend may show. Apps served outside
-// deskconnd, like media-app's, are listed while their process is connected.
-const ProcedureCapabilitiesList = "io.xconn.deskconn.deskconnd.capabilities.list"
+// ProcedureProxyCapabilitiesList/Set call a machine's capabilities procedures for the local
+// CLI; their first argument is its realm.
+const (
+	ProcedureProxyCapabilitiesList = "io.xconn.deskconn.local.proxy.capabilities.list"
+	ProcedureProxyCapabilitiesSet  = "io.xconn.deskconn.local.proxy.capabilities.set"
+)
 
 // ProcedureAppsRegister is how a process on deskconnd's local socket registers the apps it
-// serves, with a JSON list of {"id", "name"}. Local realm only.
-const ProcedureAppsRegister = "io.xconn.deskconn.deskconnd.apps.register"
+// serves, with a JSON list of {"id", "name", "key_exchange", "requires", "default_off"}
+// (see the README's "Adding an app"). Local realm only.
+const ProcedureAppsRegister = "io.xconn.deskconn.local.apps.register"
 
-// ProcedureRemoteControlKeyExchange is remotecontrol-app's own key exchange. The screen,
-// screenshot, media player, audio and printer procedures are encrypted with the keys it
-// derives, not ProcedureKeyExchange's.
-const ProcedureRemoteControlKeyExchange = "io.xconn.deskconn.deskconnd.remotecontrol.key.exchange"
+// xlink exposes every procedure registered on deskconnd's local socket under these
+// prefixes to remote clients: deskconnd's own and other apps' alike. Procedures under
+// ProcedureAdminPrefix are only for a machine's owner and admins.
+const (
+	ProcedurePrefix      = "io.xconn.deskconn.deskconnd."
+	ProcedureAdminPrefix = "io.xconn.deskconn.admin."
+)
 
 const (
 	ExtJpg  = ".jpg"

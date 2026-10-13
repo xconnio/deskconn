@@ -323,6 +323,62 @@ desk self version
 desk self update
 ```
 
+## Adding an app
+
+Apps beyond deskconnd's own (Files, Terminal, Resource Monitor, Text Editor) run as their own processes, like
+[media-app](https://github.com/xconnio/media-app) and [remotecontrol-app](https://github.com/xconnio/remotecontrol-app).
+An app needs no code in deskconn: it connects to deskconnd's local socket, registers its procedures there, and tells
+deskconnd which apps it serves. deskconnd lists them to clients (the web app shows an app only while it's listed and
+enabled), owners and admins enable or disable them, and xlink exposes their procedures to the cloud, LAN and P2P.
+
+1. **Connect** to `~/.deskconn/deskconn.sock` (WAMP over a Unix socket, realm `io.xconn.deskconn.local`, anonymous).
+   Reconnect when deskconnd restarts.
+2. **Register a key exchange.** deskconn only supports end-to-end encrypted apps: deskconnd refuses an app without one.
+   Clients call it with their X25519 public key and get the app's; both sides derive their keys with HKDF-SHA256,
+   `frontendToBackend` for requests and `backendToFrontend` for results. Every other procedure takes its request as a
+   single encrypted JSON argument (nonce + ChaCha20-Poly1305 ciphertext, empty or absent when there is none) and returns
+   a single encrypted JSON result. Keys are per caller session.
+3. **Register the apps** by calling `io.xconn.deskconn.local.apps.register` with a JSON list:
+
+   ```json
+   [{"id": "pictures", "name": "Pictures", "key_exchange": "io.xconn.deskconn.deskconnd.media.key.exchange",
+     "requires": ["files"], "default_off": true}]
+   ```
+
+   `requires` are apps this one can't work without (it's disabled with them), and a `default_off` app stays disabled
+   until an owner or admin enables it. Ids must be unique on the machine. The apps are listed until the app's session
+   leaves.
+4. **Follow enabled apps.** Call `io.xconn.deskconn.deskconnd.capabilities.list` for every app's
+   `{"id", "name", "enabled", "key_exchange", "requires"}`, and subscribe to
+   `io.xconn.deskconn.deskconnd.capabilities.on_change`, published with the same list whenever an app is enabled or
+   disabled. Register an app's procedures while it's enabled and unregister them while it's disabled; keep the key
+   exchange registered.
+
+Procedures under `io.xconn.deskconn.deskconnd.` are reachable by remote clients (and `io.xconn.deskconn.admin.` by
+the machine's owner and admins only), so the key exchange and the app's procedures go there. Everything else on the
+socket, such as `io.xconn.deskconn.local.*`, stays local.
+
+In Go, `common.AppEncryption` does step 2:
+
+```go
+enc := common.NewAppEncryption()
+if err := enc.Register(session, "io.xconn.deskconn.deskconnd.myapp.key.exchange"); err != nil {
+    return err
+}
+handler := enc.Encrypted(func(ctx context.Context, req []byte) (any, error) {
+    // req is the decrypted JSON request; the result is sent back as encrypted JSON.
+    return map[string]string{"hello": "world"}, nil
+})
+resp := session.Register("io.xconn.deskconn.deskconnd.myapp.hello", handler).Do()
+```
+
+A client finds the app's key exchange in the apps list, then calls it before the app's procedures:
+
+```go
+keys, err := common.ClientKeyExchangeWith(session, app.KeyExchange)
+result, err := common.EncryptedCall(session, "io.xconn.deskconn.deskconnd.myapp.hello", nil, keys)
+```
+
 ## Development
 
 ### Build

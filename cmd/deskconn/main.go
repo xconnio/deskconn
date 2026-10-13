@@ -257,6 +257,7 @@ func main() {
 	selfRemoveYes := selfRemoveCmd.Flag("yes", "Do not prompt for confirmation").Short('y').Bool()
 
 	agentCmds := registerAgentCommands(app, cfgDirectory)
+	appsCmds := registerAppsCommands(app, cfgDirectory)
 
 	if len(os.Args) == 1 {
 		app.Usage(nil)
@@ -1212,7 +1213,7 @@ func main() {
 		}
 
 	default:
-		dispatchAgentCommand(parsedCmd, agentCmds, cfgDirectory)
+		_ = dispatchAppsCommand(parsedCmd, appsCmds, cfgDirectory) || dispatchAgentCommand(parsedCmd, agentCmds, cfgDirectory)
 	}
 }
 

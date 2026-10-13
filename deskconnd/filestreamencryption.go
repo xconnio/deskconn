@@ -22,7 +22,7 @@ func P2PServerKeyExchange(channel common.MessageChannel, firstMessage []byte) (s
 		return nil, nil, fmt.Errorf("invalid client public key length: %d", len(clientKey.PublicKey))
 	}
 
-	publicKey, sendKey, receiveKey, err := ServerKeyExchange(clientKey.PublicKey)
+	publicKey, sendKey, receiveKey, err := common.ServerKeyExchange(clientKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
