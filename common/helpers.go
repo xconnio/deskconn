@@ -173,12 +173,17 @@ type SessionKeys struct {
 // ClientKeyExchange performs a key exchange against session's
 // ProcedureKeyExchange, as the calling side.
 func ClientKeyExchange(session *xconn.Session) (*SessionKeys, error) {
+	return ClientKeyExchangeWith(session, ProcedureKeyExchange)
+}
+
+// ClientKeyExchangeWith performs a key exchange against procedure, as the calling side.
+func ClientKeyExchangeWith(session *xconn.Session, procedure string) (*SessionKeys, error) {
 	publicKey, privateKey, err := CreateX25519KeyPair()
 	if err != nil {
 		return nil, err
 	}
 
-	keyResp := session.Call(ProcedureKeyExchange).Args(publicKey).Do()
+	keyResp := session.Call(procedure).Args(publicKey).Do()
 	if keyResp.Err != nil {
 		return nil, keyResp.Err
 	}

@@ -151,6 +151,11 @@ const ProcedureCapabilitiesList = "io.xconn.deskconn.deskconnd.capabilities.list
 // serves, with a JSON list of {"id", "name"}. Local realm only.
 const ProcedureAppsRegister = "io.xconn.deskconn.deskconnd.apps.register"
 
+// ProcedureRemoteControlKeyExchange is remotecontrol-app's own key exchange. The screen,
+// screenshot, media player, audio and printer procedures are encrypted with the keys it
+// derives, not ProcedureKeyExchange's.
+const ProcedureRemoteControlKeyExchange = "io.xconn.deskconn.deskconnd.remotecontrol.key.exchange"
+
 const (
 	ExtJpg  = ".jpg"
 	ExtJpeg = ".jpeg"
