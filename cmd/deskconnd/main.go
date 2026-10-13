@@ -152,6 +152,7 @@ func main() {
 		Session: appSession,
 		Procedures: []string{
 			common.ProcedureKeyExchange,
+			common.ProcedureRemoteControlKeyExchange,
 			common.ProcedureScreenBrightnessGet,
 			common.ProcedureScreenBrightnessSet,
 			common.ProcedureScreenLock,

@@ -173,14 +173,14 @@ func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		callResp := machineSess.Call(common.ProcedurePrinterList).Do()
-		if callResp.Err != nil {
+		var printers []any
+		if err := remoteControlCall(machineSess, common.ProcedurePrinterList, nil, &printers); err != nil {
 			_ = machineSess.Leave()
 			clientSessions.DeleteMachineSession(realm)
-			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		return xconn.NewInvocationResult(callResp.Args()...)
+		return xconn.NewInvocationResult(printers)
 	}
 }
 
@@ -208,15 +208,37 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		callResp := machineSess.Call(common.ProcedurePrinterPrint).Args(printer, filename, data).Do()
-		if callResp.Err != nil {
+		req := map[string]any{"printer": printer, "filename": filename, "data": data}
+		var jobID string
+		if err := remoteControlCall(machineSess, common.ProcedurePrinterPrint, req, &jobID); err != nil {
 			_ = machineSess.Leave()
 			clientSessions.DeleteMachineSession(realm)
-			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
-		return xconn.NewInvocationResult(callResp.Args()...)
+		return xconn.NewInvocationResult(jobID)
 	}
+}
+
+// remoteControlCall calls one of remotecontrol-app's procedures on a machine, end-to-end
+// encrypted with remotecontrol-app's own key exchange: req, if not nil, is sent as JSON and
+// the JSON result is unmarshaled into out.
+func remoteControlCall(session *xconn.Session, procedure string, req, out any) error {
+	enc, err := common.ClientKeyExchangeWith(session, common.ProcedureRemoteControlKeyExchange)
+	if err != nil {
+		return err
+	}
+	var payload []byte
+	if req != nil {
+		if payload, err = json.Marshal(req); err != nil {
+			return err
+		}
+	}
+	result, err := common.EncryptedCall(session, procedure, payload, enc)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(result, out)
 }
 
 // ProxyVPNStartHandler proxies "desk vpn serve": it arms d to accept
