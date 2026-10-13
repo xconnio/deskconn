@@ -49,6 +49,28 @@ func legacyCLIPaths(binDir, bashCompDir, zshCompDir string) []string {
 	return paths
 }
 
+// The installed layout: the one deskconn binary lives in ~/.local/lib/exec, next to the
+// daemons' symlinks to it (deskconn-userd, deskconn-rootd), and desk on the PATH is a
+// symlink to it too.
+const (
+	binaryName    = "deskconn"
+	cliName       = "desk"
+	userdService  = userdName
+	legacyService = "deskconnd"
+)
+
+// installDirs returns the PATH directory desk is linked into and the directory the
+// deskconn binary and its daemon symlinks live in.
+func installDirs(homeDir string) (binDir, execDir string) {
+	return filepath.Join(homeDir, ".local", "bin"), filepath.Join(homeDir, ".local", "lib", "exec")
+}
+
+// legacyDaemonPaths lists the separate binaries of installs before the multicall binary:
+// deskconnd, and the vpnd symlink to desk.
+func legacyDaemonPaths(binDir, execDir string) []string {
+	return []string{filepath.Join(execDir, legacyService), filepath.Join(binDir, "vpnd")}
+}
+
 const (
 	ModeQUIC = "quic"
 	ModeP2P  = "p2p"
@@ -57,8 +79,14 @@ const (
 )
 
 func main() {
-	if args, ok := vpndArgs(os.Args); ok {
-		runVPNd(args)
+	// One binary, several programs: desk (or deskconn) is the CLI, and the daemons run
+	// from symlinks named after them.
+	if args, ok := multicallArgs(os.Args, userdName); ok {
+		runUserd(args)
+		return
+	}
+	if args, ok := multicallArgs(os.Args, deskconn.RootdName); ok {
+		runRootd(args)
 		return
 	}
 
@@ -70,11 +98,11 @@ func main() {
 	versionString := fmt.Sprintf("desk %s", version)
 	app := kingpin.New("desk", "Control your machines remotely.")
 	configureHelp(app)
-	standaloneURL := app.Flag("url", "Connect directly to a standalone deskconnd at this URL "+
+	standaloneURL := app.Flag("url", "Connect directly to a standalone deskconn-userd at this URL "+
 		"(quic://host:port, or https://host:port for WebTransport) instead of a machine on your account").
 		Envar("DESKCONN_URL").String()
 	standaloneCertHash := app.Flag("cert-hash", "SHA-256 fingerprint of the standalone machine's certificate, "+
-		"as deskconnd prints it, to trust it even if self-signed (default: verify against trusted CAs)").
+		"as deskconn-userd prints it, to trust it even if self-signed (default: verify against trusted CAs)").
 		Envar("DESKCONN_CERT_HASH").String()
 	standaloneKey := app.Flag("private-key", "Private key (hex) to authenticate with --url; see `desk keygen`").
 		Envar("DESKCONN_PRIVATE_KEY").String()
@@ -1245,13 +1273,16 @@ func updateApp() error {
 	if err := removeLegacyXlinkService(); err != nil {
 		return err
 	}
+	if err := migrateLegacyService(); err != nil {
+		return err
+	}
 
-	fmt.Println("Restarting deskconnd service...")
-	cmd := exec.Command("systemctl", "--user", "restart", "deskconnd")
+	fmt.Printf("Restarting %s service...\n", userdService)
+	cmd := exec.Command("systemctl", "--user", "restart", userdService) // nolint: gosec
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to restart deskconnd: %w", err)
+		return fmt.Errorf("failed to restart %s: %w", userdService, err)
 	}
 
 	fmt.Printf("Updated desk from version %s to %s.\n", version, updateResp.LatestVersion)
@@ -1269,7 +1300,7 @@ func removeLegacyXlinkService() error {
 
 	serviceFile := filepath.Join(homeDir, ".config", "systemd", "user", "xlink.service")
 	if _, err := os.Stat(serviceFile); err == nil {
-		fmt.Println("Removing the old xlink service (now part of deskconnd)...")
+		fmt.Println("Removing the old xlink service (now part of deskconn-userd)...")
 		_ = exec.Command("systemctl", "--user", "stop", "xlink").Run()    // nolint: gosec
 		_ = exec.Command("systemctl", "--user", "disable", "xlink").Run() // nolint: gosec
 		if err := os.Remove(serviceFile); err != nil && !os.IsNotExist(err) {
@@ -1281,6 +1312,46 @@ func removeLegacyXlinkService() error {
 	xlinkBin := filepath.Join(homeDir, ".local", "lib", "exec", "xlink")
 	if err := os.Remove(xlinkBin); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove %s: %w", xlinkBin, err)
+	}
+	return nil
+}
+
+// migrateLegacyService replaces the deskconnd.service of installs before the multicall
+// binary with deskconn-userd.service, keeping the environment the installer captured in
+// it (DISPLAY, WAYLAND_DISPLAY).
+func migrateLegacyService() error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home dir: %w", err)
+	}
+	_, execDir := installDirs(homeDir)
+	systemdDir := filepath.Join(homeDir, ".config", "systemd", "user")
+
+	legacyFile := filepath.Join(systemdDir, legacyService+".service")
+	data, err := os.ReadFile(legacyFile)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", legacyFile, err)
+	}
+
+	fmt.Printf("Replacing the %s service with %s...\n", legacyService, userdService)
+	_ = exec.Command("systemctl", "--user", "stop", legacyService).Run()    // nolint: gosec
+	_ = exec.Command("systemctl", "--user", "disable", legacyService).Run() // nolint: gosec
+
+	unit := strings.ReplaceAll(string(data), filepath.Join(execDir, legacyService), filepath.Join(execDir, userdName))
+	unit = strings.Replace(unit, "Description=deskconnd daemon", "Description=deskconn user daemon", 1)
+	userdFile := filepath.Join(systemdDir, userdService+".service")
+	if err := os.WriteFile(userdFile, []byte(unit), 0644); err != nil { // nolint: gosec
+		return fmt.Errorf("failed to write %s service: %w", userdService, err)
+	}
+	if err := os.Remove(legacyFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove %s: %w", legacyFile, err)
+	}
+	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()                            // nolint: gosec
+	if err := exec.Command("systemctl", "--user", "enable", userdService).Run(); err != nil { // nolint: gosec
+		return fmt.Errorf("failed to enable %s: %w", userdService, err)
 	}
 	return nil
 }
@@ -1452,11 +1523,12 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		return err
 	}
 
-	const serviceName = "deskconnd"
-	serviceFile := filepath.Join(homeDir, ".config", "systemd", "user", serviceName+".service")
-
-	if _, err := os.Stat(serviceFile); err == nil {
-		fmt.Println("Stopping deskconnd service...")
+	for _, serviceName := range []string{userdService, legacyService} {
+		serviceFile := filepath.Join(homeDir, ".config", "systemd", "user", serviceName+".service")
+		if _, err := os.Stat(serviceFile); err != nil {
+			continue
+		}
+		fmt.Printf("Stopping %s service...\n", serviceName)
 		_ = exec.Command("systemctl", "--user", "stop", serviceName).Run()    // nolint: gosec
 		_ = exec.Command("systemctl", "--user", "disable", serviceName).Run() // nolint: gosec
 		if err := os.Remove(serviceFile); err != nil && !os.IsNotExist(err) {
@@ -1465,18 +1537,19 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		_ = exec.Command("systemctl", "--user", "daemon-reload").Run() // nolint: gosec
 	}
 
-	binDir := filepath.Join(homeDir, ".local", "bin")
-	execDir := filepath.Join(homeDir, ".local", "lib", "exec")
+	binDir, execDir := installDirs(homeDir)
 	bashCompDir := filepath.Join(homeDir, ".local", "share", "bash-completion", "completions")
 	zshCompDir := filepath.Join(homeDir, ".local", "share", "zsh", "site-functions")
 
 	paths := []string{
-		filepath.Join(binDir, "desk"),
-		filepath.Join(binDir, vpndProgName),
-		filepath.Join(execDir, "deskconnd"),
-		filepath.Join(bashCompDir, "desk"),
-		filepath.Join(zshCompDir, "_desk"),
+		filepath.Join(binDir, cliName),
+		filepath.Join(execDir, binaryName),
+		filepath.Join(execDir, userdName),
+		filepath.Join(execDir, deskconn.RootdName),
+		filepath.Join(bashCompDir, cliName),
+		filepath.Join(zshCompDir, "_"+cliName),
 	}
+	paths = append(paths, legacyDaemonPaths(binDir, execDir)...)
 	paths = append(paths, legacyCLIPaths(binDir, bashCompDir, zshCompDir)...)
 
 	fmt.Println("Removing desk binaries and shell completions...")
@@ -1554,8 +1627,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		return fmt.Errorf("failed to get user home dir: %w", err)
 	}
 
-	binDir := filepath.Join(homeDir, ".local", "bin")
-	execDir := filepath.Join(homeDir, ".local", "lib", "exec")
+	binDir, execDir := installDirs(homeDir)
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		return fmt.Errorf("failed to create bin dir: %w", err)
 	}
@@ -1563,9 +1635,7 @@ func downloadAndInstallUpdate(downloadURL string) error {
 		return fmt.Errorf("failed to create exec dir: %w", err)
 	}
 
-	foundDesk := false
-	foundDeskconnd := false
-
+	found := false
 	for {
 		header, err := tarReader.Next()
 		if errors.Is(err, io.EOF) {
@@ -1575,50 +1645,55 @@ func downloadAndInstallUpdate(downloadURL string) error {
 			return fmt.Errorf("failed to read update archive: %w", err)
 		}
 
-		if header.Typeflag != tar.TypeReg {
+		if header.Typeflag != tar.TypeReg || filepath.Base(header.Name) != binaryName {
 			continue
 		}
-
-		name := filepath.Base(header.Name)
-		switch name {
-		case "desk":
-			fmt.Println("Installing desk...")
-			deskPath := filepath.Join(binDir, "desk")
-			if err := installBinaryFromReader(tarReader, deskPath, 0755); err != nil {
-				return err
-			}
-			// desk runs as the privileged VPN helper when invoked as "vpnd".
-			linkPath := filepath.Join(binDir, vpndProgName)
-			_ = os.Remove(linkPath)
-			if err := os.Symlink(deskPath, linkPath); err != nil {
-				return fmt.Errorf("failed to create %s symlink: %w", vpndProgName, err)
-			}
-			foundDesk = true
-		case "deskconnd":
-			fmt.Println("Installing deskconnd...")
-			if err := installBinaryFromReader(tarReader, filepath.Join(execDir, "deskconnd"), 0700); err != nil {
-				return err
-			}
-			foundDeskconnd = true
+		fmt.Printf("Installing %s...\n", binaryName)
+		if err := installBinaryFromReader(tarReader, filepath.Join(execDir, binaryName), 0755); err != nil {
+			return err
 		}
+		found = true
+	}
+	if !found {
+		return fmt.Errorf("update archive missing the %s binary", binaryName)
 	}
 
-	if !foundDesk || !foundDeskconnd {
-		return fmt.Errorf("update archive missing required binaries")
+	if err := linkPrograms(binDir, execDir); err != nil {
+		return err
 	}
 
-	if err := installCompletions(filepath.Join(binDir, "desk")); err != nil {
+	if err := installCompletions(filepath.Join(binDir, cliName)); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to update shell completions: %v\n", err)
 	}
 
 	bashCompDir := filepath.Join(homeDir, ".local", "share", "bash-completion", "completions")
 	zshCompDir := filepath.Join(homeDir, ".local", "share", "zsh", "site-functions")
-	for _, p := range legacyCLIPaths(binDir, bashCompDir, zshCompDir) {
+	for _, p := range append(legacyDaemonPaths(binDir, execDir), legacyCLIPaths(binDir, bashCompDir, zshCompDir)...) {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "warning: failed to remove %s: %v\n", p, err)
 		}
 	}
 
+	return nil
+}
+
+// linkPrograms points desk on the PATH, and the daemons next to the binary, at the
+// deskconn binary in execDir.
+func linkPrograms(binDir, execDir string) error {
+	binary := filepath.Join(execDir, binaryName)
+	for _, link := range []string{
+		filepath.Join(binDir, cliName),
+		filepath.Join(execDir, userdName),
+		filepath.Join(execDir, deskconn.RootdName),
+	} {
+		// Replaces desk itself on installs before the multicall binary.
+		if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to replace %s: %w", link, err)
+		}
+		if err := os.Symlink(binary, link); err != nil {
+			return fmt.Errorf("failed to link %s: %w", link, err)
+		}
+	}
 	return nil
 }
 

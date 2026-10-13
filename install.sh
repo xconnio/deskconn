@@ -42,22 +42,21 @@ curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE"
 echo "Extracting archive..."
 tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
 
-if [ ! -f "$TMP_DIR/desk" ] || [ ! -f "$TMP_DIR/deskconnd" ]; then
-    echo "Release archive does not contain desk and deskconnd binaries."
+if [ ! -f "$TMP_DIR/deskconn" ]; then
+    echo "Release archive does not contain the deskconn binary."
     exit 1
 fi
 
 # Before the rename the CLI was installed as "deskconn" (with "desk" a symlink to it).
 rm -f "$BIN_DIR/desk" "$BIN_DIR/deskconn"
 
-mv "$TMP_DIR/desk" "$BIN_DIR/desk"
-mv "$TMP_DIR/deskconnd" "$EXEC_DIR/deskconnd"
-
-chmod 755 "$BIN_DIR/desk"
-chmod 700 "$EXEC_DIR/deskconnd"
-
-# desk runs as the privileged VPN helper when invoked by this name.
-ln -sf "$BIN_DIR/desk" "$BIN_DIR/vpnd"
+# One multicall binary, run by the name it's invoked as: desk is the CLI, deskconn-userd
+# the user daemon and deskconn-rootd the root helper.
+mv "$TMP_DIR/deskconn" "$EXEC_DIR/deskconn"
+chmod 755 "$EXEC_DIR/deskconn"
+ln -sf "$EXEC_DIR/deskconn" "$BIN_DIR/desk"
+ln -sf "$EXEC_DIR/deskconn" "$EXEC_DIR/deskconn-userd"
+ln -sf "$EXEC_DIR/deskconn" "$EXEC_DIR/deskconn-rootd"
 
 BASH_COMP_DIR="$HOME/.local/share/bash-completion/completions"
 ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
@@ -116,18 +115,18 @@ case ":$PATH:" in
 esac
 
 # systemd --user services don't reliably inherit DISPLAY/WAYLAND_DISPLAY from
-# the desktop session, so deskconnd can't tell a desktop from a headless
+# the desktop session, so deskconn-userd can't tell a desktop from a headless
 # server apart without them being exported explicitly. Capture them from the
 # installer's own environment: on a real desktop session they'll be set here;
-# on a headless server they won't, and deskconnd will register server-only
+# on a headless server they won't, and deskconn-userd will register server-only
 # APIs (no wallpaper/display RPCs).
-DESKCONND_ENV_LINES="Environment=TERM=xterm-256color"
+USERD_ENV_LINES="Environment=TERM=xterm-256color"
 if [ -n "${DISPLAY:-}" ]; then
-    DESKCONND_ENV_LINES="$DESKCONND_ENV_LINES
+    USERD_ENV_LINES="$USERD_ENV_LINES
 Environment=DISPLAY=$DISPLAY"
 fi
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    DESKCONND_ENV_LINES="$DESKCONND_ENV_LINES
+    USERD_ENV_LINES="$USERD_ENV_LINES
 Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 fi
 
@@ -135,27 +134,30 @@ echo "Setting up systemd user services..."
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 mkdir -p "$SYSTEMD_USER_DIR"
 
-# deskconnd runs xlink (connectivity: cloud, LAN, remote-client auth, QUIC/WebRTC
-# streams) in-process. Earlier installs ran xlink as its own service: remove it,
-# or it would compete with deskconnd for deskconn.sock.
-if [ -f "$SYSTEMD_USER_DIR/xlink.service" ]; then
-    echo "Removing the old xlink service (now part of deskconnd)..."
-    systemctl --user stop xlink 2>/dev/null || true
-    systemctl --user disable xlink 2>/dev/null || true
-    rm -f "$SYSTEMD_USER_DIR/xlink.service"
-fi
-rm -f "$EXEC_DIR/xlink"
+# deskconn-userd runs xlink (connectivity: cloud, LAN, remote-client auth, QUIC/WebRTC
+# streams) in-process. Earlier installs ran xlink as its own service, and then the daemon
+# as deskconnd: remove those, or they would compete with deskconn-userd for deskconn.sock.
+for OLD_SERVICE in xlink deskconnd; do
+    if [ -f "$SYSTEMD_USER_DIR/$OLD_SERVICE.service" ]; then
+        echo "Removing the old $OLD_SERVICE service (now deskconn-userd)..."
+        systemctl --user stop "$OLD_SERVICE" 2>/dev/null || true
+        systemctl --user disable "$OLD_SERVICE" 2>/dev/null || true
+        rm -f "$SYSTEMD_USER_DIR/$OLD_SERVICE.service"
+    fi
+    rm -f "$EXEC_DIR/$OLD_SERVICE"
+done
+rm -f "$BIN_DIR/vpnd"
 
-cat > "$SYSTEMD_USER_DIR/deskconnd.service" <<EOL
+cat > "$SYSTEMD_USER_DIR/deskconn-userd.service" <<EOL
 [Unit]
-Description=deskconnd daemon (connectivity, shell, files, VPN control, ...)
+Description=deskconn user daemon (connectivity, shell, files, VPN control, ...)
 After=network.target
 
 [Service]
-ExecStart=$EXEC_DIR/deskconnd
+ExecStart=$EXEC_DIR/deskconn-userd
 Restart=always
 RestartSec=5
-$DESKCONND_ENV_LINES
+$USERD_ENV_LINES
 
 [Install]
 WantedBy=default.target
@@ -163,12 +165,12 @@ EOL
 
 systemctl --user daemon-reload
 
-if systemctl --user is-enabled --quiet deskconnd; then
-    echo "Service deskconnd exists. Restarting..."
-    systemctl --user restart deskconnd
+if systemctl --user is-enabled --quiet deskconn-userd; then
+    echo "Service deskconn-userd exists. Restarting..."
+    systemctl --user restart deskconn-userd
 else
-    echo "Enabling and starting deskconnd..."
-    systemctl --user enable deskconnd
-    systemctl --user start deskconnd
+    echo "Enabling and starting deskconn-userd..."
+    systemctl --user enable deskconn-userd
+    systemctl --user start deskconn-userd
 fi
-echo "Systemd service deskconnd installed and started!"
+echo "Systemd service deskconn-userd installed and started!"

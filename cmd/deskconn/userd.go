@@ -31,8 +31,13 @@ const (
 	transportBoth         = "both"
 )
 
-func main() {
-	app := kingpin.New("deskconnd", "Deskconn daemon: the machine's APIs and its connectivity (xlink)")
+// userdName is the name the deskconn binary runs as its user daemon under (see
+// multicallArgs).
+const userdName = "deskconn-userd"
+
+// runUserd is the user daemon: the machine's APIs and its connectivity (xlink).
+func runUserd(args []string) {
+	app := kingpin.New(userdName, "Deskconn user daemon: the machine's APIs and its connectivity (xlink)")
 	standalone := app.Flag("standalone", "Serve this machine directly over --transport to --public-key holders "+
 		"and --user accounts, instead of through the cloud").Bool()
 	standaloneTransport := app.Flag("transport", "Standalone transport to serve: quic, webtransport or both").
@@ -48,7 +53,7 @@ func main() {
 		"(see `desk keygen`)").Strings()
 	standaloneUsers := app.Flag("user", "username:password allowed to connect in standalone mode; repeat for "+
 		"more").Envar("DESKCONND_USERS").Strings()
-	kingpin.MustParse(app.Parse(os.Args[1:]))
+	kingpin.MustParse(app.Parse(args))
 	standalonePasswords, err := parseUsers(*standaloneUsers)
 	if err != nil {
 		app.Fatalf("%v", err)

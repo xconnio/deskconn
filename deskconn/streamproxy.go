@@ -12,7 +12,7 @@ import (
 
 // ErrDaemonUnavailable means deskconnd's stream proxy can't be reached, so a default-mode
 // command should connect to the machine itself.
-var ErrDaemonUnavailable = errors.New("deskconnd stream proxy unavailable")
+var ErrDaemonUnavailable = errors.New("deskconn-userd stream proxy unavailable")
 
 // DaemonStreams opens raw streams to a machine on deskconnd's persistent connection to it:
 // data channels if that connection is P2P, QUIC streams otherwise (see P2P).
@@ -95,11 +95,11 @@ func (d *DaemonStreams) open(ctx context.Context, req common.StreamProxyRequest)
 
 func proxyHandshake(conn net.Conn, req common.StreamProxyRequest) (common.StreamProxyResponse, error) {
 	if err := common.WriteMsg(conn, req); err != nil {
-		return common.StreamProxyResponse{}, fmt.Errorf("deskconnd stream proxy: %w", err)
+		return common.StreamProxyResponse{}, fmt.Errorf("deskconn-userd stream proxy: %w", err)
 	}
 	var resp common.StreamProxyResponse
 	if err := common.ReadMsg(conn, &resp); err != nil {
-		return common.StreamProxyResponse{}, fmt.Errorf("deskconnd stream proxy: %w", err)
+		return common.StreamProxyResponse{}, fmt.Errorf("deskconn-userd stream proxy: %w", err)
 	}
 	if resp.Error != "" {
 		return common.StreamProxyResponse{}, errors.New(resp.Error)

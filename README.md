@@ -13,7 +13,7 @@ The Deskconn ecosystem consists of five pieces. This repository contains the two
 
 | Component                                                                                                                               | Role                                                                                                                          |
 |-----------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
-| [deskconnd](https://github.com/xconnio/deskconn)                                                                                        | Desktop daemon. Registers and exposes desktop APIs over WAMP. Runs as a systemd user service.                                 |
+| [deskconn-userd](https://github.com/xconnio/deskconn)                                                                                   | Desktop daemon. Registers and exposes desktop APIs over WAMP. Runs as a systemd user service.                                 |
 | [desk](https://github.com/xconnio/deskconn)                                                                                             | Control CLI. Attach desktops, manage files, open shells, forward ports, and more.                                             |
 | [deskconn-router](https://github.com/xconnio/deskconn-router)                                                                           | Cloud WAMP router. The central hub — every component (CLI, daemon, account service, web app, mobile app) connects through it. |
 | [deskconn-account-service](https://github.com/xconnio/deskconn-account-service)                                                         | Manages user accounts, organizations, and per-machine CryptoSign principals.                                                  |
@@ -25,13 +25,13 @@ The Deskconn ecosystem consists of five pieces. This repository contains the two
 desk CLI
     │  (Unix socket — ~/.deskconn/deskconn.sock)
     ▼
-deskconnd (local proxy)
+deskconn-userd (local proxy)
     │  (WebSocket — wss://api.deskconn.com/ws or WebRTC P2P)
     ▼
-deskconnd (target machine)
+deskconn-userd (target machine)
 ```
 
-The local `deskconnd` maintains a persistent session to the cloud router per target machine. The shell command starts
+The local `deskconn-userd` maintains a persistent session to the cloud router per target machine. The shell command starts
 over the routed path and migrates transparently to a direct WebRTC connection in the background once the P2P handshake
 completes.
 
@@ -46,8 +46,13 @@ the account service, and stores the private key in `~/.deskconn/id_ed25519`.
 curl -fsSL https://get.deskconn.com | sh
 ```
 
-This installs `desk` and `deskconnd` to `~/.local/bin` and registers `deskconnd` as a systemd user service that
-starts automatically.
+This installs one multicall binary, `deskconn`, to `~/.local/lib/exec`. It runs as whatever it's invoked as:
+
+| Name             | Installed as                                 | Role                                                                     |
+|------------------|----------------------------------------------|--------------------------------------------------------------------------|
+| `desk`           | `~/.local/bin/desk` (symlink)                | The CLI (so is `deskconn` itself)                                        |
+| `deskconn-userd` | `~/.local/lib/exec/deskconn-userd` (symlink) | User daemon, run by the `deskconn-userd` systemd user service at login   |
+| `deskconn-rootd` | `~/.local/lib/exec/deskconn-rootd` (symlink) | Root helper, started on demand with `sudo` as `deskconn-rootd.service`   |
 
 ## Getting started
 
@@ -94,7 +99,7 @@ desk shell <machine> --mode routed   # force cloud router
 
 ## Standalone mode (no cloud)
 
-`deskconnd` can serve a machine directly, without an account or the cloud router, to a fixed list of keys and/or
+`deskconn-userd` can serve a machine directly, without an account or the cloud router, to a fixed list of keys and/or
 username/password accounts. One command starts it; clients point the CLI at its URL. Shell, exec, file operations, port and agent forwarding, logs and P2P
 work the same way.
 
@@ -106,19 +111,19 @@ desk keygen
 # Private Key: 9f2d0b17…
 ```
 
-### 2. Start deskconnd in standalone mode on the machine
+### 2. Start deskconn-userd in standalone mode on the machine
 
 ```bash
-deskconnd --standalone --public-key 65160c38… [--public-key <another public key> ...]
+~/.local/lib/exec/deskconn-userd --standalone --public-key 65160c38… [--public-key <another public key> ...]
 ```
 
-deskconnd serves QUIC on UDP `0.0.0.0:18080` by default. Pick the transport with `--transport quic|webtransport|both`
+deskconn-userd serves QUIC on UDP `0.0.0.0:18080` by default. Pick the transport with `--transport quic|webtransport|both`
 and the addresses with `--quic-address` and `--webtransport-address` (default `0.0.0.0:18081`, path `/wamp`). Clients
 holding one of the `--public-key`s can connect, whatever authid they present. To run it as the service, put the flags
-on `ExecStart` with `systemctl --user edit deskconnd`.
+on `ExecStart` with `systemctl --user edit deskconn-userd`.
 
 Both transports use TLS. Pass your certificate with `--tls-cert cert.pem --tls-key key.pem` (e.g. one issued by a public
-CA); without them deskconnd generates a self-signed certificate once and keeps it in `~/.deskconn`. Either way it logs
+CA); without them deskconn-userd generates a self-signed certificate once and keeps it in `~/.deskconn`. Either way it logs
 the certificate's SHA-256 fingerprint at startup:
 
 ```
@@ -129,7 +134,7 @@ To allow username/password logins instead of (or as well as) keys, add `--user u
 accounts (or set `DESKCONND_USERS`, one `username:password` per line, to keep passwords off the command line):
 
 ```bash
-deskconnd --standalone --user alice:s3cret [--user <username:password> ...]
+~/.local/lib/exec/deskconn-userd --standalone --user alice:s3cret [--user <username:password> ...]
 ```
 
 ### 3. Connect from the client
@@ -163,7 +168,7 @@ your account only.
 ## Self-hosting
 
 Run your own cloud (router, account service, web app and database) locally with
-[deskconn-docker](https://github.com/xconnio/deskconn-docker), then build `desk` and `deskconnd` pointed at it.
+[deskconn-docker](https://github.com/xconnio/deskconn-docker), then build `deskconn` pointed at it.
 
 ### 1. Start the stack
 
@@ -177,7 +182,7 @@ make run
 ### 2. Build the binaries against it
 
 ```bash
-make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081   # builds bin/desk and bin/deskconnd
+make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081   # builds bin/deskconn, linked as bin/desk, bin/deskconn-userd and bin/deskconn-rootd
 ```
 
 `CLOUD_QUIC_ADDRESS` is the router's QUIC address, baked in as the default. For a stack on another machine, use its
@@ -197,8 +202,8 @@ WebRTC uses a public STUN server only. To also relay through your own TURN serve
 export DESKCONN_TURN_URL=turn:turn.example.com:3478 DESKCONN_TURN_USERNAME=<user> DESKCONN_TURN_PASSWORD=<password>
 ```
 
-The deskconnd service doesn't inherit your shell's environment; add the variables to it with
-`systemctl --user edit deskconnd`:
+The deskconn-userd service doesn't inherit your shell's environment; add the variables to it with
+`systemctl --user edit deskconn-userd`:
 
 ```ini
 [Service]
@@ -219,9 +224,9 @@ Then follow [Getting started](#getting-started) from step 2 with the binaries fr
 foreground:
 
 ```bash
-systemctl --user stop deskconnd   # if the official release is installed; it shares ~/.deskconn
+systemctl --user stop deskconn-userd   # if the official release is installed; it shares ~/.deskconn
 bin/desk machine attach --username <email> --password <password>
-bin/deskconnd
+bin/deskconn-userd
 ```
 
 Don't run `desk self update` on these builds: it installs the official release, which connects to
@@ -261,7 +266,7 @@ desk machine disconnect [<machine>] [--all]
 Standalone machines (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
-desk keygen                                        # key pair: public for deskconnd --public-key, private for --private-key
+desk keygen                                        # key pair: public for deskconn-userd --public-key, private for --private-key
 desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --private-key <hex> <command>   # also DESKCONN_URL / DESKCONN_CERT_HASH / DESKCONN_PRIVATE_KEY
 desk --url <quic://host:port|https://host:port> [--cert-hash <sha256>] --authid <user> [--secret <pw>] <command>   # also DESKCONN_AUTHID / DESKCONN_SECRET
 ```
@@ -313,8 +318,7 @@ desk self update
 ### Build
 
 ```bash
-make build-deskconnd   # builds bin/deskconnd
-make build-desk        # builds bin/desk
+make build   # builds bin/deskconn, linked as bin/desk, bin/deskconn-userd and bin/deskconn-rootd
 ```
 
 Override the cloud router for local development (see [Self-hosting](#self-hosting)):
@@ -335,7 +339,7 @@ All credentials and configuration are stored under `~/.deskconn/`:
 
 | File                    | Contents                                                                |
 |-------------------------|-------------------------------------------------------------------------|
-| `credentials.json`      | Machine attach credentials (realm, authid, keypair) used by `deskconnd` |
+| `credentials.json`      | Machine attach credentials (realm, authid, keypair) used by `deskconn-userd` |
 | `id_ed25519`            | CLI private key, username, and key expiry                               |
 | `id_ed25519.pub`        | CLI public key, username, and account name                              |
 | `config.yml`            | Machine list and aliases                                                |

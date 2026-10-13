@@ -40,7 +40,7 @@ DeskconnCLI[desk-cli]
 AccountService[Account Service]
 CloudDB[(Cloud Database)]
 CloudRouter[cloud-router]
-Deskconnd[deskconnd]
+Deskconnd[deskconn-userd]
 
 User -->|Run attach command| DeskconnCLI
 
@@ -65,7 +65,7 @@ Deskconnd -->|Register Procedures| CloudRouter
 ```mermaid
 sequenceDiagram
     participant C as desk-cli
-    participant D as deskconnd
+    participant D as deskconn-userd
     participant Dev as Device
 
     C->>D: Call procedure (targetDeviceID)
@@ -90,14 +90,14 @@ sequenceDiagram
 Shell, exec, logs, port forwarding, agent forwarding and file transfer don't use procedure calls: they
 run on raw streams opened alongside the session (QUIC streams, or WebRTC data channels once the
 connection has upgraded to P2P). By default the CLI opens those on the same persistent connection,
-through `deskconnd`'s stream proxy socket (`~/.deskconn/deskconn-streams.sock`), instead of connecting
+through `deskconn-userd`'s stream proxy socket (`~/.deskconn/deskconn-streams.sock`), instead of connecting
 to the device itself. `--mode quic` and `--mode p2p` still connect directly, as does the default mode
-when `deskconnd` isn't running.
+when `deskconn-userd` isn't running.
 
 ```mermaid
 sequenceDiagram
     participant C as desk-cli
-    participant D as deskconnd
+    participant D as deskconn-userd
     participant Dev as Device
 
     C->>D: Which transport? (targetDeviceID)
@@ -108,9 +108,9 @@ sequenceDiagram
     D->>Dev: Open QUIC stream / data channel on the session's connection
     D-->>C: OK
 
-    C->>Dev: Key exchange, then encrypted traffic (deskconnd only relays it)
+    C->>Dev: Key exchange, then encrypted traffic (deskconn-userd only relays it)
 ```
 
-The two transports speak different protocols per feature, so `deskconnd` can't translate between them:
+The two transports speak different protocols per feature, so `deskconn-userd` can't translate between them:
 the CLI asks which one the connection has and uses that one for the whole operation. The key exchange
-is end to end between the CLI and the device, so `deskconnd` relays ciphertext only.
+is end to end between the CLI and the device, so `deskconn-userd` relays ciphertext only.

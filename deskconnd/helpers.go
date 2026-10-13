@@ -242,7 +242,7 @@ func remoteControlCall(session *xconn.Session, procedure string, req, out any) e
 }
 
 // ProxyVPNStartHandler proxies "desk vpn serve": it arms d to accept
-// inbound VPN tunnel requests using helperSocket, a vpnd socket the
+// inbound VPN tunnel requests using helperSocket, a deskconn-rootd socket the
 // caller already started.
 //
 // Returns as soon as arming succeeds, without blocking, so the CLI can hand
@@ -270,7 +270,7 @@ func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
 }
 
 // ProxyVPNStopHandler proxies "desk vpn stop": disarms serving, tearing down any active
-// tunnel and closing the helper connection so vpnd unwinds and exits. Meant to run as
+// tunnel and closing the helper connection so deskconn-rootd unwinds and exits. Meant to run as
 // an independent command from "desk vpn serve", not necessarily the same terminal.
 func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
 	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
