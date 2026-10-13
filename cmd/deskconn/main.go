@@ -17,6 +17,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -194,19 +195,18 @@ func main() {
 	).Short('A').Bool()
 
 	portCmd := app.Command("port", "Forward ports")
-	portForwardCmd := portCmd.Command("forward", "Forward a local port to a port on the remote machine")
+	portForwardCmd := portCmd.Command("forward", "Listen locally and forward connections to a port on the remote machine")
 	portForwardMachine := machineArg(portForwardCmd, "ID, name or alias of machine", cfgDirectory)
-	portForwardPorts := portForwardCmd.Arg("ports", "Port mapping as localport:remoteport").String()
-	portForwardLocalFlag := portForwardCmd.Flag("local", "Local port to listen on").Short('l').String()
-	portForwardRemoteFlag := portForwardCmd.Flag("remote", "Port on the remote machine to connect to").Short('r').String()
+	portForwardPorts := portForwardCmd.Arg("listen:target",
+		"Listen on local 127.0.0.1:LISTEN and connect to remote localhost:TARGET (e.g. 8080:80)").Required().String()
 	portForwardModeFlag := modeFlag(portForwardCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
-	portReverseCmd := portCmd.Command("reverse", "Reverse-forward a remote port to a local port")
+	portReverseCmd := portCmd.Command("reverse", "Listen on the remote machine and forward connections to a local port")
 	portReverseMachine := machineArg(portReverseCmd, "ID, name or alias of machine", cfgDirectory)
-	portReversePorts := portReverseCmd.Arg("ports", "Port mapping as remoteport:localport").String()
-	portReverseRemoteFlag := portReverseCmd.Flag("remote", "Port on the remote machine to listen on").Short('r').String()
-	portReverseLocalFlag := portReverseCmd.Flag("local", "Local port to connect to").Short('l').String()
+	portReversePorts := portReverseCmd.Arg("listen:target",
+		"Listen on remote port LISTEN (all interfaces) and connect to local localhost:TARGET "+
+			"(e.g. 9000:3000)").Required().String()
 	portReverseModeFlag := modeFlag(portReverseCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
@@ -744,27 +744,9 @@ func main() {
 		}
 
 	case portForwardCmd.FullCommand():
-		var localPort, remotePort string
-		if *portForwardPorts != "" && (*portForwardLocalFlag != "" || *portForwardRemoteFlag != "") {
-			fmt.Fprintln(os.Stderr, "specify ports with either localport:remoteport or --local and --remote, not both")
-			return
-		}
-
-		if *portForwardPorts != "" {
-			parts := strings.SplitN(*portForwardPorts, ":", 2)
-			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-				fmt.Fprintln(os.Stderr, "invalid port mapping: use localport:remoteport")
-				return
-			}
-			localPort, remotePort = parts[0], parts[1]
-		} else if *portForwardLocalFlag != "" && *portForwardRemoteFlag != "" {
-			localPort = *portForwardLocalFlag
-			remotePort = *portForwardRemoteFlag
-		} else if *portForwardLocalFlag != "" || *portForwardRemoteFlag != "" {
-			fmt.Fprintln(os.Stderr, "both --local(-l) and --remote(-r) must be provided together")
-			return
-		} else {
-			fmt.Fprintln(os.Stderr, "specify ports as localport:remoteport or use --local and --remote flags")
+		localPort, remotePort, err := parsePortMapping(*portForwardPorts)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 
@@ -799,27 +781,9 @@ func main() {
 		}
 
 	case portReverseCmd.FullCommand():
-		var remotePort, localPort string
-		if *portReversePorts != "" && (*portReverseRemoteFlag != "" || *portReverseLocalFlag != "") {
-			fmt.Fprintln(os.Stderr, "specify ports with either remoteport:localport or --remote and --local, not both")
-			return
-		}
-
-		if *portReversePorts != "" {
-			parts := strings.SplitN(*portReversePorts, ":", 2)
-			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-				fmt.Fprintln(os.Stderr, "invalid port mapping: use remoteport:localport")
-				return
-			}
-			remotePort, localPort = parts[0], parts[1]
-		} else if *portReverseRemoteFlag != "" && *portReverseLocalFlag != "" {
-			remotePort = *portReverseRemoteFlag
-			localPort = *portReverseLocalFlag
-		} else if *portReverseRemoteFlag != "" || *portReverseLocalFlag != "" {
-			fmt.Fprintln(os.Stderr, "both --remote(-r) and --local(-l) must be provided together")
-			return
-		} else {
-			fmt.Fprintln(os.Stderr, "specify ports as remoteport:localport or use --remote and --local flags")
+		remotePort, localPort, err := parsePortMapping(*portReversePorts)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 
@@ -1996,6 +1960,20 @@ func standaloneRequested() bool {
 		}
 	}
 	return false
+}
+
+func parsePortMapping(mapping string) (listen, target string, err error) {
+	listen, target, ok := strings.Cut(mapping, ":")
+	if !ok || listen == "" || target == "" {
+		return "", "", fmt.Errorf("invalid port mapping: use listen:target (e.g. 8080:80)")
+	}
+	for _, port := range []string{listen, target} {
+		n, parseErr := strconv.ParseUint(port, 10, 16)
+		if parseErr != nil || n == 0 {
+			return "", "", fmt.Errorf("invalid port %q: use a number from 1 to 65535", port)
+		}
+	}
+	return listen, target, nil
 }
 
 // machineArg defines cmd's machine argument. With --profile there is only one machine, so

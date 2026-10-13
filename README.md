@@ -308,11 +308,12 @@ desk file cat <machine:path> [--mode p2p|routed]
 ### Port forwarding
 
 ```
-# Forward local:remote — traffic on localhost:LOCAL goes to REMOTE on the machine
-desk port forward <machine> [-l LOCAL] [-r REMOTE] [--p2p]
+# Both commands use listen:target (TCP ports 1–65535).
+# Listen locally on 127.0.0.1:8080; connect to localhost:80 on office.
+desk port forward office 8080:80 [--mode quic|p2p]
 
-# Reverse — the machine listens on REMOTE and forwards to localhost:LOCAL
-desk port reverse <machine> [-r REMOTE] [-l LOCAL] [--p2p]
+# Listen on port 9000 on all interfaces on office; connect to local localhost:3000.
+desk port reverse office 9000:3000 [--mode quic|p2p]
 ```
 
 ### Self-update
