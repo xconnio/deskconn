@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
@@ -241,24 +239,12 @@ func fetchMachines(session *xconn.Session) ([]common.Machine, error) {
 
 // CacheMachines replaces the machines in config.yml, keeping its other sections.
 func CacheMachines(cfgDirectory string, machines []common.Machine) error {
-	cfgPath := filepath.Join(cfgDirectory, "config.yml")
-
-	var config common.Config
-	data, err := os.ReadFile(cfgPath)
-	if err != nil && !os.IsNotExist(err) {
+	config, err := readConfig(cfgDirectory)
+	if err != nil {
 		return err
 	}
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("failed to parse config: %w", err)
-	}
-
 	config.Machines = machines
-	b, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	return os.WriteFile(cfgPath, b, 0600)
+	return writeConfig(cfgDirectory, config)
 }
 
 // CallFileOp performs one key-exchange-then-encrypted-call round trip
