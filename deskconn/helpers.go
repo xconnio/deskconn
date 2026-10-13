@@ -274,7 +274,7 @@ func CallFileOp(machineSession *xconn.Session, procedure string, payload []byte)
 }
 
 // clientAuthenticator returns the authenticator this machine uses on realm's machine: the
-// one for the standalone target (desk --url), otherwise the cloud login's.
+// one for the standalone target (desk --profile), otherwise the cloud login's.
 func clientAuthenticator(realm, cfgDirectory string) (auth.ClientAuthenticator, error) {
 	if target, ok := common.StandaloneTargetFor(realm); ok {
 		return target.Authenticator()

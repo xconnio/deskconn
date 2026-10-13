@@ -31,6 +31,7 @@ import (
 	"github.com/xconnio/deskconn/deskconn"
 	wampauth "github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
+	xconnauth "github.com/xconnio/xconn-go/auth"
 )
 
 var version = "v0.1.0-alpha"
@@ -98,20 +99,26 @@ func main() {
 	versionString := fmt.Sprintf("desk %s", version)
 	app := kingpin.New("desk", "Control your machines remotely.")
 	configureHelp(app)
-	standaloneURL := app.Flag("url", "Connect directly to a standalone deskconn-userd at this URL "+
-		"(quic://host:port, or https://host:port for WebTransport) instead of a machine on your account").
-		Envar("DESKCONN_URL").String()
-	standaloneCertHash := app.Flag("cert-hash", "SHA-256 fingerprint of the standalone machine's certificate, "+
-		"as deskconn-userd prints it, to trust it even if self-signed (default: verify against trusted CAs)").
-		Envar("DESKCONN_CERT_HASH").String()
-	standaloneKey := app.Flag("private-key", "Private key (hex) to authenticate with --url; see `desk keygen`").
-		Envar("DESKCONN_PRIVATE_KEY").String()
-	standaloneAuthID := app.Flag("authid", "Authid (username) to present with --url (default: current user)").
-		Envar("DESKCONN_AUTHID").String()
-	standalonePassword := app.Flag("secret", "Password to authenticate with --url instead of "+
-		"--private-key (prompted for if neither is given)").Envar("DESKCONN_SECRET").String()
+	profileName := app.Flag("profile", "Connect directly to the standalone machine saved as this profile "+
+		"(see `desk profile add`) instead of a machine on your account").
+		HintAction(profileCompletions(cfgDirectory)).String()
 
 	keygenCmd := app.Command("keygen", "Generate a key pair for standalone machines")
+
+	profileCmd := app.Command("profile", "Save standalone machines to connect to with --profile")
+	profileAddCmd := profileCmd.Command("add", "Save a standalone machine as a profile")
+	profileAddName := profileAddCmd.Arg("name", "Profile name").Required().String()
+	profileAddURL := profileAddCmd.Flag("url", "The machine's URL: quic://host:port, or https://host:port "+
+		"for WebTransport").Required().String()
+	profileAddCertHash := profileAddCmd.Flag("cert-hash", "SHA-256 fingerprint of the machine's certificate, "+
+		"as deskconn-userd prints it, to trust it even if self-signed (default: verify against trusted CAs)").String()
+	profileAddKey := profileAddCmd.Flag("private-key", "Private key (hex) to authenticate with; see `desk keygen`. "+
+		"Without it, a password is asked for on each use").String()
+	profileAddAuthID := profileAddCmd.Flag("authid", "Authid (username) to present (default: current user)").String()
+	profileRemoveCmd := profileCmd.Command("remove", "Remove a profile")
+	profileRemoveName := profileRemoveCmd.Arg("name", "Profile name").Required().
+		HintAction(profileCompletions(cfgDirectory)).String()
+	profileLsCmd := profileCmd.Command("ls", "List profiles")
 
 	machineCmd := app.Command("machine", "Manage machines and connections")
 
@@ -283,33 +290,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *standaloneURL != "" {
-		if _, err := common.ParseStandaloneURL(*standaloneURL); err != nil {
+	if *profileName != "" {
+		if err := useProfile(cfgDirectory, *profileName); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		if _, err := common.StandaloneTLSConfig(*standaloneCertHash); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		if *standaloneKey != "" && *standalonePassword != "" {
-			fmt.Fprintln(os.Stderr, "--private-key and --secret are mutually exclusive")
-			os.Exit(1)
-		}
-		if *standaloneAuthID == "" {
-			*standaloneAuthID = "deskconn"
-			if u, err := user.Current(); err == nil && u.Username != "" {
-				*standaloneAuthID = u.Username
-			}
-		}
-		authID := *standaloneAuthID
-		common.SetStandaloneTarget(&common.StandaloneTarget{URL: *standaloneURL, CertHash: *standaloneCertHash,
-			AuthID: authID, PrivateKey: *standaloneKey, Password: *standalonePassword,
-			ReadPassword: func() (string, error) { return readStandalonePassword(authID) }})
 		switch parsedCmd {
 		case pingCmd.FullCommand(), connectCmd.FullCommand(), disconnectCmd.FullCommand(), lsCmd.FullCommand(),
 			machineLsCmd.FullCommand():
-			fmt.Fprintf(os.Stderr, "%s is not available with --url (it works on machines of your account)\n",
+			fmt.Fprintf(os.Stderr, "%s is not available with --profile (it works on machines of your account)\n",
 				parsedCmd)
 			os.Exit(1)
 		}
@@ -318,6 +307,27 @@ func main() {
 	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
 
 	switch parsedCmd {
+	case profileAddCmd.FullCommand():
+		profile := deskconn.Profile{Name: *profileAddName, URL: *profileAddURL, CertHash: *profileAddCertHash,
+			PrivateKey: *profileAddKey, AuthID: *profileAddAuthID}
+		if err := addProfile(cfgDirectory, profile); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+	case profileRemoveCmd.FullCommand():
+		if err := deskconn.RemoveProfile(cfgDirectory, *profileRemoveName); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("Removed profile %s.\n", *profileRemoveName)
+
+	case profileLsCmd.FullCommand():
+		if err := listProfiles(cfgDirectory); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
 	case keygenCmd.FullCommand():
 		publicKey, privateKey, err := wampauth.GenerateCryptoSignKeyPair()
 		if err != nil {
@@ -1973,26 +1983,23 @@ func logout(cfgDirectory string) error {
 	return deskconn.RemoveCredentialsFiles(cfgDirectory)
 }
 
-// standaloneRequested reports whether the CLI is pointed at a standalone machine (--url or
-// DESKCONN_URL). It has to be known before the command line is parsed: machine arguments
+// standaloneRequested reports whether the CLI is pointed at a standalone machine
+// (--profile). It has to be known before the command line is parsed: machine arguments
 // aren't defined then.
 func standaloneRequested() bool {
-	if os.Getenv("DESKCONN_URL") != "" {
-		return true
-	}
 	for _, arg := range os.Args[1:] {
 		if arg == "--" {
 			break
 		}
-		if arg == "--url" || strings.HasPrefix(arg, "--url=") {
+		if arg == "--profile" || strings.HasPrefix(arg, "--profile=") {
 			return true
 		}
 	}
 	return false
 }
 
-// machineArg defines cmd's machine argument. With --url there is only one machine, so the
-// argument isn't defined at all and the result is empty.
+// machineArg defines cmd's machine argument. With --profile there is only one machine, so
+// the argument isn't defined at all and the result is empty.
 func machineArg(cmd *kingpin.CmdClause, help, cfgDirectory string) *string {
 	if standaloneRequested() {
 		return new(string)
@@ -2000,7 +2007,7 @@ func machineArg(cmd *kingpin.CmdClause, help, cfgDirectory string) *string {
 	return cmd.Arg("machine", help).Required().HintAction(machineCompletions(cfgDirectory)).String()
 }
 
-// modeFlag defines cmd's --mode flag. With --url it defaults to a direct connection: the
+// modeFlag defines cmd's --mode flag. With --profile it defaults to a direct connection: the
 // local daemon that some commands go through by default doesn't know the standalone machine.
 func modeFlag(cmd *kingpin.CmdClause, help string) *string {
 	flag := cmd.Flag("mode", help)
@@ -2113,12 +2120,12 @@ func readOTP() (string, error) {
 	return otp, nil
 }
 
-// readStandalonePassword prompts for authID's password on the standalone machine, when
-// neither --private-key nor --secret was given and a command first connects.
+// readStandalonePassword prompts for authID's password on the standalone machine, for a
+// profile saved without a private key, when a command first connects.
 func readStandalonePassword(authID string) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
-		return "", errors.New("--url needs --private-key (or DESKCONN_PRIVATE_KEY; see `desk keygen`) " +
-			"or --secret (or DESKCONN_SECRET)")
+		return "", fmt.Errorf("the password for %s can only be typed in a terminal; to connect without one, "+
+			"save the profile with --private-key (see `desk keygen`)", authID)
 	}
 
 	fmt.Fprintf(os.Stderr, "Password for %s: ", authID)
@@ -2410,4 +2417,95 @@ func updateMachineAlias(cfgDirectory, machineKey, alias string) error {
 	}
 
 	return os.WriteFile(configFile, out, 0600)
+}
+
+// addProfile checks profile's URL, certificate fingerprint and private key, then saves it.
+func addProfile(cfgDirectory string, profile deskconn.Profile) error {
+	if strings.TrimSpace(profile.Name) == "" || strings.ContainsAny(profile.Name, " \t\n") {
+		return fmt.Errorf("profile name can't be empty or contain spaces")
+	}
+	if _, err := common.ParseStandaloneURL(profile.URL); err != nil {
+		return err
+	}
+	if _, err := common.StandaloneTLSConfig(profile.CertHash); err != nil {
+		return err
+	}
+	if profile.AuthID == "" {
+		profile.AuthID = currentUsername()
+	}
+	if profile.PrivateKey != "" {
+		if _, err := xconnauth.NewCryptoSignAuthenticator(profile.AuthID, profile.PrivateKey, nil); err != nil {
+			return errors.New("invalid private key: expected the hex private key `desk keygen` prints")
+		}
+	}
+
+	if err := deskconn.AddProfile(cfgDirectory, profile); err != nil {
+		return err
+	}
+	fmt.Printf("Saved profile %s. Use it with: desk --profile %s <command>\n", profile.Name, profile.Name)
+	return nil
+}
+
+// useProfile points this process at the standalone machine saved as name.
+func useProfile(cfgDirectory, name string) error {
+	profile, err := deskconn.FindProfile(cfgDirectory, name)
+	if errors.Is(err, deskconn.ErrProfileNotFound) {
+		return fmt.Errorf("no profile named %s; see `desk profile ls`", name)
+	}
+	if err != nil {
+		return err
+	}
+	authID := profile.AuthID
+	if authID == "" {
+		authID = currentUsername()
+	}
+	common.SetStandaloneTarget(&common.StandaloneTarget{URL: profile.URL, CertHash: profile.CertHash,
+		AuthID: authID, PrivateKey: profile.PrivateKey,
+		ReadPassword: func() (string, error) { return readStandalonePassword(authID) }})
+	return nil
+}
+
+func listProfiles(cfgDirectory string) error {
+	profiles, err := deskconn.Profiles(cfgDirectory)
+	if err != nil {
+		return err
+	}
+	if len(profiles) == 0 {
+		fmt.Println("No profiles. Add one with `desk profile add <name> --url <url>`.")
+		return nil
+	}
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.Header([]string{"Name", "URL", "Auth", "Certificate"})
+	for _, profile := range profiles {
+		auth := "password as " + profile.AuthID
+		if profile.PrivateKey != "" {
+			auth = "key as " + profile.AuthID
+		}
+		cert := "trusted CAs"
+		if profile.CertHash != "" {
+			cert = "pinned"
+		}
+		_ = table.Append([]any{profile.Name, profile.URL, auth, cert})
+	}
+	return table.Render()
+}
+
+// currentUsername is the authid a profile presents unless --authid says otherwise.
+func currentUsername() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return "deskconn"
+}
+
+func profileCompletions(cfgDirectory string) func() []string {
+	return func() []string {
+		profiles, _ := deskconn.Profiles(cfgDirectory)
+		names := make([]string, 0, len(profiles))
+		for _, profile := range profiles {
+			names = append(names, profile.Name)
+		}
+		return names
+	}
 }

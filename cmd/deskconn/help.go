@@ -65,10 +65,10 @@ Commands:
 Management:
 {{CommandRows .App.Commands "machine" "account" "self" | FormatTwoColumns}}
 Standalone:
-{{CommandRows .App.Commands "keygen" | FormatTwoColumns}}
+{{CommandRows .App.Commands "profile" "keygen" | FormatTwoColumns}}
 Flags:
-  --help      Show help
-  --url URL   Connect directly to a standalone machine
+  --help            Show help
+  --profile NAME    Connect directly to a standalone machine saved as a profile
 
 Run 'desk <command> --help' for details.
 Run 'desk --help-long' for all commands and flags.
@@ -154,6 +154,12 @@ func groupHelpExamples(group string) []string {
 			return []string{"desk agent ls", "desk agent pull"}
 		}
 		return []string{"desk agent ls", "desk agent pull office", "desk agent resume <session-id>"}
+	case "profile":
+		return []string{
+			"desk profile add office --url quic://host:18080 --cert-hash <fingerprint> --private-key <key>",
+			"desk --profile office shell",
+			"desk profile ls",
+		}
 	case "self":
 		return []string{"desk self version", "desk self update"}
 	default:
