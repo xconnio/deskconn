@@ -63,9 +63,9 @@ Sign up at [deskconn.com](https://deskconn.com) or via the mobile app.
 ### 2. Attach the desktop to the cloud
 
 ```bash
-desk machine attach --username <email> --password <password>
-# or read the password from stdin
-echo "$PASSWORD" | desk machine attach --username <email> --password-stdin
+desk machine attach --username <email>
+# or, without a prompt, read the password from stdin
+echo "$PASSWORD" | desk machine attach --username <email>
 ```
 
 This creates a realm for the desktop under your account and writes credentials to `~/.deskconn/credentials.json`. The
@@ -74,7 +74,7 @@ daemon picks these up automatically and connects to the cloud router.
 ### 3. Log in from the CLI
 
 ```bash
-desk account login --username <username> --password <password>
+desk account login --username <username>
 ```
 
 You'll then be prompted for the one-time password emailed to you. Once verified, desk generates an Ed25519
@@ -225,7 +225,7 @@ foreground:
 
 ```bash
 systemctl --user stop deskconn-userd   # if the official release is installed; it shares ~/.deskconn
-bin/desk machine attach --username <email> --password <password>
+bin/desk machine attach --username <email>
 bin/deskconn-userd
 ```
 
@@ -241,7 +241,7 @@ Use `desk <command> --help` for command details (for example, `desk file --help`
 ### Account
 
 ```
-desk account login  [--username] [--password] [--password-stdin]
+desk account login  [--username]
 desk account logout
 desk account whoami
 ```
@@ -251,7 +251,7 @@ desk account whoami
 ```
 desk machine ls     [--refresh] [--detailed]
 desk machine info   <machine> [--mode p2p|routed]
-desk machine attach [--name] [--username] [--password] [--password-stdin]
+desk machine attach [--name] [--username]
 desk machine detach
 desk machine alias  <machine> <name>
 desk machine alias  <machine> --unset
