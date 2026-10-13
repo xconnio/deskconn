@@ -10,17 +10,17 @@ import (
 )
 
 const (
-	// VPNHelperName is the program name desk runs as its privileged VPN
-	// helper under: main dispatches on it either as argv[0] (the installed
-	// symlink) or as the first argument (how LaunchVPNHelper invokes it).
-	VPNHelperName = "vpnd"
+	// RootdName is the name the deskconn binary runs as its root helper under: main
+	// dispatches on it either as argv[0] (the installed symlink) or as the first argument
+	// (how LaunchVPNHelper invokes it).
+	RootdName = "deskconn-rootd"
 
-	// VPNServeUnit is the transient systemd unit vpnd runs as for "desk vpn
-	// start", VPNConnectUnit the one for "desk vpn connect". Fixed names,
+	// VPNServeUnit is the transient systemd unit deskconn-rootd runs as for "desk vpn
+	// serve", VPNConnectUnit the one for "desk vpn connect". Fixed names,
 	// so systemd itself refuses a second instance of either while one is
 	// running, and so "systemctl is-active" tells whether one is.
-	VPNServeUnit   = "deskconn-vpnd"
-	VPNConnectUnit = "deskconn-vpnd-connect"
+	VPNServeUnit   = RootdName
+	VPNConnectUnit = RootdName + "-connect"
 
 	// helperReadyTimeout bounds how long we wait for the helper's socket to
 	// come up once systemd-run has returned -- the sudo password has already
@@ -33,7 +33,7 @@ const (
 	helperStopTimeout = 15 * time.Second
 )
 
-// LaunchVPNHelper starts vpnd (this same executable) as the transient
+// LaunchVPNHelper starts deskconn-rootd (this same executable) as the transient
 // systemd unit named unit, via "sudo systemd-run" -- prompting for a
 // password on this process's terminal -- and waits for its socket to come
 // up. Connect to the returned path with DialVPNHelper, from this process or
@@ -46,32 +46,32 @@ const (
 // Callers that hand the helper off and return don't need to call it.
 func LaunchVPNHelper(ctx context.Context, cfgDirectory, unit string) (socketPath string, wait func() error, err error) {
 	if _, err := exec.LookPath("systemd-run"); err != nil {
-		return "", nil, fmt.Errorf("%s needs systemd: systemd-run not found", VPNHelperName)
+		return "", nil, fmt.Errorf("%s needs systemd: systemd-run not found", RootdName)
 	}
 	if VPNHelperActive(unit) {
-		return "", nil, fmt.Errorf("%s is already running (unit %s)", VPNHelperName, unit)
+		return "", nil, fmt.Errorf("%s is already running (unit %s)", RootdName, unit)
 	}
 
 	exe, err := os.Executable()
 	if err != nil {
-		return "", nil, fmt.Errorf("find own executable for %s: %w", VPNHelperName, err)
+		return "", nil, fmt.Errorf("find own executable for %s: %w", RootdName, err)
 	}
 
 	// The socket lives in a private dir under the operator's own config dir, so only their
-	// uid (or root) can reach it; vpnd removes the dir when it exits.
+	// uid (or root) can reach it; deskconn-rootd removes the dir when it exits.
 	dir, err := os.MkdirTemp(cfgDirectory, "vpnhelper-")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir for vpn helper socket: %w", err)
 	}
 	socketPath = filepath.Join(dir, "helper.sock")
 
-	fmt.Println("A password is needed to grant vpnd the network access this requires.")
+	fmt.Printf("A password is needed to grant %s the network access this requires.\n", RootdName)
 	cmd := exec.CommandContext(ctx, "sudo", "systemd-run", //nolint:gosec
 		"--unit="+unit,
 		"--description=deskconn VPN helper",
 		"--collect", // discard the unit on exit even if it failed, so the name is free again
 		"--quiet",
-		"--", exe, VPNHelperName, "--socket", socketPath)
+		"--", exe, RootdName, "--socket", socketPath)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -80,7 +80,7 @@ func LaunchVPNHelper(ctx context.Context, cfgDirectory, unit string) (socketPath
 		if ctx.Err() != nil {
 			return "", nil, ctx.Err()
 		}
-		return "", nil, fmt.Errorf("start %s: %w", VPNHelperName, err)
+		return "", nil, fmt.Errorf("start %s: %w", RootdName, err)
 	}
 
 	if err := waitForSocket(ctx, socketPath, unit); err != nil {
@@ -121,14 +121,14 @@ func waitForSocket(ctx context.Context, socketPath, unit string) error {
 			return nil
 		}
 		if !VPNHelperActive(unit) {
-			return fmt.Errorf("%s exited before it was ready (see \"journalctl -u %s\")", VPNHelperName, unit)
+			return fmt.Errorf("%s exited before it was ready (see \"journalctl -u %s\")", RootdName, unit)
 		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline:
-			return fmt.Errorf("timed out waiting for %s to start (see \"journalctl -u %s\")", VPNHelperName, unit)
+			return fmt.Errorf("timed out waiting for %s to start (see \"journalctl -u %s\")", RootdName, unit)
 		case <-ticker.C:
 		}
 	}
@@ -142,7 +142,7 @@ func waitForUnitExit(unit string) error {
 	for VPNHelperActive(unit) {
 		select {
 		case <-deadline:
-			return fmt.Errorf("timed out waiting for %s to exit (non-fatal)", VPNHelperName)
+			return fmt.Errorf("timed out waiting for %s to exit (non-fatal)", RootdName)
 		case <-ticker.C:
 		}
 	}

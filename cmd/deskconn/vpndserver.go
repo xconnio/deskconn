@@ -11,7 +11,7 @@ import (
 	"github.com/xconnio/deskconn/common"
 )
 
-// Server implements the privileged side of the vpnd protocol: it
+// Server implements the privileged side of the deskconn-rootd protocol: it
 // runs the actual iptun calls (expects to be root) on behalf of one
 // connected client, and undoes anything left outstanding if that client
 // disconnects without cleanly undoing it first (crash, kill -9, ...).
@@ -114,7 +114,7 @@ func (s *Server) handleOpenTUN(conn *net.UnixConn, req common.VPNHelperRequest) 
 		writeResponse(conn, dataResponse(common.VPNOpenTUNData{Iface: ifaceName}), int(fd))
 	})
 	if ctrlErr != nil {
-		log.Debugf("vpnd: open_tun: failed to access raw fd: %v", ctrlErr)
+		log.Debugf("deskconn-rootd: open_tun: failed to access raw fd: %v", ctrlErr)
 	}
 }
 
@@ -146,7 +146,7 @@ func (s *Server) handleAddHostRoute(conn *net.UnixConn, req common.VPNHelperRequ
 	ip := args.IP
 	s.undo.push("host_route:"+ip, func() {
 		if err := DelHostRoute(ip); err != nil {
-			log.Debugf("vpnd: failed to remove leftover host route to %s: %v", ip, err)
+			log.Debugf("deskconn-rootd: failed to remove leftover host route to %s: %v", ip, err)
 		}
 	})
 	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
@@ -182,7 +182,7 @@ func (s *Server) handleReplaceDefaultRoute(conn *net.UnixConn, req common.VPNHel
 	ipVersion := args.IPVersion
 	s.undo.push("default_route", func() {
 		if err := RestoreDefaultRoute(ipVersion, prev); err != nil {
-			log.Debugf("vpnd: failed to restore leftover default route: %v", err)
+			log.Debugf("deskconn-rootd: failed to restore leftover default route: %v", err)
 		}
 	})
 	writeResponse(conn, dataResponse(common.VPNReplaceDefaultRouteData{Prev: prev}), -1)
@@ -211,7 +211,7 @@ func (s *Server) handleBlockIPv6Default(conn *net.UnixConn, _ common.VPNHelperRe
 	}
 	s.undo.push("ipv6_block", func() {
 		if err := RestoreIPv6Default(hadDefault, prev); err != nil {
-			log.Debugf("vpnd: failed to restore leftover ipv6 default route: %v", err)
+			log.Debugf("deskconn-rootd: failed to restore leftover ipv6 default route: %v", err)
 		}
 	})
 	writeResponse(conn, dataResponse(common.VPNBlockIPv6DefaultData{HadDefault: hadDefault, Prev: prev}), -1)
@@ -246,7 +246,7 @@ func (s *Server) handleSetLinkDNS(conn *net.UnixConn, req common.VPNHelperReques
 	iface := args.Iface
 	s.undo.push("link_dns:"+iface, func() {
 		if err := RevertLinkDNS(iface); err != nil {
-			log.Debugf("vpnd: failed to revert leftover dns settings on %s: %v", iface, err)
+			log.Debugf("deskconn-rootd: failed to revert leftover dns settings on %s: %v", iface, err)
 		}
 	})
 	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
@@ -282,7 +282,7 @@ func (s *Server) handleSetSysctl(conn *net.UnixConn, req common.VPNHelperRequest
 	key, prev := args.Key, previous
 	s.undo.push("sysctl:"+key, func() {
 		if _, err := SetSysctl(key, prev); err != nil {
-			log.Debugf("vpnd: failed to restore leftover sysctl %s: %v", key, err)
+			log.Debugf("deskconn-rootd: failed to restore leftover sysctl %s: %v", key, err)
 		}
 	})
 	writeResponse(conn, dataResponse(common.VPNSetSysctlData{Previous: previous}), -1)
@@ -317,7 +317,7 @@ func (s *Server) handleAddMasquerade(conn *net.UnixConn, req common.VPNHelperReq
 	subnet, oif := args.Subnet, args.Oif
 	s.undo.push("masquerade:"+subnet+"|"+oif, func() {
 		if err := DelMasquerade(subnet, oif); err != nil {
-			log.Debugf("vpnd: failed to remove leftover masquerade rule: %v", err)
+			log.Debugf("deskconn-rootd: failed to remove leftover masquerade rule: %v", err)
 		}
 	})
 	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
@@ -352,7 +352,7 @@ func (s *Server) handleAddForwardAccept(conn *net.UnixConn, req common.VPNHelper
 	in, out := args.InIface, args.OutIface
 	s.undo.push("forward_accept:"+in+"|"+out, func() {
 		if err := DelForwardAccept(in, out); err != nil {
-			log.Debugf("vpnd: failed to remove leftover forward-accept rule: %v", err)
+			log.Debugf("deskconn-rootd: failed to remove leftover forward-accept rule: %v", err)
 		}
 	})
 	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
@@ -387,7 +387,7 @@ func (s *Server) handleAddForwardEstablished(conn *net.UnixConn, req common.VPNH
 	in, out := args.InIface, args.OutIface
 	s.undo.push("forward_established:"+in+"|"+out, func() {
 		if err := DelForwardEstablished(in, out); err != nil {
-			log.Debugf("vpnd: failed to remove leftover forward-established rule: %v", err)
+			log.Debugf("deskconn-rootd: failed to remove leftover forward-established rule: %v", err)
 		}
 	})
 	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
@@ -430,7 +430,7 @@ func writeResponse(conn *net.UnixConn, resp common.VPNHelperResponse, fd int) {
 	}
 	data, err := json.Marshal(resp)
 	if err != nil {
-		log.Debugf("vpnd: failed to marshal response: %v", err)
+		log.Debugf("deskconn-rootd: failed to marshal response: %v", err)
 		return
 	}
 
@@ -439,7 +439,7 @@ func writeResponse(conn *net.UnixConn, resp common.VPNHelperResponse, fd int) {
 		oob = unix.UnixRights(fd)
 	}
 	if _, _, err := conn.WriteMsgUnix(data, oob, nil); err != nil {
-		log.Debugf("vpnd: failed to write response: %v", err)
+		log.Debugf("deskconn-rootd: failed to write response: %v", err)
 	}
 }
 

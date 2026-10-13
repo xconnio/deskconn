@@ -14,16 +14,16 @@ release-snapshot:
 release-check:
 	goreleaser check
 
-build: build-deskconnd build-desk
+# One multicall binary: run as desk (or deskconn) it's the CLI, as deskconn-userd the user
+# daemon and as deskconn-rootd the root helper.
+build:
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/deskconn github.com/xconnio/deskconn/cmd/deskconn
+	ln -sf deskconn bin/desk
+	ln -sf deskconn bin/deskconn-userd
+	ln -sf deskconn bin/deskconn-rootd
 
-build-deskconnd:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/deskconnd github.com/xconnio/deskconn/cmd/deskconnd
-
-run-deskconnd:
-	go run github.com/xconnio/deskconn/cmd/deskconnd
-
-build-desk:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/desk github.com/xconnio/deskconn/cmd/desk
+run-userd:
+	go run github.com/xconnio/deskconn/cmd/deskconn deskconn-userd
 
 run-desk:
-	go run github.com/xconnio/deskconn/cmd/desk
+	go run github.com/xconnio/deskconn/cmd/deskconn
