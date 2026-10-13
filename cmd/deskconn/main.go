@@ -308,7 +308,7 @@ func main() {
 
 	switch parsedCmd {
 	case profileAddCmd.FullCommand():
-		profile := deskconn.Profile{Name: *profileAddName, URL: *profileAddURL, CertHash: *profileAddCertHash,
+		profile := common.Profile{Name: *profileAddName, URL: *profileAddURL, CertHash: *profileAddCertHash,
 			PrivateKey: *profileAddKey, AuthID: *profileAddAuthID}
 		if err := addProfile(cfgDirectory, profile); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -2420,7 +2420,7 @@ func updateMachineAlias(cfgDirectory, machineKey, alias string) error {
 }
 
 // addProfile checks profile's URL, certificate fingerprint and private key, then saves it.
-func addProfile(cfgDirectory string, profile deskconn.Profile) error {
+func addProfile(cfgDirectory string, profile common.Profile) error {
 	if strings.TrimSpace(profile.Name) == "" || strings.ContainsAny(profile.Name, " \t\n") {
 		return fmt.Errorf("profile name can't be empty or contain spaces")
 	}

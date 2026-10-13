@@ -36,10 +36,22 @@ type ScreenshotConfig struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 }
 
+// Profile is a standalone machine saved with "desk profile add", to connect to directly
+// with "desk --profile <name>". It authenticates with PrivateKey if set, otherwise as
+// AuthID with a password asked for on each use.
+type Profile struct {
+	Name       string `yaml:"name"`
+	URL        string `yaml:"url"`
+	CertHash   string `yaml:"cert_hash,omitempty"`
+	PrivateKey string `yaml:"private_key,omitempty"`
+	AuthID     string `yaml:"authid,omitempty"`
+}
+
 type Config struct {
 	Machines   []Machine        `yaml:"machines"`
 	Printing   PrintingConfig   `yaml:"printing,omitempty"`
 	Screenshot ScreenshotConfig `yaml:"screenshot,omitempty"`
+	Profiles   []Profile        `yaml:"profiles,omitempty"`
 }
 
 // UnmarshalYAML also accepts the "devices" key that config.yml used before machines were

@@ -8,93 +8,89 @@ import (
 	"sort"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/xconnio/deskconn/common"
 )
-
-// profilesFile keeps the profiles apart from config.yml: they hold private keys, and other
-// processes rewrite config.yml with their own view of it.
-const profilesFile = "profiles.yml"
-
-// Profile is a standalone machine saved with "desk profile add", to connect to directly
-// with "desk --profile <name>". It authenticates with PrivateKey if set, otherwise as
-// AuthID with a password asked for on each use.
-type Profile struct {
-	Name       string `yaml:"name"`
-	URL        string `yaml:"url"`
-	CertHash   string `yaml:"cert_hash,omitempty"`
-	PrivateKey string `yaml:"private_key,omitempty"`
-	AuthID     string `yaml:"authid,omitempty"`
-}
 
 // ErrProfileNotFound is returned for a profile name that isn't saved.
 var ErrProfileNotFound = errors.New("profile not found")
 
-// Profiles returns the saved profiles, sorted by name; none if there's no profiles file.
-func Profiles(cfgDirectory string) ([]Profile, error) {
-	data, err := os.ReadFile(filepath.Join(cfgDirectory, profilesFile))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+// Profiles returns the profiles saved in config.yml, sorted by name.
+func Profiles(cfgDirectory string) ([]common.Profile, error) {
+	config, err := readConfig(cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
-
-	var profiles []Profile
-	if err := yaml.Unmarshal(data, &profiles); err != nil {
-		return nil, fmt.Errorf("failed to parse %s: %w", profilesFile, err)
-	}
-	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
-	return profiles, nil
+	return config.Profiles, nil
 }
 
 // FindProfile returns the profile saved as name.
-func FindProfile(cfgDirectory, name string) (Profile, error) {
+func FindProfile(cfgDirectory, name string) (common.Profile, error) {
 	profiles, err := Profiles(cfgDirectory)
 	if err != nil {
-		return Profile{}, err
+		return common.Profile{}, err
 	}
 	for _, profile := range profiles {
 		if profile.Name == name {
 			return profile, nil
 		}
 	}
-	return Profile{}, fmt.Errorf("%w: %s", ErrProfileNotFound, name)
+	return common.Profile{}, fmt.Errorf("%w: %s", ErrProfileNotFound, name)
 }
 
 // AddProfile saves profile, refusing a name that's already taken.
-func AddProfile(cfgDirectory string, profile Profile) error {
-	profiles, err := Profiles(cfgDirectory)
+func AddProfile(cfgDirectory string, profile common.Profile) error {
+	config, err := readConfig(cfgDirectory)
 	if err != nil {
 		return err
 	}
-	for _, existing := range profiles {
+	for _, existing := range config.Profiles {
 		if existing.Name == profile.Name {
 			return fmt.Errorf("profile %s already exists; remove it first", profile.Name)
 		}
 	}
-	return saveProfiles(cfgDirectory, append(profiles, profile))
+	config.Profiles = append(config.Profiles, profile)
+	return writeConfig(cfgDirectory, config)
 }
 
 // RemoveProfile deletes the profile saved as name.
 func RemoveProfile(cfgDirectory, name string) error {
-	profiles, err := Profiles(cfgDirectory)
+	config, err := readConfig(cfgDirectory)
 	if err != nil {
 		return err
 	}
-	for i, profile := range profiles {
+	for i, profile := range config.Profiles {
 		if profile.Name == name {
-			return saveProfiles(cfgDirectory, append(profiles[:i], profiles[i+1:]...))
+			config.Profiles = append(config.Profiles[:i], config.Profiles[i+1:]...)
+			return writeConfig(cfgDirectory, config)
 		}
 	}
 	return fmt.Errorf("%w: %s", ErrProfileNotFound, name)
 }
 
-func saveProfiles(cfgDirectory string, profiles []Profile) error {
-	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
-	// Saving the key is the point, like ~/.deskconn/id_ed25519; the file is owner only.
-	data, err := yaml.Marshal(profiles) //nolint:gosec
-	if err != nil {
-		return err
+// readConfig returns config.yml, empty if there's none yet.
+func readConfig(cfgDirectory string) (common.Config, error) {
+	var config common.Config
+	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return config, nil
 	}
-	// Owner only: profiles hold private keys.
-	return os.WriteFile(filepath.Join(cfgDirectory, profilesFile), data, 0600)
+	if err != nil {
+		return config, err
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return config, fmt.Errorf("failed to parse config: %w", err)
+	}
+	return config, nil
+}
+
+// writeConfig saves config.yml, with its profiles sorted by name.
+func writeConfig(cfgDirectory string, config common.Config) error {
+	sort.Slice(config.Profiles, func(i, j int) bool { return config.Profiles[i].Name < config.Profiles[j].Name })
+	// Profiles hold private keys, like ~/.deskconn/id_ed25519; config.yml is owner only.
+	data, err := yaml.Marshal(config) //nolint:gosec
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	return os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), data, 0600)
 }

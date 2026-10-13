@@ -168,7 +168,7 @@ desk --profile office shell
 Use `https://host:18081` as the URL to connect over WebTransport instead. `--cert-hash` pins the machine's certificate,
 which is what makes a self-signed one trusted; leave it out when the certificate is issued by a CA the client trusts.
 
-Profiles are kept in `~/.deskconn/profiles.yml`, readable only by you. `desk profile ls` lists them and
+Profiles are kept in the `profiles` section of `~/.deskconn/config.yml`, readable only by you. `desk profile ls` lists them and
 `desk profile remove <name>` deletes one. `machine ping`, `machine connect`, `machine disconnect` and `ls` work on
 machines of your account only.
 
@@ -351,8 +351,7 @@ All credentials and configuration are stored under `~/.deskconn/`:
 | `credentials.json`      | Machine attach credentials (realm, authid, keypair) used by `deskconn-userd` |
 | `id_ed25519`            | CLI private key, username, and key expiry                               |
 | `id_ed25519.pub`        | CLI public key, username, and account name                              |
-| `config.yml`            | Machine list and aliases                                                |
-| `profiles.yml`          | Standalone machine profiles (`desk profile add`), including private keys |
+| `config.yml`            | Machine list and aliases, and standalone machine profiles (`desk profile add`) with their private keys |
 | `principals.json`       | Local CryptoSign principals (used by the local WAMP router)             |
 | `turn_credentials.json` | Cached TURN server credentials for WebRTC                               |
 | `deskconn.sock`         | Unix socket for local CLI–daemon communication                          |
