@@ -5,8 +5,14 @@ LDFLAGS := $(if $(CLOUD_QUIC_ADDRESS),-X github.com/xconnio/deskconn/common.clou
 test:
 	go test -count=1 ./... -v
 
+.PHONY: lint format
+
 lint:
 	golangci-lint run
+
+format:
+	golangci-lint fmt
+	golangci-lint run --fix
 
 release-snapshot:
 	goreleaser release --snapshot --clean
