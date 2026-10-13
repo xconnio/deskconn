@@ -123,8 +123,6 @@ func main() {
 	attachCmd := machineCmd.Command("attach", "Register this machine with your account")
 	attachName := attachCmd.Flag("name", "Machine name").Short('n').String()
 	attachUsername := attachCmd.Flag("username", "Username").Short('u').String()
-	attachPassword := attachCmd.Flag("password", "Password").Short('p').String()
-	attachPasswordStdin := attachCmd.Flag("password-stdin", "Read password from stdin").Bool()
 
 	detachCmd := machineCmd.Command("detach", "Remove this machine from your account (asks for confirmation)")
 
@@ -138,8 +136,6 @@ func main() {
 
 	loginCmd := accountCmd.Command("login", "Sign in to access your machines")
 	loginUsername := loginCmd.Flag("username", "Username").Short('u').String()
-	loginPassword := loginCmd.Flag("password", "Password").Short('p').String()
-	loginPasswordStdin := loginCmd.Flag("password-stdin", "Read password from stdin").Bool()
 
 	fileCmd := app.Command("file", "Browse, copy, and edit files")
 
@@ -334,7 +330,7 @@ func main() {
 		fmt.Println(versionString)
 
 	case attachCmd.FullCommand():
-		if err := attach(*attachUsername, *attachPassword, *attachName, *attachPasswordStdin); err != nil {
+		if err := attach(*attachUsername, *attachName); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
@@ -354,7 +350,7 @@ func main() {
 			}
 		}
 
-		if err := login(*loginUsername, *loginPassword, *loginPasswordStdin); err != nil {
+		if err := login(*loginUsername); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
@@ -1787,7 +1783,7 @@ func installBinaryFromReader(src io.Reader, dst string, mode os.FileMode) error 
 	return nil
 }
 
-func attach(flagUsername, flagPassword, name string, useStdin bool) error {
+func attach(flagUsername, name string) error {
 	file, err := common.CredentialsFilePath()
 	if err != nil {
 		return err
@@ -1796,7 +1792,7 @@ func attach(flagUsername, flagPassword, name string, useStdin bool) error {
 		return fmt.Errorf("machine already attached")
 	}
 
-	username, password, err := readCredentials(flagUsername, flagPassword, useStdin)
+	username, password, err := readCredentials(flagUsername)
 	if err != nil {
 		return err
 	}
@@ -1916,8 +1912,8 @@ func detach(cfgDirectory string) error {
 	return nil
 }
 
-func login(flagUsername, flagPassword string, useStdin bool) error {
-	username, password, err := readCredentials(flagUsername, flagPassword, useStdin)
+func login(flagUsername string) error {
+	username, password, err := readCredentials(flagUsername)
 	if err != nil {
 		return err
 	}
@@ -2056,46 +2052,45 @@ func machineRealm(machineName, cfgDirectory string) (string, error) {
 	return "", fmt.Errorf("machine not found: %s", machineName)
 }
 
-func readCredentials(flagUsername, flagPassword string, useStdin bool) (username, password string, err error) {
-	if useStdin {
-		if flagUsername == "" {
-			return "", "", fmt.Errorf("--username is required when using --password-stdin")
-		}
-		if flagPassword == "" {
-			reader := bufio.NewReader(os.Stdin)
-			line, err := reader.ReadString('\n')
-			if err != nil && !errors.Is(err, io.EOF) {
-				return "", "", fmt.Errorf("reading password from stdin: %w", err)
-			}
-			flagPassword = strings.TrimRight(line, "\r\n")
-		}
-		return flagUsername, flagPassword, nil
-	}
+// readCredentials returns the username, from --username or else a prompt, and the
+// password: prompted for on a terminal, otherwise the first line of stdin, so it never
+// appears on the command line.
+func readCredentials(flagUsername string) (username, password string, err error) {
+	interactive := term.IsTerminal(int(os.Stdin.Fd())) // #nosec
 
-	if flagUsername == "" {
-		if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
-			return "", "", fmt.Errorf("username required: use --username flag")
+	username = flagUsername
+	if username == "" {
+		if !interactive {
+			return "", "", fmt.Errorf("--username is required when the password comes from stdin")
 		}
 		fmt.Fprint(os.Stderr, "Username: ")
-		reader := bufio.NewReader(os.Stdin)
-		pwd, err := reader.ReadString('\n')
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			return "", "", err
 		}
-		flagUsername = strings.TrimSpace(pwd)
-		if flagUsername == "" {
+		username = strings.TrimSpace(line)
+		if username == "" {
 			return "", "", fmt.Errorf("username cannot be empty")
 		}
 	}
 
-	if flagPassword == "" {
-		flagPassword, err = readPassword()
+	if interactive {
+		password, err = readPassword()
 		if err != nil {
 			return "", "", err
 		}
+	} else {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", "", fmt.Errorf("reading password from stdin: %w", err)
+		}
+		password = strings.TrimRight(line, "\r\n")
+	}
+	if password == "" {
+		return "", "", fmt.Errorf("password cannot be empty")
 	}
 
-	return flagUsername, flagPassword, nil
+	return username, password, nil
 }
 
 func readOTP() (string, error) {
@@ -2137,10 +2132,6 @@ func readStandalonePassword(authID string) (string, error) {
 }
 
 func readPassword() (string, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
-		return "", fmt.Errorf("password required: use --password or --password-stdin flag")
-	}
-
 	fmt.Fprint(os.Stderr, "Password: ")
 	pwd, err := term.ReadPassword(int(os.Stdin.Fd())) // #nosec
 	fmt.Fprintln(os.Stderr)
