@@ -121,6 +121,27 @@ func TestFileBrowserBrowsePagination(t *testing.T) {
 	require.Equal(t, "c.txt", page2.Entries[1].Name)
 }
 
+func TestFileBrowserBrowseItemCount(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "a-dir")
+	require.NoError(t, os.Mkdir(subDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "one.txt"), []byte("1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "two.txt"), []byte("2"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644))
+
+	fb := deskconnd.NewFileBrowser()
+	result, err := fb.Browse(dir, "", 0)
+	require.NoError(t, err)
+	require.Len(t, result.Entries, 2)
+
+	require.True(t, result.Entries[0].IsDir)
+	require.NotNil(t, result.Entries[0].ItemCount)
+	require.Equal(t, 2, *result.Entries[0].ItemCount)
+
+	require.False(t, result.Entries[1].IsDir)
+	require.Nil(t, result.Entries[1].ItemCount)
+}
+
 func TestFileBrowserBrowseHiddenEntry(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".hidden"), []byte("h"), 0644))

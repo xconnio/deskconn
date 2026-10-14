@@ -80,12 +80,6 @@ func (f *FileBrowser) Browse(pathArg, cursor string, limit int) (*common.FileBro
 		}
 
 		fe := buildFileEntry(entryPath, entryInfo)
-		if fe.IsDir {
-			if subEntries, err := os.ReadDir(entryPath); err == nil {
-				n := len(subEntries)
-				fe.ItemCount = &n
-			}
-		}
 		all = append(all, fe)
 	}
 
@@ -116,6 +110,7 @@ func (f *FileBrowser) Browse(pathArg, cursor string, limit int) (*common.FileBro
 	page := all[start:end]
 
 	generateThumbnails(page)
+	generateItemCounts(page)
 
 	result.Entries = page
 	result.HasMore = hasMore
@@ -184,6 +179,33 @@ func generateThumbnails(entries []common.FileEntry) {
 				e.Thumbnail = common.PDFThumbnail(e.Path)
 			})
 		}
+	}
+	wg.Wait()
+}
+
+// generateItemCounts fills in ItemCount for directory entries in parallel.
+// Only called for the page actually returned to the caller: counting every
+// subdirectory's contents is one extra directory read per entry, which adds
+// up when a folder has many subdirectories and is markedly more expensive on
+// Windows (AV/NTFS overhead per read) than on Linux.
+func generateItemCounts(entries []common.FileEntry) {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i := range entries {
+		e := &entries[i]
+		if !e.IsDir {
+			continue
+		}
+		wg.Add(1)
+		common.SafeGo(func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if subEntries, err := os.ReadDir(e.Path); err == nil {
+				n := len(subEntries)
+				e.ItemCount = &n
+			}
+		})
 	}
 	wg.Wait()
 }
