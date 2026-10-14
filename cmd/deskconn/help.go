@@ -63,7 +63,7 @@ Usage: {{.App.Name}} [flags] <command>
 Commands:
 {{CommandRows .App.Commands "ls" "shell" "file" "port" "vpn" "agent" | FormatTwoColumns}}
 Management:
-{{CommandRows .App.Commands "machine" "apps" "account" "self" | FormatTwoColumns}}
+{{CommandRows .App.Commands "machine" "account" "self" | FormatTwoColumns}}
 Standalone:
 {{CommandRows .App.Commands "profile" "keygen" | FormatTwoColumns}}
 Flags:
@@ -160,11 +160,6 @@ func groupHelpExamples(group string) []string {
 			"desk --profile office shell",
 			"desk profile ls",
 		}
-	case "apps":
-		if standaloneRequested() {
-			return []string{"desk apps ls", "desk apps disable terminal"}
-		}
-		return []string{"desk apps ls office", "desk apps disable terminal office"}
 	case "self":
 		return []string{"desk self version", "desk self update"}
 	default:

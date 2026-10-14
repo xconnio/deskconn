@@ -149,8 +149,7 @@ func (c *capabilities) check(id string) error {
 	if c.enabled(id) {
 		return nil
 	}
-	return fmt.Errorf("%s is disabled on this machine, an owner or admin can enable it with `desk apps enable %s`",
-		id, id)
+	return fmt.Errorf("%s is disabled on this machine, an owner or admin can enable it in the web app's settings", id)
 }
 
 // register starts registering the enabled own apps' procedures on session.

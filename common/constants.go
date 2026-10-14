@@ -130,13 +130,6 @@ const (
 	TopicCapabilitiesChanged = "io.xconn.deskconn.deskconnd.capabilities.on_change"
 )
 
-// ProcedureProxyCapabilitiesList/Set call a machine's capabilities procedures for the local
-// CLI; their first argument is its realm.
-const (
-	ProcedureProxyCapabilitiesList = "io.xconn.deskconn.local.proxy.capabilities.list"
-	ProcedureProxyCapabilitiesSet  = "io.xconn.deskconn.local.proxy.capabilities.set"
-)
-
 // ProcedureAppsRegister is how a process on deskconnd's local socket registers the apps it
 // serves, with a JSON list of {"id", "name", "key_exchange", "requires", "default_off"}
 // (see the README's "Adding an app"). Local realm only.
