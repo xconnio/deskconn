@@ -33,6 +33,7 @@ import (
 	wampauth "github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 	xconnauth "github.com/xconnio/xconn-go/auth"
+	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
 var version = "v0.1.0-alpha"
@@ -1449,7 +1450,7 @@ func detachIfAttached(cfgDirectory string) error {
 	if _, err := os.Stat(credFile); os.IsNotExist(err) {
 		return nil
 	}
-	machineID, err := common.MachineID()
+	machineID, err := xconnd.MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}
@@ -1847,7 +1848,7 @@ func promptAttachMachine(username, password string) error {
 // detach detaches this machine from the user's account after they confirm, and removes
 // its credentials so it can be attached again.
 func detach(cfgDirectory string) error {
-	machineID, err := common.MachineID()
+	machineID, err := xconnd.MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}

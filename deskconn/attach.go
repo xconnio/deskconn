@@ -9,6 +9,7 @@ import (
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
+	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
 func Attach(username, password, desktopName string) error {
@@ -23,7 +24,7 @@ func Attach(username, password, desktopName string) error {
 	defer quicSess.Connection().Close()
 	session := quicSess.Session
 
-	machineIDStr, err := common.MachineID()
+	machineIDStr, err := xconnd.MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}
