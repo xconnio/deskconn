@@ -14,7 +14,7 @@ func watchResize(fd int, onResize func()) {
 		return
 	}
 
-	ticker := time.NewTicker(250 * time.Millisecond)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
 		w, h, err := term.GetSize(fd)
