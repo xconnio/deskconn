@@ -42,7 +42,7 @@ the account service, and stores the private key in `~/.deskconn/id_ed25519`.
 
 ## Installation
 
-**macOS and Linux**
+**Linux**
 
 ```bash
 curl -fsSL https://get.deskconn.com | sh

@@ -50,7 +50,7 @@ try {
     # One multicall binary, run by how it's invoked: with no args it's the CLI, with
     # "deskconn-userd" as its first argument it's the user daemon (see
     # cmd/deskconn/rootd.go's multicallArgs). Windows has no unprivileged symlinks, so
-    # unlike Linux/macOS this passes the name as an argument instead of renaming a copy.
+    # unlike Linux this passes the name as an argument instead of renaming a copy.
     $DeskconnExe = Join-Path $TmpDir 'deskconn.exe'
     if (-not (Test-Path $DeskconnExe)) {
         Write-Error "Release archive does not contain the deskconn binary."
@@ -96,8 +96,8 @@ if ($pathEntries -notcontains $BinDir) {
 
 # The user daemon needs the installing user's own session (HKCU, LockWorkStation, etc.),
 # not a system-wide account, so it runs as a per-user scheduled task that starts at
-# logon - the Windows equivalent of "systemctl --user" on Linux and a launchd
-# LaunchAgent on macOS, rather than a LocalSystem Windows service.
+# logon - the Windows equivalent of "systemctl --user" on Linux, rather than a
+# LocalSystem Windows service.
 Write-Host "Setting up scheduled task for $ServiceName..."
 
 $UserId = "$env:USERDOMAIN\$env:USERNAME"

@@ -23,7 +23,7 @@ const fileChunkSize = 1024 * 1024 // 1mb
 //     bare letters and using one directly as the path to browse into)
 //   - a POSIX-style rooted path ("/etc/hosts" or "\Users\...") - IsAbs requires a drive letter
 //     on Windows and rejects these outright, which a client normalizing paths to forward
-//     slashes (or written for the same account's Linux/macOS device) can still send
+//     slashes (or written for the same account's Linux device) can still send
 func isRootedPath(path string) bool {
 	if filepath.IsAbs(path) {
 		return true

@@ -96,8 +96,8 @@ func runUserd(args []string) {
 	clientSessions := deskconnd.NewClientSessions()
 
 	// DISPLAY/WAYLAND_DISPLAY only distinguish a desktop from a headless server on Linux.
-	// macOS and Windows have no supported headless-server install path, so treat them as
-	// desktop unconditionally rather than misreading an unset X11/Wayland var as "server".
+	// Windows has no supported headless-server install path, so treat it as desktop
+	// unconditionally rather than misreading an unset X11/Wayland var as "server".
 	isDesktop := runtime.GOOS != "linux" || os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
 	var sessionBus *dbus.Conn

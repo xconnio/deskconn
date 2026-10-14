@@ -169,7 +169,7 @@ func GetMachineInfo() (*common.MachineInfo, error) {
 
 // physicalInterfaces returns a set of interface names that correspond to real hardware (ethernet,
 // WiFi). What actually distinguishes "real hardware" from a virtual/pseudo adapter is OS-specific
-// - see isPhysicalInterface in network_linux.go, network_windows.go and network_darwin.go.
+// - see isPhysicalInterface in network_linux.go and network_windows.go.
 func physicalInterfaces() (map[string]struct{}, error) {
 	ifaces, err := psnet.Interfaces()
 	if err != nil {
