@@ -276,10 +276,6 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Des
 		common.ProcedureProxyVPNStop:      deskconnd.ProxyVPNStopHandler(deskconnApis),
 		common.ProcedureProxyPrinterList:  deskconnd.ProxyPrinterListHandler(clientSessions, cfgDirectory),
 		common.ProcedureProxyPrinterPrint: deskconnd.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyCapabilitiesList: deskconnd.ProxyCallHandler(clientSessions, cfgDirectory,
-			common.ProcedureCapabilitiesList),
-		common.ProcedureProxyCapabilitiesSet: deskconnd.ProxyCallHandler(clientSessions, cfgDirectory,
-			common.ProcedureCapabilitiesSet),
 		common.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSessions.Login()
 			return xconn.NewInvocationResult()
