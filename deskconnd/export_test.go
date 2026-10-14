@@ -7,7 +7,26 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/xconn-go"
 )
+
+type App = app
+
+// Capabilities is capabilities for tests, already registering on its session.
+type Capabilities struct{ c *capabilities }
+
+func NewCapabilities(own []*App, cfgDirectory string, session *xconn.Session) (*Capabilities, error) {
+	c := newCapabilities(own, cfgDirectory)
+	return &Capabilities{c}, c.register(session)
+}
+
+func (c *Capabilities) Enabled(id string) bool        { return c.c.enabled(id) }
+func (c *Capabilities) List() xconn.InvocationHandler { return c.c.handleList }
+func (c *Capabilities) Set() xconn.InvocationHandler  { return c.c.handleSet }
+func (c *Capabilities) AddExternal(sessionID uint64, apps []*App) error {
+	return c.c.addExternal(sessionID, apps)
+}
+func (c *Capabilities) RemoveExternal(sessionID uint64) { c.c.removeExternal(sessionID) }
 
 // Test-only access to unexported stream handlers and shell session state, for the
 // package's external tests.

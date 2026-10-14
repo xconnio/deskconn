@@ -47,6 +47,15 @@ func (d *Deskconn) DispatchQUICOp(op common.FSOp, stream net.Conn) {
 		return
 	}
 
+	// A transfer starts with a list (download) or init (upload), both answered with an
+	// FSResponse, so that's where a client learns file transfers are disabled.
+	if err := d.capabilities.check(filesAppID); err != nil {
+		if req.Op == common.FSOpList || req.Op == common.FSOpInit {
+			_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		}
+		return
+	}
+
 	switch req.Op {
 	case common.FSOpList:
 		quicServeList(stream, req, sendKey)
@@ -69,7 +78,7 @@ func quicServerKeyExchange(stream net.Conn) (sendKey, receiveKey []byte, err err
 		return nil, nil, fmt.Errorf("invalid client public key length: %d", len(clientKey.PublicKey))
 	}
 
-	publicKey, sendKey, receiveKey, err := ServerKeyExchange(clientKey.PublicKey)
+	publicKey, sendKey, receiveKey, err := common.ServerKeyExchange(clientKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}

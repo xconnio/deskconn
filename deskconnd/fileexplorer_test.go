@@ -389,7 +389,7 @@ func TestHandleFileEditRPC(t *testing.T) {
 	caller, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
 
-	d := deskconnd.NewDeskconn(nil, false)
+	d := deskconnd.NewDeskconn(nil, false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
 	dir := tempDirInHome(t)

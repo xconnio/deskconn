@@ -6,7 +6,6 @@ import (
 	"errors"
 	"maps"
 	"os"
-	"sync"
 
 	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
@@ -28,20 +27,12 @@ type Deskconn struct {
 	appRegistry          *AppRegistry
 	desktop              bool
 	vpn                  *vpnServer
-	// session is the session Register registered on, also used to reach media-app's
-	// procedures.
-	session *xconn.Session
-
-	appsMu sync.Mutex
-	// externalApps are the apps other processes registered, by their session.
-	externalApps map[uint64][]externalApp
-	// indexQuery is registered while media-app's apps are.
-	indexQuery *xconn.RegisterResponse
+	capabilities         *capabilities
 }
 
 // NewDeskconn returns the machine's APIs. sessionBus, nil on a headless server, serves the
 // wallpaper.
-func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool) *Deskconn {
+func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool, cfgDirectory string) *Deskconn {
 	d := &Deskconn{
 		shellSession:         newInteractiveShellSession(),
 		keys:                 newKeyManager(),
@@ -51,9 +42,9 @@ func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool) *Deskconn {
 		appRegistry:          NewAppRegistry(),
 		desktop:              desktopEnvironment,
 		vpn:                  newVPNServer(),
-		externalApps:         map[uint64][]externalApp{},
 	}
 	d.shellSession.agentForward = d.agentForwardSessions
+	d.capabilities = newCapabilities(d.apps(), cfgDirectory)
 	if sessionBus != nil {
 		d.wallpaper = NewWallpaper(sessionBus)
 	}
@@ -61,35 +52,19 @@ func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool) *Deskconn {
 }
 
 func (d *Deskconn) Register(session *xconn.Session) error {
-	d.session = session
 	handlers := map[string]xconn.InvocationHandler{
 		common.ProcedureKeyExchange:      d.handleKeyExchange,
-		common.ProcedureShellIsBusy:      d.handleShellIsBusy,
-		common.ProcedureFileBrowse:       d.handleFileBrowse,
-		common.ProcedureFileRename:       d.handleFileRename,
-		common.ProcedureFileDelete:       d.handleFileDelete,
-		common.ProcedureFileCopy:         d.handleFileCopy,
-		common.ProcedureFileEdit:         d.handleFileEdit,
-		common.ProcedureFileCat:          d.handleFileCat,
-		common.ProcedureFileSearch:       d.handleFileSearch,
-		common.ProcedureGitStatus:        d.handleGitStatus,
-		common.ProcedureGitOriginal:      d.handleGitOriginal,
 		common.ProcedureMachineInfo:      d.handleMachineInfo,
 		common.ProcedureMachineIsDesktop: d.handleMachineIsDesktop,
-		common.ProcedureProcessList:      d.handleProcessList,
-		common.ProcedureProcessSignal:    d.handleProcessSignal,
-		common.ProcedureAppList:          d.handleAppList,
-		common.ProcedureAppIcon:          d.handleAppIcon,
 		common.ProcedureAISessionList:    d.handleAISessionList,
 		common.ProcedureAISessionPull:    d.handleAISessionPull,
+		common.ProcedureCapabilitiesList: d.capabilities.handleList,
+		common.ProcedureCapabilitiesSet:  d.capabilities.handleSet,
+		common.ProcedureAppsRegister:     d.handleAppsRegister,
 		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
 	}
-
-	// Pictures, Videos and Documents are listed and served while media-app is connected.
-	handlers[common.ProcedureCapabilitiesList] = d.handleCapabilitiesList
-	handlers[common.ProcedureAppsRegister] = d.handleAppsRegister
 
 	// The wallpaper depends on a session D-Bus connection, which isn't available on a
 	// headless server. Skip registering it there. Screen, MPRIS, audio, screenshot and
@@ -108,6 +83,11 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		}
 
 		log.Printf("Registered procedure %s", uri)
+	}
+
+	// Each app's procedures, registered while that app is enabled (see Deskconn.apps).
+	if err := d.capabilities.register(session); err != nil {
+		return err
 	}
 
 	subResp := session.Subscribe(MetaTopicSessionLeave, d.handleSessionLeave).Do()
@@ -156,47 +136,6 @@ func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *
 	d.keys.store(inv.Caller(), &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey})
 
 	return xconn.NewInvocationResult(serverPublicKey)
-}
-
-// handleIndexQuery serves Pictures, Videos and Documents: it decrypts the query and
-// forwards it to media-app, which does the indexing.
-func (d *Deskconn) handleIndexQuery(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-	enc, ok := d.keys.fetch(inv.Caller())
-	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
-	}
-
-	encrypted, err := inv.ArgBytes(0)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-	}
-
-	resp := d.session.Call(common.ProcedureMediaIndexQuery).Args(plaintext).Do()
-	if resp.Err != nil {
-		var wampErr *xconn.Error
-		if !errors.As(resp.Err, &wampErr) {
-			return xconn.NewInvocationError(common.ErrOperationFailed, resp.Err.Error())
-		}
-		if wampErr.URI == wampproto.ErrNoSuchProcedure {
-			return xconn.NewInvocationError(common.ErrOperationFailed, "media-app isn't running on this device")
-		}
-		// media-app's own errors, as they are.
-		return xconn.NewInvocationError(wampErr.URI, wampErr.Args...)
-	}
-	resultBytes, err := resp.ArgBytes(0)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
-	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
-
-	return xconn.NewInvocationResult(encryptedResult)
 }
 
 func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {

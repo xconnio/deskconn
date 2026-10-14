@@ -44,7 +44,7 @@ func TestMachineInfoIncludesBattery(t *testing.T) {
 
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	d := deskconnd.NewDeskconn(nil, false)
+	d := deskconnd.NewDeskconn(nil, false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
 	enc, err := common.ClientKeyExchange(caller)
@@ -62,7 +62,7 @@ func TestMachineInfoIncludesBattery(t *testing.T) {
 func TestMachineIsDesktop(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	d := deskconnd.NewDeskconn(nil, true)
+	d := deskconnd.NewDeskconn(nil, true, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(common.ProcedureMachineIsDesktop).Do()
@@ -76,7 +76,7 @@ func TestMachineIsDesktop(t *testing.T) {
 func TestMachineIsDesktopFalseOnServer(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	d := deskconnd.NewDeskconn(nil, false)
+	d := deskconnd.NewDeskconn(nil, false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
 	callResp := caller.Call(common.ProcedureMachineIsDesktop).Do()
@@ -90,7 +90,7 @@ func TestMachineIsDesktopFalseOnServer(t *testing.T) {
 func TestEncryptedProceduresRequireKeyExchange(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	d := deskconnd.NewDeskconn(nil, false)
+	d := deskconnd.NewDeskconn(nil, false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
 	for _, procedure := range []string{
@@ -109,7 +109,7 @@ func TestEncryptedProceduresRequireKeyExchange(t *testing.T) {
 func TestEncryptedProcedures(t *testing.T) {
 	callee, caller := setupRouterAndConnectSessions(t)
 
-	d := deskconnd.NewDeskconn(nil, false)
+	d := deskconnd.NewDeskconn(nil, false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
 	enc, err := common.ClientKeyExchange(caller)

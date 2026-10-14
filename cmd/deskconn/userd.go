@@ -108,7 +108,7 @@ func runUserd(args []string) {
 			"running in server mode: display APIs disabled")
 	}
 
-	deskconnApis := deskconnd.NewDeskconn(sessionBus, isDesktop)
+	deskconnApis := deskconnd.NewDeskconn(sessionBus, isDesktop, cfgDirectory)
 	defer deskconnApis.CloseVPNTunnel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -151,55 +151,16 @@ func runUserd(args []string) {
 	}
 	log.Println("registered procedures with xlink")
 
-	// xlink exposes the app layer's machine procedures to remote clients and relays their
-	// raw streams and WebRTC data channels to streamSockPath.
+	// xlink exposes the app layer's machine procedures to remote clients, whichever process
+	// registered them, and relays their raw streams and WebRTC data channels to
+	// streamSockPath.
 	xlinkApp := &xconnd.App{
 		Session: appSession,
-		Procedures: []string{
-			common.ProcedureKeyExchange,
-			common.ProcedureRemoteControlKeyExchange,
-			common.ProcedureScreenBrightnessGet,
-			common.ProcedureScreenBrightnessSet,
-			common.ProcedureScreenLock,
-			common.ProcedureScreenIsLocked,
-			common.ProcedureShellIsBusy,
-			common.ProcedureFileBrowse,
-			common.ProcedurePrinterList,
-			common.ProcedurePrinterPrint,
-			common.ProcedureFileRename,
-			common.ProcedureFileDelete,
-			common.ProcedureFileCopy,
-			common.ProcedureFileEdit,
-			common.ProcedureFileSearch,
-			common.ProcedurePing,
-			common.ProcedureIndexQuery,
-			common.ProcedureWallpaperGet,
-			common.ProcedureWallpaperChecksum,
-			common.ProcedureMPRISPlayers,
-			common.ProcedureMPRISPlayPause,
-			common.ProcedureMPRISPlay,
-			common.ProcedureMPRISPause,
-			common.ProcedureMPRISNext,
-			common.ProcedureMPRISPrevious,
-			common.ProcedureAudioMute,
-			common.ProcedureAudioUnmute,
-			common.ProcedureAudioToggleMute,
-			common.ProcedureAudioIsMuted,
-			common.ProcedureScreenshot,
-			common.ProcedureScreenshotPermission,
-			common.ProcedureMachineInfo,
-			common.ProcedureMachineIsDesktop,
-			common.ProcedureProcessList,
-			common.ProcedureProcessSignal,
-			common.ProcedureAppList,
-			common.ProcedureAppIcon,
-			common.ProcedureAISessionList,
-			common.ProcedureAISessionPull,
-			common.ProcedureGitStatus,
-			common.ProcedureGitOriginal,
-			common.ProcedureFileCat,
-			common.ProcedureCapabilitiesList,
+		// A session per remote caller, so deskconnd and apps keep each caller's keys.
+		NewSession: func() (*xconn.Session, error) {
+			return xconn.ConnectInMemory(appRouter, common.LocalRealm)
 		},
+		Prefixes:     []string{common.ProcedurePrefix, common.ProcedureAdminPrefix},
 		StreamSocket: streamSockPath,
 	}
 	xlinkDone := make(chan struct{})
@@ -315,6 +276,10 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Des
 		common.ProcedureProxyVPNStop:      deskconnd.ProxyVPNStopHandler(deskconnApis),
 		common.ProcedureProxyPrinterList:  deskconnd.ProxyPrinterListHandler(clientSessions, cfgDirectory),
 		common.ProcedureProxyPrinterPrint: deskconnd.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyCapabilitiesList: deskconnd.ProxyCallHandler(clientSessions, cfgDirectory,
+			common.ProcedureCapabilitiesList),
+		common.ProcedureProxyCapabilitiesSet: deskconnd.ProxyCallHandler(clientSessions, cfgDirectory,
+			common.ProcedureCapabilitiesSet),
 		common.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSessions.Login()
 			return xconn.NewInvocationResult()

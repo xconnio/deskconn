@@ -21,7 +21,7 @@ func connectFileCatSessions(t *testing.T) *xconn.Session {
 
 	callee, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
-	require.NoError(t, deskconnd.NewDeskconn(nil, false).Register(callee))
+	require.NoError(t, deskconnd.NewDeskconn(nil, false, t.TempDir()).Register(callee))
 
 	caller, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
