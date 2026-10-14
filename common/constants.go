@@ -108,7 +108,6 @@ const (
 	ProcedureDeskconnAttachDesktop   = "io.xconn.deskconn.desktop.attach"
 	ProcedureDeskconnDetachDesktop   = "io.xconn.deskconn.desktop.detach"
 	TopicDeskconnDesktopDetachFormat = "io.xconn.deskconn.desktop.%s.detach"
-	MachineIDPath                    = "/etc/machine-id"
 
 	// The cloud's API for the keys authorized to connect to a desktop (see xconn-go's xconn.CloudConfig).
 	ProcedureDesktopKeyList      = "io.xconn.deskconn.desktop.access.key.list"

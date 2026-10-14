@@ -1449,7 +1449,7 @@ func detachIfAttached(cfgDirectory string) error {
 	if _, err := os.Stat(credFile); os.IsNotExist(err) {
 		return nil
 	}
-	machineID, err := os.ReadFile(common.MachineIDPath)
+	machineID, err := common.MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}
@@ -1461,7 +1461,7 @@ func detachIfAttached(cfgDirectory string) error {
 	defer func() { _ = session.Leave() }()
 
 	fmt.Println("Detaching this machine from your account...")
-	if err := deskconn.Detach(session, strings.TrimSpace(string(machineID))); err != nil {
+	if err := deskconn.Detach(session, machineID); err != nil {
 		return err
 	}
 	fmt.Println("Machine detached.")
@@ -1847,7 +1847,7 @@ func promptAttachMachine(username, password string) error {
 // detach detaches this machine from the user's account after they confirm, and removes
 // its credentials so it can be attached again.
 func detach(cfgDirectory string) error {
-	machineID, err := os.ReadFile(common.MachineIDPath)
+	machineID, err := common.MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}
@@ -1869,7 +1869,7 @@ func detach(cfgDirectory string) error {
 		return nil
 	}
 
-	if err := deskconn.Detach(session, strings.TrimSpace(string(machineID))); err != nil {
+	if err := deskconn.Detach(session, machineID); err != nil {
 		return err
 	}
 
