@@ -1,3 +1,5 @@
+//go:build !windows
+
 package deskconnd
 
 import "github.com/shirou/gopsutil/mem"
