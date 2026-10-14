@@ -132,7 +132,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 		return err
 	}
 
-	var sessions []common.AISessionSummary
+	var sessions []common.ClaudeSessionSummary
 	switch {
 	case machine == "" && !standaloneRequested():
 		homeDir, err := os.UserHomeDir()
@@ -143,7 +143,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 		if err != nil {
 			return fmt.Errorf("failed to discover local sessions: %w", err)
 		}
-		sessions = common.SummarizeAISessions(local)
+		sessions = common.SummarizeClaudeSessions(local)
 	case mode == ModeQUIC:
 		realm, err := machineRealm(machine, cfgDirectory)
 		if err != nil {
@@ -154,7 +154,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 			return err
 		}
 		defer quicSess.Connection().Close()
-		sessions, err = deskconn.CallAISessionList(quicSess.Session, path)
+		sessions, err = deskconn.CallClaudeSessionList(quicSess.Session, path)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
 		}
@@ -168,7 +168,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 			return err
 		}
 		defer func() { _ = p2pSess.Leave() }()
-		sessions, err = deskconn.CallAISessionList(p2pSess, path)
+		sessions, err = deskconn.CallClaudeSessionList(p2pSess, path)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
 		}
@@ -183,7 +183,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 			return fmt.Errorf("could not reach local daemon: %w", err)
 		}
 		defer func() { _ = localSession.Leave() }()
-		sessions, err = deskconn.CallAISessionListProxy(localSession, realm, path)
+		sessions, err = deskconn.CallClaudeSessionListProxy(localSession, realm, path)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
 		}
@@ -211,7 +211,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 		return err
 	}
 
-	var bundles []common.AISessionBundle
+	var bundles []common.ClaudeSessionBundle
 	switch mode {
 	case ModeQUIC:
 		var realm string
@@ -224,7 +224,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 			return qErr
 		}
 		defer quicSess.Connection().Close()
-		bundles, err = deskconn.CallAISessionPull(quicSess.Session, path, "", sessionID)
+		bundles, err = deskconn.CallClaudeSessionPull(quicSess.Session, path, "", sessionID)
 	case ModeP2P:
 		var realm string
 		realm, err = machineRealm(machine, cfgDirectory)
@@ -236,7 +236,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 			return pErr
 		}
 		defer func() { _ = p2pSess.Leave() }()
-		bundles, err = deskconn.CallAISessionPull(p2pSess, path, "", sessionID)
+		bundles, err = deskconn.CallClaudeSessionPull(p2pSess, path, "", sessionID)
 	default:
 		var realm string
 		realm, err = machineRealm(machine, cfgDirectory)
@@ -249,7 +249,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 			return fmt.Errorf("could not reach local daemon: %w", lErr)
 		}
 		defer func() { _ = localSession.Leave() }()
-		bundles, err = deskconn.CallAISessionPullProxy(localSession, realm, path, "", sessionID)
+		bundles, err = deskconn.CallClaudeSessionPullProxy(localSession, realm, path, "", sessionID)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to pull sessions from %s: %w", machine, err)
@@ -263,7 +263,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 	for _, bundle := range bundles {
-		fileCount, err := deskconn.ExtractAITarball(bundle.Tarball, homeDir, path)
+		fileCount, err := deskconn.ExtractClaudeTarball(bundle.Tarball, homeDir, path)
 		if err != nil {
 			return fmt.Errorf("failed to restore %s session: %w", bundle.Tool, err)
 		}
@@ -290,7 +290,7 @@ func runAgentResume(sessionID string, printOnly bool) error {
 		return errors.New("no local claude sessions found for this project; run `desk agent pull <machine>` first")
 	}
 
-	var matches []common.AISessionFile
+	var matches []common.ClaudeSessionFile
 	for _, s := range sessions {
 		id := strings.TrimSuffix(filepath.Base(s.Path), ".jsonl")
 		if strings.HasPrefix(id, sessionID) {

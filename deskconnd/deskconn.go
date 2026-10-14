@@ -56,8 +56,6 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		common.ProcedureKeyExchange:      d.handleKeyExchange,
 		common.ProcedureMachineInfo:      d.handleMachineInfo,
 		common.ProcedureMachineIsDesktop: d.handleMachineIsDesktop,
-		common.ProcedureAISessionList:    d.handleAISessionList,
-		common.ProcedureAISessionPull:    d.handleAISessionPull,
 		common.ProcedureCapabilitiesList: d.capabilities.handleList,
 		common.ProcedureCapabilitiesSet:  d.capabilities.handleSet,
 		common.ProcedureAppsRegister:     d.handleAppsRegister,

@@ -39,33 +39,33 @@ func isolatedHome(t *testing.T) string {
 	return homeDir
 }
 
-func TestAISessionListHandlerMissingKeyExchange(t *testing.T) {
+func TestClaudeSessionListHandlerMissingKeyExchange(t *testing.T) {
 	caller := setupDeskconnWithInstance(t)
 
-	callResp := caller.Call(common.ProcedureAISessionList).Do()
+	callResp := caller.Call(common.ProcedureClaudeSessionList).Do()
 	require.ErrorContains(t, callResp.Err, "no session keys")
 }
 
-func TestAISessionListHandlerNoMatchingSessionsReturnsEmpty(t *testing.T) {
+func TestClaudeSessionListHandlerNoMatchingSessionsReturnsEmpty(t *testing.T) {
 	isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
-	sessions, err := deskconn.CallAISessionList(caller, randomPath(t))
+	sessions, err := deskconn.CallClaudeSessionList(caller, randomPath(t))
 	require.NoError(t, err)
 	require.Empty(t, sessions)
 }
 
-func TestAISessionPullHandlerMissingKeyExchange(t *testing.T) {
+func TestClaudeSessionPullHandlerMissingKeyExchange(t *testing.T) {
 	caller := setupDeskconnWithInstance(t)
 
-	callResp := caller.Call(common.ProcedureAISessionPull).Do()
+	callResp := caller.Call(common.ProcedureClaudeSessionPull).Do()
 	require.ErrorContains(t, callResp.Err, "no session keys")
 }
 
-func TestAISessionPullHandlerNoMatchingSessionsErrors(t *testing.T) {
+func TestClaudeSessionPullHandlerNoMatchingSessionsErrors(t *testing.T) {
 	isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
-	_, err := deskconn.CallAISessionPull(caller, randomPath(t), "", "")
+	_, err := deskconn.CallClaudeSessionPull(caller, randomPath(t), "", "")
 	require.ErrorContains(t, err, "no local sessions found")
 }

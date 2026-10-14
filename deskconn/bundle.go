@@ -13,12 +13,12 @@ import (
 	"github.com/xconnio/deskconn/common"
 )
 
-// ExtractAITarball reverses BuildTarball, writing each entry into the Claude Code project
+// ExtractClaudeTarball reverses BuildTarball, writing each entry into the Claude Code project
 // directory for path under homeDir - re-derived using this machine's own homeDir, so the same
 // project lands in the right place regardless of username or home directory location. Returns
 // the number of files written. Entries aren't plain filenames (e.g. contain a path separator or
 // "..") are rejected.
-func ExtractAITarball(tarball []byte, homeDir, path string) (int, error) {
+func ExtractClaudeTarball(tarball []byte, homeDir, path string) (int, error) {
 	destDir := filepath.Join(homeDir, ".claude", "projects", common.ClaudeProjectDir(homeDir, path))
 
 	gz, err := gzip.NewReader(bytes.NewReader(tarball))

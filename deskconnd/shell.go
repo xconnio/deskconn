@@ -210,11 +210,12 @@ func (p *interactiveShellSession) agentSockForAuthID(authID string) string {
 // otherwise leak extra bytes into the exec'd command's own output, racing
 // with and sometimes landing right before its real first output.
 func (p *interactiveShellSession) startPtySession(transport shellTransport, shellID, agentSockPath,
-	prevShellID, command string, cols, rows uint16, echo bool, args ...string) (
+	dir, command string, cols, rows uint16, echo bool, args ...string) (
 	ptmx pty.Pty, startReader func(), err error) {
-	dir, err := p.resolveStartDir(prevShellID)
-	if err != nil {
-		return nil, nil, err
+	if dir == "" {
+		if dir, err = p.resolveStartDir(""); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	ptmx, err = pty.New()

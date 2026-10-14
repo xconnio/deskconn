@@ -98,7 +98,7 @@ func (p *interactiveShellSession) beginShellSession(ctrl common.ShellControlMsg,
 		command = defaultShell()
 	}
 	shellID = newShellStreamID()
-	newPt, startReader, err := p.startPtySession(transport, shellID, p.agentSockForAuthID(ctrl.AuthID), "",
+	newPt, startReader, err := p.startPtySession(transport, shellID, p.agentSockForAuthID(ctrl.AuthID), ctrl.Dir,
 		command, ctrl.Cols, ctrl.Rows, interactive, ctrl.Args...)
 	if err != nil {
 		return "", "", nil, nil, err

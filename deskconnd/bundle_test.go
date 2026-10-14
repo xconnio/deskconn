@@ -29,7 +29,7 @@ func TestExtractTarballRejectsPathTraversal(t *testing.T) {
 	require.NoError(t, gz.Close())
 
 	homeDir := t.TempDir()
-	_, err = deskconn.ExtractAITarball(buf.Bytes(), homeDir, testProjectPath)
+	_, err = deskconn.ExtractClaudeTarball(buf.Bytes(), homeDir, testProjectPath)
 	require.Error(t, err)
 
 	_, statErr := os.Stat(filepath.Join(filepath.Dir(homeDir), "etc", "passwd"))

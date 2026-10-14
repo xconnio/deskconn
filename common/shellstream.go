@@ -17,6 +17,7 @@ type ShellControlMsg struct {
 	AuthID  string         `json:"auth_id,omitempty"`  // size only: self-reported, for agent-forward lookup
 	Command string         `json:"command,omitempty"`  // size only: exec's command; empty means an interactive bash shell
 	Args    []string       `json:"args,omitempty"`     // size only: exec's arguments to Command
+	Dir     string         `json:"dir,omitempty"`      // size only: the directory to start in; empty means home
 	OldID   string         `json:"old_id,omitempty"`   // migrate only: shell ID being claimed
 	Token   string         `json:"token,omitempty"`    // migrate only: the token issued for OldID
 	ShellID string         `json:"shell_id,omitempty"` // server->client ack: the (possibly new) shell ID

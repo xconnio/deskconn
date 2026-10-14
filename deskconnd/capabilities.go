@@ -48,7 +48,7 @@ const (
 
 // apps is deskconnd's own apps, in the order the frontend shows them.
 func (d *Deskconn) apps() []*app {
-	return []*app{
+	apps := []*app{
 		{ID: filesAppID, Name: "Files", Procedures: map[string]xconn.InvocationHandler{
 			common.ProcedureFileBrowse: d.handleFileBrowse,
 			common.ProcedureFileRename: d.handleFileRename,
@@ -75,6 +75,17 @@ func (d *Deskconn) apps() []*app {
 				common.ProcedureGitOriginal: d.handleGitOriginal,
 			}},
 	}
+	// Claude resumes sessions in a terminal; its procedures also serve `desk agent`. It's only
+	// an app on machines with Claude Code installed.
+	if claudeInstalled() {
+		apps = append(apps, &app{ID: "claude", Name: "Claude", Requires: []string{terminalAppID},
+			Procedures: map[string]xconn.InvocationHandler{
+				common.ProcedureClaudeProjectList: d.handleClaudeProjectList,
+				common.ProcedureClaudeSessionList: d.handleClaudeSessionList,
+				common.ProcedureClaudeSessionPull: d.handleClaudeSessionPull,
+			}})
+	}
+	return apps
 }
 
 // capabilities tracks which apps the machine's owner/admin has enabled (persisted to
