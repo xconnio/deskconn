@@ -33,6 +33,7 @@ import (
 	wampauth "github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 	xconnauth "github.com/xconnio/xconn-go/auth"
+	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
 var version = "v0.1.0-alpha"
@@ -304,7 +305,7 @@ func main() {
 		}
 	}
 
-	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
+	uri := common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
 
 	switch parsedCmd {
 	case profileAddCmd.FullCommand():
@@ -1448,7 +1449,7 @@ func detachIfAttached(cfgDirectory string) error {
 	if _, err := os.Stat(credFile); os.IsNotExist(err) {
 		return nil
 	}
-	machineID, err := os.ReadFile(common.MachineIDPath)
+	machineID, err := xconnd.MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}
@@ -1460,7 +1461,7 @@ func detachIfAttached(cfgDirectory string) error {
 	defer func() { _ = session.Leave() }()
 
 	fmt.Println("Detaching this machine from your account...")
-	if err := deskconn.Detach(session, strings.TrimSpace(string(machineID))); err != nil {
+	if err := deskconn.Detach(session, machineID); err != nil {
 		return err
 	}
 	fmt.Println("Machine detached.")
@@ -1846,7 +1847,7 @@ func promptAttachMachine(username, password string) error {
 // detach detaches this machine from the user's account after they confirm, and removes
 // its credentials so it can be attached again.
 func detach(cfgDirectory string) error {
-	machineID, err := os.ReadFile(common.MachineIDPath)
+	machineID, err := xconnd.MachineID()
 	if err != nil {
 		return fmt.Errorf("failed to read machine-id: %w", err)
 	}
@@ -1868,7 +1869,7 @@ func detach(cfgDirectory string) error {
 		return nil
 	}
 
-	if err := deskconn.Detach(session, strings.TrimSpace(string(machineID))); err != nil {
+	if err := deskconn.Detach(session, machineID); err != nil {
 		return err
 	}
 
@@ -2197,7 +2198,7 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
+	uri := common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
 	localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
 	if err != nil {
 		return nil
@@ -2340,8 +2341,11 @@ func toMiB(b uint64) float64 {
 	return float64(b) / (1024 * 1024)
 }
 
+// formatBytes uses binary (1024-based) units, matching toMiB above and what Windows Explorer/
+// macOS Finder/Linux's "df -h" show - a decimal (1000-based) unit here would print a visibly
+// different, larger number for the same disk than what's shown everywhere else on the machine.
 func formatBytes(b uint64) string {
-	const unit = 1000
+	const unit = 1024
 	if b < unit {
 		return fmt.Sprintf("%d B", b)
 	}
@@ -2350,7 +2354,7 @@ func formatBytes(b uint64) string {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func updateMachineAlias(cfgDirectory, machineKey, alias string) error {

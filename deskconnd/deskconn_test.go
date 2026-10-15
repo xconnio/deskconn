@@ -14,6 +14,9 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
+// goosWindows is runtime.GOOS's value on Windows, shared by tests that skip or branch on it.
+const goosWindows = "windows"
+
 func setupRouterAndConnectSessions(t *testing.T) (*xconn.Session, *xconn.Session) {
 	r, err := xconn.NewRouter(&xconn.RouterConfig{})
 	require.NoError(t, err)

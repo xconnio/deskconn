@@ -3,6 +3,7 @@ package deskconn_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,12 @@ func TestProfiles(t *testing.T) {
 
 	info, err := os.Stat(filepath.Join(dir, "config.yml"))
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0600), info.Mode().Perm(), "profiles hold private keys")
+	// Windows has no POSIX permission bits: os.Chmod(0600) there only clears the read-only
+	// attribute, so Stat reports a fixed 0666/0444 regardless of the mode requested - real
+	// access control is ACL-based (NTFS inherits the user's own profile dir ACL) instead.
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0600), info.Mode().Perm(), "profiles hold private keys")
+	}
 
 	profiles, err = deskconn.Profiles(dir)
 	require.NoError(t, err)

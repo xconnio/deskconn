@@ -9,9 +9,7 @@ import (
 	"math"
 	"net"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -280,25 +278,23 @@ func shellStdinLoop(active *activeShellConn) {
 }
 
 func shellResizeLoop(active *activeShellConn, fd int) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGWINCH)
-	for range sigChan {
+	watchResize(fd, func() {
 		cols, rows, err := term.GetSize(fd)
 		if err != nil {
-			continue
+			return
 		}
 		conn, sendKey, _ := active.get()
 		msg := common.ShellControlMsg{Op: common.ShellOpSize, Cols: clampUint16(cols), Rows: clampUint16(rows)}
 		plaintext, err := json.Marshal(msg)
 		if err != nil {
-			continue
+			return
 		}
 		envelope, err := common.BuildShellEnvelope(common.ShellMsgControl, plaintext, sendKey)
 		if err != nil {
-			continue
+			return
 		}
 		_ = conn.sendEnvelope(envelope)
-	}
+	})
 }
 
 // shellPingLoop keeps the active connection producing traffic even when the
@@ -358,7 +354,13 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	}
 	defer func() { _ = term.Restore(fd, oldState) }()
 
-	cols, rows, err := term.GetSize(fd)
+	// Terminal dimensions are a property of the screen, not the keyboard: querying them
+	// needs stdout's fd, not stdin's. On Unix either works (both ends of the same tty
+	// answer the same ioctl), but on Windows only a console SCREEN BUFFER handle (stdout)
+	// answers GetConsoleScreenBufferInfo -- stdin's handle fails it with "the handle is
+	// invalid", breaking every shell/exec invocation.
+	sizeFd := int(os.Stdout.Fd()) // #nosec
+	cols, rows, err := term.GetSize(sizeFd)
 	if err != nil {
 		return fmt.Errorf("failed to get terminal size: %w", err)
 	}
@@ -389,7 +391,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	defer active.cleanupCurrent()
 
 	go shellStdinLoop(active)
-	go shellResizeLoop(active, fd)
+	go shellResizeLoop(active, sizeFd)
 	go shellPingLoop(active)
 
 	migrateCtrl := common.ShellControlMsg{
