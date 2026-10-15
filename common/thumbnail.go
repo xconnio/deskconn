@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"image"
@@ -9,14 +10,24 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"io"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // MaxThumbnailSourceSize is the largest image a thumbnail is generated for.
 const MaxThumbnailSourceSize = 20 * 1024 * 1024 // 20 MB
 // ThumbnailMaxDim is the longest side of a generated thumbnail, in pixels.
 const ThumbnailMaxDim = 480
+
+// MaxThumbnailSourcePixels is the largest image (width x height) a thumbnail is made of:
+// a small file can claim huge dimensions, and decoding it would take ~4 bytes a pixel.
+const MaxThumbnailSourcePixels = 50_000_000
+
+// ThumbnailTimeout bounds one ffmpeg/pdftocairo run, so a broken file (or a hung network
+// mount) can't hold a thumbnail worker forever.
+const ThumbnailTimeout = 30 * time.Second
 
 // ImageThumbnail returns a base64 JPEG thumbnail of the image at path, or "" if it can't
 // be decoded.
@@ -28,6 +39,13 @@ func ImageThumbnail(path string) string {
 	}
 	defer f.Close()
 
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil || cfg.Width*cfg.Height > MaxThumbnailSourcePixels {
+		return ""
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return ""
+	}
 	src, _, err := image.Decode(f)
 	if err != nil {
 		return ""
@@ -50,8 +68,10 @@ func VideoThumbnail(path string) string {
 		return ""
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), ThumbnailTimeout)
+	defer cancel()
 	//nolint:gosec // path comes from an already-resolved FileEntry/walk under a jailed root
-	cmd := exec.Command(ffmpeg,
+	cmd := exec.CommandContext(ctx, ffmpeg,
 		"-ss", "00:00:01",
 		"-i", path,
 		"-vframes", "1",
@@ -60,6 +80,7 @@ func VideoThumbnail(path string) string {
 		"-vcodec", "mjpeg",
 		"-",
 	)
+	cmd.WaitDelay = time.Second // don't wait on a killed tool's children holding stdout
 	out, err := cmd.Output()
 	if err != nil || len(out) == 0 {
 		return ""
@@ -75,8 +96,10 @@ func PDFThumbnail(path string) string {
 		return ""
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), ThumbnailTimeout)
+	defer cancel()
 	//nolint:gosec // path comes from an already-resolved FileEntry/walk under a jailed root
-	cmd := exec.Command(pdftocairo,
+	cmd := exec.CommandContext(ctx, pdftocairo,
 		"-jpeg",
 		"-singlefile",
 		"-scale-to", fmt.Sprint(ThumbnailMaxDim),
@@ -85,6 +108,7 @@ func PDFThumbnail(path string) string {
 		path,
 		"-",
 	)
+	cmd.WaitDelay = time.Second // don't wait on a killed tool's children holding stdout
 	out, err := cmd.Output()
 	if err != nil || len(out) == 0 {
 		return ""

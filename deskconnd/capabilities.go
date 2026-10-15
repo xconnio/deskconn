@@ -50,12 +50,13 @@ const (
 func (d *Deskconn) apps() []*app {
 	apps := []*app{
 		{ID: filesAppID, Name: "Files", Procedures: map[string]xconn.InvocationHandler{
-			common.ProcedureFileBrowse: d.handleFileBrowse,
-			common.ProcedureFileRename: d.handleFileRename,
-			common.ProcedureFileDelete: d.handleFileDelete,
-			common.ProcedureFileCopy:   d.handleFileCopy,
-			common.ProcedureFileSearch: d.handleFileSearch,
-			common.ProcedureFileCat:    d.handleFileCat,
+			common.ProcedureFileBrowse:     d.handleFileBrowse,
+			common.ProcedureFileRename:     d.handleFileRename,
+			common.ProcedureFileDelete:     d.handleFileDelete,
+			common.ProcedureFileCopy:       d.handleFileCopy,
+			common.ProcedureFileSearch:     d.handleFileSearch,
+			common.ProcedureFileThumbnails: d.handleFileThumbnails,
+			common.ProcedureFileCat:        d.handleFileCat,
 		}},
 		{ID: terminalAppID, Name: "Terminal", Procedures: map[string]xconn.InvocationHandler{
 			common.ProcedureShellIsBusy: d.handleShellIsBusy,
