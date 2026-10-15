@@ -45,7 +45,7 @@ func TestSessionTitleUsesSummaryLine(t *testing.T) {
 	})...)
 	require.NoError(t, os.WriteFile(path, buf, 0600))
 
-	require.Equal(t, "Fix the login bug", common.AISessionTitle(path))
+	require.Equal(t, "Fix the login bug", common.ClaudeSessionTitle(path))
 }
 
 func TestSessionTitleFallsBackToFirstUserMessage(t *testing.T) {
@@ -57,5 +57,5 @@ func TestSessionTitleFallsBackToFirstUserMessage(t *testing.T) {
 	})
 	require.NoError(t, os.WriteFile(path, buf, 0600))
 
-	require.Equal(t, "please refactor the parser", common.AISessionTitle(path))
+	require.Equal(t, "please refactor the parser", common.ClaudeSessionTitle(path))
 }

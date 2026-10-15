@@ -13,6 +13,9 @@ import (
 
 type App = app
 
+// The tests serve Claude's procedures whether or not Claude Code is installed.
+func init() { claudeInstalled = func() bool { return true } }
+
 // Capabilities is capabilities for tests, already registering on its session.
 type Capabilities struct{ c *capabilities }
 

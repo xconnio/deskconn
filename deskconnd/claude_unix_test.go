@@ -37,38 +37,38 @@ func seedClaudeSessionWithID(t *testing.T, homeDir, path, sessionID string) {
 	require.NoError(t, os.WriteFile(filepath.Join(projectDir, sessionID+".jsonl"), []byte(content), 0600))
 }
 
-func TestAISessionListHandlerReturnsLocalSessions(t *testing.T) {
+func TestClaudeSessionListHandlerReturnsLocalSessions(t *testing.T) {
 	homeDir := isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
 	path := randomPath(t)
 	seedClaudeSession(t, homeDir, path)
 
-	sessions, err := deskconn.CallAISessionList(caller, path)
+	sessions, err := deskconn.CallClaudeSessionList(caller, path)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
-	require.Equal(t, common.AIToolClaude, sessions[0].Tool)
+	require.Equal(t, common.ClaudeTool, sessions[0].Tool)
 	require.Equal(t, "abc", sessions[0].SessionID)
 	require.Equal(t, "Fix the login bug", sessions[0].Title)
 }
 
-func TestAISessionPullHandlerReturnsBundle(t *testing.T) {
+func TestClaudeSessionPullHandlerReturnsBundle(t *testing.T) {
 	homeDir := isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
 	path := randomPath(t)
 	seedClaudeSession(t, homeDir, path)
 
-	bundles, err := deskconn.CallAISessionPull(caller, path, "", "")
+	bundles, err := deskconn.CallClaudeSessionPull(caller, path, "", "")
 	require.NoError(t, err)
 	require.Len(t, bundles, 1)
-	require.Equal(t, common.AIToolClaude, bundles[0].Tool)
+	require.Equal(t, common.ClaudeTool, bundles[0].Tool)
 
 	// Extracting onto a different "machine" (a different home directory, standing in for a
 	// different username) must still land under that machine's own correctly re-encoded
 	// project directory, not the source's.
 	restoreHome := t.TempDir()
-	count, err := deskconn.ExtractAITarball(bundles[0].Tarball, restoreHome, path)
+	count, err := deskconn.ExtractClaudeTarball(bundles[0].Tarball, restoreHome, path)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 
@@ -77,7 +77,7 @@ func TestAISessionPullHandlerReturnsBundle(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestAISessionPullHandlerFiltersBySessionIDPrefix(t *testing.T) {
+func TestClaudeSessionPullHandlerFiltersBySessionIDPrefix(t *testing.T) {
 	homeDir := isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
@@ -85,12 +85,12 @@ func TestAISessionPullHandlerFiltersBySessionIDPrefix(t *testing.T) {
 	seedClaudeSessionWithID(t, homeDir, path, "abc123")
 	seedClaudeSessionWithID(t, homeDir, path, "def456")
 
-	bundles, err := deskconn.CallAISessionPull(caller, path, "", "abc")
+	bundles, err := deskconn.CallClaudeSessionPull(caller, path, "", "abc")
 	require.NoError(t, err)
 	require.Len(t, bundles, 1)
 
 	restoreHome := t.TempDir()
-	count, err := deskconn.ExtractAITarball(bundles[0].Tarball, restoreHome, path)
+	count, err := deskconn.ExtractClaudeTarball(bundles[0].Tarball, restoreHome, path)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 
@@ -102,18 +102,18 @@ func TestAISessionPullHandlerFiltersBySessionIDPrefix(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 }
 
-func TestAISessionPullHandlerSessionIDNoMatchErrors(t *testing.T) {
+func TestClaudeSessionPullHandlerSessionIDNoMatchErrors(t *testing.T) {
 	homeDir := isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
 	path := randomPath(t)
 	seedClaudeSessionWithID(t, homeDir, path, "abc123")
 
-	_, err := deskconn.CallAISessionPull(caller, path, "", "zzz")
+	_, err := deskconn.CallClaudeSessionPull(caller, path, "", "zzz")
 	require.ErrorContains(t, err, `no session matching "zzz"`)
 }
 
-func TestAISessionPullHandlerSessionIDAmbiguousPrefixErrors(t *testing.T) {
+func TestClaudeSessionPullHandlerSessionIDAmbiguousPrefixErrors(t *testing.T) {
 	homeDir := isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
@@ -121,6 +121,6 @@ func TestAISessionPullHandlerSessionIDAmbiguousPrefixErrors(t *testing.T) {
 	seedClaudeSessionWithID(t, homeDir, path, "abc123")
 	seedClaudeSessionWithID(t, homeDir, path, "abc456")
 
-	_, err := deskconn.CallAISessionPull(caller, path, "", "abc")
+	_, err := deskconn.CallClaudeSessionPull(caller, path, "", "abc")
 	require.ErrorContains(t, err, `"abc" matches more than one session; use a longer prefix`)
 }

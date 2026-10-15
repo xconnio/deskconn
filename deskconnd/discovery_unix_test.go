@@ -44,7 +44,7 @@ func TestDiscoverClaudeSessionsFindsMatchingProjectSortedNewestFirst(t *testing.
 	require.Len(t, sessions, 2)
 	require.Equal(t, "newer.jsonl", filepath.Base(sessions[0].Path))
 	require.Equal(t, "older.jsonl", filepath.Base(sessions[1].Path))
-	require.Equal(t, common.AIToolClaude, sessions[0].Tool)
+	require.Equal(t, common.ClaudeTool, sessions[0].Tool)
 }
 
 func TestDiscoverClaudeSessionsIndependentOfHomeDir(t *testing.T) {

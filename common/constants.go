@@ -84,8 +84,9 @@ const (
 	ProcedureAppList          = "io.xconn.deskconn.deskconnd.app.list"
 	ProcedureAppIcon          = "io.xconn.deskconn.deskconnd.app.icon"
 
-	ProcedureAISessionList = "io.xconn.deskconn.deskconnd.ai.session.list"
-	ProcedureAISessionPull = "io.xconn.deskconn.deskconnd.ai.session.pull"
+	ProcedureClaudeSessionList = "io.xconn.deskconn.deskconnd.claude.session.list"
+	ProcedureClaudeSessionPull = "io.xconn.deskconn.deskconnd.claude.session.pull"
+	ProcedureClaudeProjectList = "io.xconn.deskconn.deskconnd.claude.project.list"
 
 	ProcedureGitStatus   = "io.xconn.deskconn.deskconnd.git.status"
 	ProcedureGitOriginal = "io.xconn.deskconn.deskconnd.git.original"
@@ -382,13 +383,23 @@ const (
 )
 
 const (
-	AIToolClaude = "claude"
+	ClaudeTool = "claude"
 
-	// AITitleScanLines caps how many leading lines of a claude session file are inspected for a title.
-	AITitleScanLines = 50
+	// ClaudeTitleScanLines caps how many leading lines of a claude session file are inspected for a title.
+	ClaudeTitleScanLines = 50
 
-	// AIMaxTitleLen truncates a session title for display.
-	AIMaxTitleLen = 70
+	// ClaudeMaxTitleLen truncates a session title for display.
+	ClaudeMaxTitleLen = 70
+
+	// ClaudeSessionTailBytes is how much of a session file's end is read for its recent
+	// messages, title and cwd.
+	ClaudeSessionTailBytes = 256 * 1024
+	// ClaudeRecentMessages is how many of a session's last chat messages are listed.
+	ClaudeRecentMessages = 6
+	ClaudeMaxMessageLen  = 500
+
+	// ClaudeRoleUser is both a session record's type and its message's role for a user's message.
+	ClaudeRoleUser = "user"
 )
 
 const (
