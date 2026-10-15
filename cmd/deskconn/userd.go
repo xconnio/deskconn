@@ -43,6 +43,8 @@ const userdName = "deskconn-userd"
 
 // runUserd is the user daemon: the machine's APIs and its connectivity (xlink).
 func runUserd(args []string) {
+	detachConsole()
+
 	app := kingpin.New(userdName, "Deskconn user daemon: the machine's APIs and its connectivity (xlink)")
 	standalone := app.Flag("standalone", "Serve this machine directly over --transport to --public-key holders "+
 		"and --user accounts, instead of through the cloud").Bool()

@@ -212,6 +212,9 @@ func main() {
 		"Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
 
 	vpnCmd := app.Command("vpn", "Route traffic through a machine or serve as an exit node")
+	if runtime.GOOS != "linux" {
+		vpnCmd.Hidden()
+	}
 	vpnConnectCmd := vpnCmd.Command("connect", "Connect to a machine and tunnel all traffic through it")
 	vpnConnectMachine := machineArg(vpnConnectCmd, "ID, name or alias of machine", cfgDirectory)
 	vpnServeCmd := vpnCmd.Command("serve", "Let other machines route their traffic through this machine")
