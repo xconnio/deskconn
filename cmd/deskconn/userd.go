@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/godbus/dbus/v5"
@@ -24,6 +25,10 @@ import (
 
 // lanPort is where xlink serves the machine realm to clients on the local network.
 const lanPort = 18080
+
+// streamCloseGrace is how long shutdown gives xlink to pass the closes of the streams
+// still open on to their clients before its connections go down.
+const streamCloseGrace = 500 * time.Millisecond
 
 // Standalone transports (--transport).
 const (
@@ -195,6 +200,12 @@ func runUserd(args []string) {
 	defer signal.Stop(sigChan)
 	<-sigChan
 
+	// Close every open stream first, while xlink is still up to pass the closes on to
+	// clients, then give it a moment to: a client never learns of a stream that just
+	// vanishes with the process (on P2P, it waits forever).
+	if deskconnApis.CloseStreams() > 0 {
+		time.Sleep(streamCloseGrace)
+	}
 	cancel()
 	<-xlinkDone
 }
