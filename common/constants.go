@@ -10,6 +10,7 @@ const (
 	ErrInvalidArgument = "wamp.error.invalid_argument"
 	ErrOperationFailed = "wamp.error.operation_failed"
 	ErrNotAuthorized   = "wamp.error.not_authorized"
+	ErrNoSuchProcedure = "wamp.error.no_such_procedure"
 )
 
 // These WebRTC data-channel labels identify which feature a freshly opened
@@ -87,6 +88,10 @@ const (
 	ProcedureClaudeSessionList = "io.xconn.deskconn.deskconnd.claude.session.list"
 	ProcedureClaudeSessionPull = "io.xconn.deskconn.deskconnd.claude.session.pull"
 	ProcedureClaudeProjectList = "io.xconn.deskconn.deskconnd.claude.project.list"
+
+	ProcedureCodexSessionList = "io.xconn.deskconn.deskconnd.codex.session.list"
+	ProcedureCodexSessionPull = "io.xconn.deskconn.deskconnd.codex.session.pull"
+	ProcedureCodexProjectList = "io.xconn.deskconn.deskconnd.codex.project.list"
 
 	ProcedureGitStatus   = "io.xconn.deskconn.deskconnd.git.status"
 	ProcedureGitOriginal = "io.xconn.deskconn.deskconnd.git.original"
@@ -384,22 +389,24 @@ const (
 
 const (
 	ClaudeTool = "claude"
+	CodexTool  = "codex"
 
-	// ClaudeTitleScanLines caps how many leading lines of a claude session file are inspected for a title.
-	ClaudeTitleScanLines = 50
+	// AgentTitleScanLines caps how many leading lines of a session file are inspected for a title.
+	AgentTitleScanLines = 50
 
-	// ClaudeMaxTitleLen truncates a session title for display.
-	ClaudeMaxTitleLen = 70
+	// AgentMaxTitleLen truncates a session title for display.
+	AgentMaxTitleLen = 70
 
-	// ClaudeSessionTailBytes is how much of a session file's end is read for its recent
+	// AgentSessionTailBytes is how much of a session file's end is read for its recent
 	// messages, title and cwd.
-	ClaudeSessionTailBytes = 256 * 1024
-	// ClaudeRecentMessages is how many of a session's last chat messages are listed.
-	ClaudeRecentMessages = 6
-	ClaudeMaxMessageLen  = 500
+	AgentSessionTailBytes = 256 * 1024
+	// AgentRecentMessages is how many of a session's last chat messages are listed.
+	AgentRecentMessages = 6
+	AgentMaxMessageLen  = 500
 
-	// ClaudeRoleUser is both a session record's type and its message's role for a user's message.
-	ClaudeRoleUser = "user"
+	// AgentRoleUser is both a session record's type and its message's role for a user's message.
+	AgentRoleUser      = "user"
+	agentRoleAssistant = "assistant"
 )
 
 const (

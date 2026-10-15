@@ -13,14 +13,13 @@ import (
 	"github.com/xconnio/deskconn/common"
 )
 
-// ExtractClaudeTarball reverses BuildTarball, writing each entry into the Claude Code project
-// directory for path under homeDir - re-derived using this machine's own homeDir, so the same
-// project lands in the right place regardless of username or home directory location. Returns
+// ExtractAgentTarball reverses BuildAgentTarball, writing each entry where tool keeps it for
+// path under homeDir (see common.AgentSessionDir) - re-derived using this machine's own
+// homeDir, so the same project lands in the right place regardless of username or home
+// directory location. Returns
 // the number of files written. Entries aren't plain filenames (e.g. contain a path separator or
 // "..") are rejected.
-func ExtractClaudeTarball(tarball []byte, homeDir, path string) (int, error) {
-	destDir := filepath.Join(homeDir, ".claude", "projects", common.ClaudeProjectDir(homeDir, path))
-
+func ExtractAgentTarball(tool string, tarball []byte, homeDir, path string) (int, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(tarball))
 	if err != nil {
 		return 0, fmt.Errorf("failed to open gzip stream: %w", err)
@@ -44,6 +43,10 @@ func ExtractClaudeTarball(tarball []byte, homeDir, path string) (int, error) {
 			return 0, fmt.Errorf("refusing to extract entry with unexpected name %q", header.Name)
 		}
 
+		destDir, err := common.AgentSessionDir(tool, homeDir, path, header.Name)
+		if err != nil {
+			return 0, err
+		}
 		if err := os.MkdirAll(destDir, 0700); err != nil {
 			return 0, fmt.Errorf("failed to create directory %s: %w", destDir, err)
 		}

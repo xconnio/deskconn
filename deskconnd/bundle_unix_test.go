@@ -29,11 +29,11 @@ func TestBuildAndExtractTarballRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 
-	tarball, err := deskconnd.BuildClaudeTarball(sessions)
+	tarball, err := deskconnd.BuildAgentTarball(sessions)
 	require.NoError(t, err)
 
 	restoreHome := t.TempDir()
-	count, err := deskconn.ExtractClaudeTarball(tarball, restoreHome, path)
+	count, err := deskconn.ExtractAgentTarball(common.ClaudeTool, tarball, restoreHome, path)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 
