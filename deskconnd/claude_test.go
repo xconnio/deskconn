@@ -50,7 +50,7 @@ func TestClaudeSessionListHandlerNoMatchingSessionsReturnsEmpty(t *testing.T) {
 	isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
-	sessions, err := deskconn.CallClaudeSessionList(caller, randomPath(t))
+	sessions, err := deskconn.CallAgentSessionList(caller, common.ClaudeTool, randomPath(t))
 	require.NoError(t, err)
 	require.Empty(t, sessions)
 }
@@ -66,6 +66,6 @@ func TestClaudeSessionPullHandlerNoMatchingSessionsErrors(t *testing.T) {
 	isolatedHome(t)
 	caller := setupDeskconnWithInstance(t)
 
-	_, err := deskconn.CallClaudeSessionPull(caller, randomPath(t), "", "")
+	_, err := deskconn.CallAgentSessionPull(caller, common.ClaudeTool, randomPath(t), "")
 	require.ErrorContains(t, err, "no local sessions found")
 }

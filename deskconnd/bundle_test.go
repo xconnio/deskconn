@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
 )
 
@@ -29,7 +30,7 @@ func TestExtractTarballRejectsPathTraversal(t *testing.T) {
 	require.NoError(t, gz.Close())
 
 	homeDir := t.TempDir()
-	_, err = deskconn.ExtractClaudeTarball(buf.Bytes(), homeDir, testProjectPath)
+	_, err = deskconn.ExtractAgentTarball(common.ClaudeTool, buf.Bytes(), homeDir, testProjectPath)
 	require.Error(t, err)
 
 	_, statErr := os.Stat(filepath.Join(filepath.Dir(homeDir), "etc", "passwd"))

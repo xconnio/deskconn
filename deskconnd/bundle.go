@@ -11,11 +11,11 @@ import (
 	"github.com/xconnio/deskconn/common"
 )
 
-// BuildClaudeTarball tars the given session files (by basename only - not by their on-disk path,
+// BuildAgentTarball tars the given session files (by basename only - not by their on-disk path,
 // which is specific to this machine's home directory) into a gzip-compressed archive.
 // ExtractTarball re-derives the correct destination directory independently, using the
 // extracting machine's own home directory and the same project path.
-func BuildClaudeTarball(files []common.ClaudeSessionFile) ([]byte, error) {
+func BuildAgentTarball(files []common.AgentSessionFile) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)

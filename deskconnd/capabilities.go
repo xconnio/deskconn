@@ -75,17 +75,7 @@ func (d *Deskconn) apps() []*app {
 				common.ProcedureGitOriginal: d.handleGitOriginal,
 			}},
 	}
-	// Claude resumes sessions in a terminal; its procedures also serve `desk agent`. It's only
-	// an app on machines with Claude Code installed.
-	if claudeInstalled() {
-		apps = append(apps, &app{ID: "claude", Name: "Claude", Requires: []string{terminalAppID},
-			Procedures: map[string]xconn.InvocationHandler{
-				common.ProcedureClaudeProjectList: d.handleClaudeProjectList,
-				common.ProcedureClaudeSessionList: d.handleClaudeSessionList,
-				common.ProcedureClaudeSessionPull: d.handleClaudeSessionPull,
-			}})
-	}
-	return apps
+	return append(apps, d.agentApps()...)
 }
 
 // capabilities tracks which apps the machine's owner/admin has enabled (persisted to

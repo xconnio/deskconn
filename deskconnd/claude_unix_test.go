@@ -44,7 +44,7 @@ func TestClaudeSessionListHandlerReturnsLocalSessions(t *testing.T) {
 	path := randomPath(t)
 	seedClaudeSession(t, homeDir, path)
 
-	sessions, err := deskconn.CallClaudeSessionList(caller, path)
+	sessions, err := deskconn.CallAgentSessionList(caller, common.ClaudeTool, path)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	require.Equal(t, common.ClaudeTool, sessions[0].Tool)
@@ -59,7 +59,7 @@ func TestClaudeSessionPullHandlerReturnsBundle(t *testing.T) {
 	path := randomPath(t)
 	seedClaudeSession(t, homeDir, path)
 
-	bundles, err := deskconn.CallClaudeSessionPull(caller, path, "", "")
+	bundles, err := deskconn.CallAgentSessionPull(caller, common.ClaudeTool, path, "")
 	require.NoError(t, err)
 	require.Len(t, bundles, 1)
 	require.Equal(t, common.ClaudeTool, bundles[0].Tool)
@@ -68,7 +68,7 @@ func TestClaudeSessionPullHandlerReturnsBundle(t *testing.T) {
 	// different username) must still land under that machine's own correctly re-encoded
 	// project directory, not the source's.
 	restoreHome := t.TempDir()
-	count, err := deskconn.ExtractClaudeTarball(bundles[0].Tarball, restoreHome, path)
+	count, err := deskconn.ExtractAgentTarball(common.ClaudeTool, bundles[0].Tarball, restoreHome, path)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 
@@ -85,12 +85,12 @@ func TestClaudeSessionPullHandlerFiltersBySessionIDPrefix(t *testing.T) {
 	seedClaudeSessionWithID(t, homeDir, path, "abc123")
 	seedClaudeSessionWithID(t, homeDir, path, "def456")
 
-	bundles, err := deskconn.CallClaudeSessionPull(caller, path, "", "abc")
+	bundles, err := deskconn.CallAgentSessionPull(caller, common.ClaudeTool, path, "abc")
 	require.NoError(t, err)
 	require.Len(t, bundles, 1)
 
 	restoreHome := t.TempDir()
-	count, err := deskconn.ExtractClaudeTarball(bundles[0].Tarball, restoreHome, path)
+	count, err := deskconn.ExtractAgentTarball(common.ClaudeTool, bundles[0].Tarball, restoreHome, path)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 
@@ -109,7 +109,7 @@ func TestClaudeSessionPullHandlerSessionIDNoMatchErrors(t *testing.T) {
 	path := randomPath(t)
 	seedClaudeSessionWithID(t, homeDir, path, "abc123")
 
-	_, err := deskconn.CallClaudeSessionPull(caller, path, "", "zzz")
+	_, err := deskconn.CallAgentSessionPull(caller, common.ClaudeTool, path, "zzz")
 	require.ErrorContains(t, err, `no session matching "zzz"`)
 }
 
@@ -121,6 +121,6 @@ func TestClaudeSessionPullHandlerSessionIDAmbiguousPrefixErrors(t *testing.T) {
 	seedClaudeSessionWithID(t, homeDir, path, "abc123")
 	seedClaudeSessionWithID(t, homeDir, path, "abc456")
 
-	_, err := deskconn.CallClaudeSessionPull(caller, path, "", "abc")
+	_, err := deskconn.CallAgentSessionPull(caller, common.ClaudeTool, path, "abc")
 	require.ErrorContains(t, err, `"abc" matches more than one session; use a longer prefix`)
 }

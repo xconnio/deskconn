@@ -1,12 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,13 +35,14 @@ type agentCommands struct {
 	resumeSessionID *string
 	resumePrintOnly *bool
 	resumeRemote    *string
+	resumeAgent     *string
 	resumeMode      *string
 }
 
 func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agentCommands {
-	agentCmd := app.Command("agent", "List, pull, and resume Claude Code sessions")
+	agentCmd := app.Command("agent", "List, pull, and resume Claude Code and Codex sessions")
 
-	lsCmd := agentCmd.Command("ls", "List Claude Code sessions for this project, on this machine or another one")
+	lsCmd := agentCmd.Command("ls", "List agent sessions for this project, on this machine or another one")
 	// Unlike machineArg, machine is optional here: omitting it lists this machine's own sessions.
 	lsMachine := new(string)
 	if !standaloneRequested() {
@@ -49,20 +52,23 @@ func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agent
 	lsMode := modeFlag(lsCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
-	pullCmd := agentCmd.Command("pull", "Pull claude sessions from another machine onto this one")
+	pullCmd := agentCmd.Command("pull", "Pull agent sessions from another machine onto this one")
 	pullMachine := machineArg(pullCmd, "Machine to pull sessions from", cfgDirectory)
 	pullSessionID := pullCmd.Arg("session-id",
 		"Only pull the session matching this id (or a unique prefix of one); default pulls all").String()
 	pullMode := modeFlag(pullCmd,
 		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
-	resumeCmd := agentCmd.Command("resume", "Resume a Claude Code session by id (see `agent ls`)")
+	resumeCmd := agentCmd.Command("resume", "Resume an agent session by id (see `agent ls`)")
 	resumeSessionID := resumeCmd.Arg("session-id", "Session id (or a unique prefix of one) to resume").Required().String()
 	resumePrintOnly := resumeCmd.Flag("print-only",
 		"Only print the resume command; don't launch").Bool()
 	resumeRemote := resumeCmd.Flag("remote",
-		"Run claude directly on this machine instead of resuming a locally pulled session").
+		"Run the agent directly on this machine instead of resuming a locally pulled session").
 		HintAction(machineCompletions(cfgDirectory)).String()
+	resumeAgent := resumeCmd.Flag("agent",
+		"The session's agent when --remote is set (see `agent ls <machine>`)").
+		Default(common.ClaudeTool).Enum(common.AgentTools()...)
 	resumeMode := modeFlag(resumeCmd,
 		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, default uses daemon persistent session")
 
@@ -78,6 +84,7 @@ func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agent
 		resumeSessionID: resumeSessionID,
 		resumePrintOnly: resumePrintOnly,
 		resumeRemote:    resumeRemote,
+		resumeAgent:     resumeAgent,
 		resumeMode:      resumeMode,
 	}
 }
@@ -94,7 +101,8 @@ func dispatchAgentCommand(parsedCmd string, cmds *agentCommands, cfgDirectory st
 		}
 	case cmds.resume.FullCommand():
 		if *cmds.resumeRemote != "" {
-			err := runAgentResumeRemote(cfgDirectory, *cmds.resumeRemote, *cmds.resumeSessionID, *cmds.resumeMode)
+			err := runAgentResumeRemote(cfgDirectory, *cmds.resumeRemote, *cmds.resumeAgent, *cmds.resumeSessionID,
+				*cmds.resumeMode)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
@@ -126,76 +134,113 @@ func agentProjectPath() (string, error) {
 	return path, nil
 }
 
+// agentMachine calls a machine's agent procedures: each agent's are only there while it's
+// installed on the machine, and its app enabled.
+type agentMachine struct {
+	list  func(tool, path string) ([]common.AgentSessionSummary, error)
+	pull  func(tool, path, sessionID string) ([]common.AgentSessionBundle, error)
+	close func()
+}
+
+// connectAgentMachine connects to machine with mode: 'quic' or 'p2p' directly, otherwise
+// through the daemon's persistent session.
+func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, error) {
+	realm, err := machineRealm(machine, cfgDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("unknown machine %q: %w", machine, err)
+	}
+
+	var session *xconn.Session
+	var closeFn func()
+	switch mode {
+	case ModeQUIC:
+		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+		if err != nil {
+			return nil, err
+		}
+		session, closeFn = quicSess.Session, func() { _ = quicSess.Connection().Close() }
+	case ModeP2P:
+		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
+		if err != nil {
+			return nil, err
+		}
+		session, closeFn = p2pSess, func() { _ = p2pSess.Leave() }
+	default:
+		localSession, err := xconn.ConnectAnonymous(context.Background(),
+			common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock")), common.LocalRealm)
+		if err != nil {
+			return nil, fmt.Errorf("could not reach local daemon: %w", err)
+		}
+		return &agentMachine{
+			list: func(tool, path string) ([]common.AgentSessionSummary, error) {
+				return deskconn.CallAgentSessionListProxy(localSession, realm, tool, path)
+			},
+			pull: func(tool, path, sessionID string) ([]common.AgentSessionBundle, error) {
+				return deskconn.CallAgentSessionPullProxy(localSession, realm, tool, path, sessionID)
+			},
+			close: func() { _ = localSession.Leave() },
+		}, nil
+	}
+	return &agentMachine{
+		list: func(tool, path string) ([]common.AgentSessionSummary, error) {
+			return deskconn.CallAgentSessionList(session, tool, path)
+		},
+		pull: func(tool, path, sessionID string) ([]common.AgentSessionBundle, error) {
+			return deskconn.CallAgentSessionPull(session, tool, path, sessionID)
+		},
+		close: closeFn,
+	}, nil
+}
+
+// agentMissing reports whether err is a machine not having an agent's procedures: the agent
+// isn't installed there, or its app is disabled.
+func agentMissing(err error) bool {
+	return err != nil && strings.Contains(err.Error(), common.ErrNoSuchProcedure)
+}
+
 func runAgentLs(cfgDirectory, machine, mode string) error {
 	path, err := agentProjectPath()
 	if err != nil {
 		return err
 	}
 
-	var sessions []common.ClaudeSessionSummary
-	switch {
-	case machine == "" && !standaloneRequested():
+	where := "this machine"
+	var sessions []common.AgentSessionSummary
+	if machine == "" && !standaloneRequested() {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return fmt.Errorf("failed to get home directory: %w", err)
 		}
-		local, err := common.DiscoverClaudeSessions(homeDir, path)
-		if err != nil {
-			return fmt.Errorf("failed to discover local sessions: %w", err)
+		for _, tool := range common.AgentTools() {
+			local, err := common.DiscoverAgentSessions(tool, homeDir, path)
+			if err != nil {
+				return fmt.Errorf("failed to discover local %s sessions: %w", tool, err)
+			}
+			sessions = append(sessions, common.SummarizeAgentSessions(local)...)
 		}
-		sessions = common.SummarizeClaudeSessions(local)
-	case mode == ModeQUIC:
-		realm, err := machineRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown machine %q: %w", machine, err)
-		}
-		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+	} else {
+		where = machine
+		m, err := connectAgentMachine(cfgDirectory, machine, mode)
 		if err != nil {
 			return err
 		}
-		defer quicSess.Connection().Close()
-		sessions, err = deskconn.CallClaudeSessionList(quicSess.Session, path)
-		if err != nil {
-			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
-		}
-	case mode == ModeP2P:
-		realm, err := machineRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown machine %q: %w", machine, err)
-		}
-		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = p2pSess.Leave() }()
-		sessions, err = deskconn.CallClaudeSessionList(p2pSess, path)
-		if err != nil {
-			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
-		}
-	default:
-		realm, err := machineRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown machine %q: %w", machine, err)
-		}
-		localSession, err := xconn.ConnectAnonymous(context.Background(),
-			common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock")), common.LocalRealm)
-		if err != nil {
-			return fmt.Errorf("could not reach local daemon: %w", err)
-		}
-		defer func() { _ = localSession.Leave() }()
-		sessions, err = deskconn.CallClaudeSessionListProxy(localSession, realm, path)
-		if err != nil {
-			return fmt.Errorf("failed to list sessions on %s: %w", machine, err)
+		defer m.close()
+		for _, tool := range common.AgentTools() {
+			found, err := m.list(tool, path)
+			if agentMissing(err) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("failed to list %s sessions on %s: %w", tool, machine, err)
+			}
+			sessions = append(sessions, found...)
 		}
 	}
 	if len(sessions) == 0 {
-		if machine == "" && !standaloneRequested() {
-			fmt.Println("no claude sessions found on this machine for this project")
-			return nil
-		}
-		fmt.Printf("no claude sessions found on %s for this project\n", machine)
+		fmt.Printf("no agent sessions found on %s for this project\n", where)
 		return nil
 	}
+	slices.SortFunc(sessions, func(a, b common.AgentSessionSummary) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 
 	table := tablewriter.NewWriter(os.Stdout)
 	table.Header([]string{"AGENT", "SESSION-ID", "TITLE", "UPDATED"})
@@ -211,51 +256,28 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 		return err
 	}
 
-	var bundles []common.ClaudeSessionBundle
-	switch mode {
-	case ModeQUIC:
-		var realm string
-		realm, err = machineRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown machine %q: %w", machine, err)
-		}
-		quicSess, qErr := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
-		if qErr != nil {
-			return qErr
-		}
-		defer quicSess.Connection().Close()
-		bundles, err = deskconn.CallClaudeSessionPull(quicSess.Session, path, "", sessionID)
-	case ModeP2P:
-		var realm string
-		realm, err = machineRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown machine %q: %w", machine, err)
-		}
-		p2pSess, pErr := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
-		if pErr != nil {
-			return pErr
-		}
-		defer func() { _ = p2pSess.Leave() }()
-		bundles, err = deskconn.CallClaudeSessionPull(p2pSess, path, "", sessionID)
-	default:
-		var realm string
-		realm, err = machineRealm(machine, cfgDirectory)
-		if err != nil {
-			return fmt.Errorf("unknown machine %q: %w", machine, err)
-		}
-		localSession, lErr := xconn.ConnectAnonymous(context.Background(),
-			common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock")), common.LocalRealm)
-		if lErr != nil {
-			return fmt.Errorf("could not reach local daemon: %w", lErr)
-		}
-		defer func() { _ = localSession.Leave() }()
-		bundles, err = deskconn.CallClaudeSessionPullProxy(localSession, realm, path, "", sessionID)
-	}
+	m, err := connectAgentMachine(cfgDirectory, machine, mode)
 	if err != nil {
-		return fmt.Errorf("failed to pull sessions from %s: %w", machine, err)
+		return err
+	}
+	defer m.close()
+
+	// Each agent errors when it has nothing to pull: that's only an error if none has.
+	var bundles []common.AgentSessionBundle
+	var pullErr error
+	for _, tool := range common.AgentTools() {
+		found, err := m.pull(tool, path, sessionID)
+		if agentMissing(err) {
+			continue
+		}
+		if err != nil {
+			pullErr = cmp.Or(pullErr, fmt.Errorf("failed to pull %s sessions from %s: %w", tool, machine, err))
+			continue
+		}
+		bundles = append(bundles, found...)
 	}
 	if len(bundles) == 0 {
-		return fmt.Errorf("no claude sessions found on %s for this project", machine)
+		return cmp.Or(pullErr, fmt.Errorf("no agent sessions found on %s for this project", machine))
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -263,7 +285,7 @@ func runAgentPull(cfgDirectory, machine, mode, sessionID string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 	for _, bundle := range bundles {
-		fileCount, err := deskconn.ExtractClaudeTarball(bundle.Tarball, homeDir, path)
+		fileCount, err := deskconn.ExtractAgentTarball(bundle.Tool, bundle.Tarball, homeDir, path)
 		if err != nil {
 			return fmt.Errorf("failed to restore %s session: %w", bundle.Tool, err)
 		}
@@ -282,50 +304,50 @@ func runAgentResume(sessionID string, printOnly bool) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	sessions, err := common.DiscoverClaudeSessions(homeDir, path)
-	if err != nil {
-		return fmt.Errorf("failed to discover local sessions: %w", err)
-	}
-	if len(sessions) == 0 {
-		return errors.New("no local claude sessions found for this project; run `desk agent pull <machine>` first")
-	}
-
-	var matches []common.ClaudeSessionFile
-	for _, s := range sessions {
-		id := strings.TrimSuffix(filepath.Base(s.Path), ".jsonl")
-		if strings.HasPrefix(id, sessionID) {
-			matches = append(matches, s)
+	var matches []common.AgentSessionFile
+	for _, tool := range common.AgentTools() {
+		sessions, err := common.DiscoverAgentSessions(tool, homeDir, path)
+		if err != nil {
+			return fmt.Errorf("failed to discover local %s sessions: %w", tool, err)
+		}
+		for _, s := range sessions {
+			if strings.HasPrefix(s.ID, sessionID) {
+				matches = append(matches, s)
+			}
 		}
 	}
 	switch {
 	case len(matches) == 0:
-		return fmt.Errorf("no local session matching %q; run `desk agent ls` to see available ids", sessionID)
+		return fmt.Errorf("no local session matching %q; run `desk agent ls` to see available ids, "+
+			"or `desk agent pull <machine>` first", sessionID)
 	case len(matches) > 1:
 		return fmt.Errorf("%q matches more than one local session; use a longer prefix", sessionID)
 	}
 
 	match := matches[0]
-	tool := match.Tool
-	fullID := strings.TrimSuffix(filepath.Base(match.Path), ".jsonl")
-
-	cmdName, args := agentResumeCommand(fullID)
+	cmdName, args := agentResumeCommand(match.Tool, match.ID)
 	if printOnly {
 		fmt.Println(strings.Join(append([]string{cmdName}, args...), " "))
 		return nil
 	}
 
-	return launch(tool, cmdName, args)
+	return launch(match.Tool, cmdName, args)
 }
 
-func agentResumeCommand(sessionID string) (string, []string) {
+// agentResumeCommand returns the command resuming tool's session sessionID: its picker if
+// sessionID is empty.
+func agentResumeCommand(tool, sessionID string) (string, []string) {
 	args := []string{"--resume"}
+	if tool == common.CodexTool {
+		args = []string{"resume"}
+	}
 	if sessionID != "" {
 		args = append(args, sessionID)
 	}
-	return "claude", args
+	return tool, args
 }
 
-func runAgentResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
+func runAgentResumeRemote(cfgDirectory, machine, tool, sessionID, mode string) error {
 	path, err := agentProjectPath()
 	if err != nil {
 		return err
@@ -335,9 +357,10 @@ func runAgentResumeRemote(cfgDirectory, machine, sessionID, mode string) error {
 		return fmt.Errorf("unknown machine %q: %w", machine, err)
 	}
 
-	cmdName, args := agentResumeCommand(sessionID)
+	// A login shell, like the web app's terminals, so the agent is found on the user's PATH.
+	cmdName, args := agentResumeCommand(tool, sessionID)
 	fullArgs := append([]string{
-		"bash", "-c", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
+		"bash", "-lc", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
 	}, args...)
 
 	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, fullArgs)
