@@ -22,6 +22,7 @@ type Deskconn struct {
 	keys                 *keyManager
 	agentForwardSessions *agentForwardSessions
 	files                *FileBrowser
+	thumbnails           *thumbnailCache
 	wallpaper            *Wallpaper
 	processes            *ProcessMonitor
 	appRegistry          *AppRegistry
@@ -39,6 +40,7 @@ func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool, cfgDirectory st
 		keys:                 newKeyManager(),
 		agentForwardSessions: newAgentForwardSessions(),
 		files:                NewFileBrowser(),
+		thumbnails:           newThumbnailCache(cfgDirectory),
 		processes:            NewProcessMonitor(),
 		appRegistry:          NewAppRegistry(),
 		desktop:              desktopEnvironment,
@@ -46,6 +48,7 @@ func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool, cfgDirectory st
 	}
 	d.shellSession.agentForward = d.agentForwardSessions
 	d.capabilities = newCapabilities(d.apps(), cfgDirectory)
+	common.SafeGo(d.thumbnails.sweepLoop)
 	if sessionBus != nil {
 		d.wallpaper = NewWallpaper(sessionBus)
 	}
@@ -168,6 +171,7 @@ func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *x
 		}
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
+	d.thumbnails.prefetch(inv.Caller(), result.Entries, args.Cursor == "")
 
 	resultBytes, err := json.Marshal(result)
 	if err != nil {

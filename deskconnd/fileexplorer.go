@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 
@@ -115,8 +114,6 @@ func (f *FileBrowser) Browse(pathArg, cursor string, limit int) (*common.FileBro
 	}
 	page := all[start:end]
 
-	generateThumbnails(page)
-
 	result.Entries = page
 	result.HasMore = hasMore
 	if hasMore {
@@ -147,45 +144,6 @@ func decodeBrowseCursor(cursor string) (string, error) {
 		return "", err
 	}
 	return string(decoded), nil
-}
-
-// generateThumbnails fills in Thumbnail for image and video entries in
-// parallel. Only called for the page actually returned to the caller.
-func generateThumbnails(entries []common.FileEntry) {
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4)
-	for i := range entries {
-		e := &entries[i]
-		if e.IsDir || e.IsSymlink {
-			continue
-		}
-		if isImageFile(e.Name) && e.Size <= common.MaxThumbnailSourceSize {
-			wg.Add(1)
-			common.SafeGo(func() {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				e.Thumbnail = common.ImageThumbnail(e.Path)
-			})
-		} else if isVideoFile(e.Name) {
-			wg.Add(1)
-			common.SafeGo(func() {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				e.Thumbnail = common.VideoThumbnail(e.Path)
-			})
-		} else if isPDFFile(e.Name) {
-			wg.Add(1)
-			common.SafeGo(func() {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				e.Thumbnail = common.PDFThumbnail(e.Path)
-			})
-		}
-	}
-	wg.Wait()
 }
 
 func resolveBrowsePath(homeDir, pathArg string) (string, error) {
@@ -499,7 +457,11 @@ func copyDir(src, dst string) error {
 
 const searchBatchSize = 50
 
-func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []byte, inv *xconn.Invocation) error {
+// Search streams the entries under pathArg whose name contains query, then the cached
+// thumbnails (see thumbnailCache.cached) of those that have one: it never makes them, so a
+// search across a big tree doesn't thumbnail all of it.
+func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []byte, inv *xconn.Invocation,
+	cachedThumbnail func(path string) string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home dir: %w", err)
@@ -535,7 +497,7 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 			batch = append(batch, buildFileEntry(path, info))
 			if !d.IsDir() {
 				name := d.Name()
-				if (isImageFile(name) && info.Size() <= common.MaxThumbnailSourceSize) || isVideoFile(name) || isPDFFile(name) {
+				if thumbnailGenerator(name, info.Size()) != nil {
 					mediaPaths = append(mediaPaths, path)
 				}
 			}
@@ -561,44 +523,11 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 		return nil
 	}
 
-	type thumbResult struct {
-		path  string
-		thumb string
-	}
-	results := make(chan thumbResult, len(mediaPaths))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4)
-
 	for _, p := range mediaPaths {
-		wg.Add(1)
-		common.SafeGo(func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			name := filepath.Base(p)
-			var thumb string
-			switch {
-			case isImageFile(name):
-				thumb = common.ImageThumbnail(p)
-			case isPDFFile(name):
-				thumb = common.PDFThumbnail(p)
-			default:
-				thumb = common.VideoThumbnail(p)
+		if thumb := cachedThumbnail(p); thumb != "" {
+			if err := sendSearchThumbnail(inv, sendKey, p, thumb); err != nil {
+				return err
 			}
-			if thumb != "" {
-				results <- thumbResult{path: p, thumb: thumb}
-			}
-		})
-	}
-
-	common.SafeGo(func() {
-		wg.Wait()
-		close(results)
-	})
-
-	for tr := range results {
-		if err := sendSearchThumbnail(inv, sendKey, tr.path, tr.thumb); err != nil {
-			return err
 		}
 	}
 
@@ -657,7 +586,7 @@ func (d *Deskconn) handleFileSearch(_ context.Context, inv *xconn.Invocation) *x
 		return xconn.NewInvocationResult()
 	}
 
-	if err := d.files.Search(args.Path, args.Query, args.ShowHidden, enc.sendKey, inv); err != nil {
+	if err := d.files.Search(args.Path, args.Query, args.ShowHidden, enc.sendKey, inv, d.thumbnails.cached); err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
 			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
 		}
@@ -698,6 +627,47 @@ func (d *Deskconn) handleFileRename(_ context.Context, inv *xconn.Invocation) *x
 	}
 
 	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
+	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
+	if err != nil {
+		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+	}
+	return xconn.NewInvocationResult(encryptedResult)
+}
+
+// maxThumbnailPaths bounds one file.thumbnails call; the frontend asks in small batches
+// so thumbnails show up as they're made.
+const maxThumbnailPaths = 100
+
+// handleFileThumbnails returns {path: base64 JPEG} for the images, videos and PDFs among
+// paths, from the thumbnail cache, making the missing ones first. Browse leaves them out so
+// a listing never waits on them.
+func (d *Deskconn) handleFileThumbnails(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	enc, ok := d.keys.fetch(inv.Caller())
+	if !ok {
+		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+	}
+
+	encrypted, err := inv.ArgBytes(0)
+	if err != nil {
+		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+	}
+	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
+	if err != nil {
+		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+	}
+
+	var args struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.Unmarshal(plaintext, &args); err != nil {
+		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+	}
+	if len(args.Paths) > maxThumbnailPaths {
+		return xconn.NewInvocationError(common.ErrInvalidArgument,
+			fmt.Sprintf("at most %d paths per call", maxThumbnailPaths))
+	}
+
+	resultBytes, _ := json.Marshal(d.thumbnails.getAll(args.Paths))
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())

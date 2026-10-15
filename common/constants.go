@@ -74,6 +74,7 @@ const (
 	ProcedureFileCopy          = "io.xconn.deskconn.deskconnd.file.copy"
 	ProcedureFileEdit          = "io.xconn.deskconn.deskconnd.file.edit"
 	ProcedureFileSearch        = "io.xconn.deskconn.deskconnd.file.search"
+	ProcedureFileThumbnails    = "io.xconn.deskconn.deskconnd.file.thumbnails"
 	ProcedurePing              = "io.xconn.deskconn.deskconnd.ping"
 	ProcedureWallpaperGet      = "io.xconn.deskconn.deskconnd.wallpaper.get"
 	ProcedureWallpaperChecksum = "io.xconn.deskconn.deskconnd.wallpaper.checksum"
