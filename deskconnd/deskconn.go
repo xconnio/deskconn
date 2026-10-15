@@ -28,6 +28,7 @@ type Deskconn struct {
 	desktop              bool
 	vpn                  *vpnServer
 	capabilities         *capabilities
+	relayConns           relayConns
 }
 
 // NewDeskconn returns the machine's APIs. sessionBus, nil on a headless server, serves the

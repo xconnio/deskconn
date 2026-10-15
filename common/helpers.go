@@ -9,8 +9,10 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
@@ -166,9 +168,19 @@ func ICEServers() []xconnwebrtc.ICEServer {
 }
 
 // ConnectWebrtcSession negotiates a WebRTC session to realm's machine, signaling over
-// session, and joins realm over it with authenticator.
+// session, and joins realm over it with authenticator. The connection is closed once it
+// fails, so every data channel on it reports closed: pion doesn't close them on a failed
+// connection by itself, which would leave a shell or port forward to a machine that
+// went away waiting forever.
 func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator auth.ClientAuthenticator,
 	onDisconnect func()) (*xconnwebrtc.WebRTCSession, error) {
+	var connection atomic.Pointer[webrtc.PeerConnection]
+	closeIfFailed := func() {
+		if pc := connection.Load(); pc != nil && pc.ConnectionState() == webrtc.PeerConnectionStateFailed {
+			// From its own goroutine, not from inside pion's state change callback.
+			SafeGo(func() { _ = pc.Close() })
+		}
+	}
 	config := &xconnwebrtc.ClientConfig{
 		Realm:                    realm,
 		ProcedureWebRTCOffer:     ProcedureWebRTCOffer,
@@ -178,10 +190,21 @@ func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator au
 		Authenticator:            authenticator,
 		Session:                  session,
 		ICEServers:               ICEServers(),
-		OnDisconnect:             onDisconnect,
+		OnDisconnect: func() {
+			closeIfFailed()
+			if onDisconnect != nil {
+				onDisconnect()
+			}
+		},
 	}
 
-	return xconnwebrtc.ConnectWAMP(config)
+	webrtcSess, err := xconnwebrtc.ConnectWAMP(config)
+	if err != nil {
+		return nil, err
+	}
+	connection.Store(webrtcSess.Connection())
+	closeIfFailed() // in case it failed before connection was set
+	return webrtcSess, nil
 }
 
 // SessionKeys is one X25519 key exchange's derived send/receive keys, from
