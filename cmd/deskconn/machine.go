@@ -65,7 +65,7 @@ type machineCommands struct {
 }
 
 func registerMachineCommands(app *kingpin.Application, cfgDirectory string) *machineCommands {
-	const modeHelp = "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC"
+	const modeHelp = "Connection mode: 'routed' goes via the router over QUIC, 'direct' connects over WebRTC"
 	cmds := &machineCommands{}
 
 	machineCmd := app.Command("machine", "Manage machines and connections")
@@ -378,14 +378,14 @@ func showMachineInfo(cfgDirectory, machine, mode string) error {
 
 func fetchMachineInfo(cfgDirectory, realm, mode string) ([]byte, error) {
 	switch mode {
-	case ModeQUIC:
+	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
 		defer quicSess.Connection().Close()
 		return deskconn.CallFileOp(quicSess.Session, common.ProcedureMachineInfo, nil)
-	case ModeP2P:
+	case ModeDirect:
 		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err

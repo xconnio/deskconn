@@ -20,8 +20,8 @@ import (
 var version = "v0.1.0-alpha"
 
 const (
-	ModeQUIC = "quic"
-	ModeP2P  = "p2p"
+	ModeRouted = "routed"
+	ModeDirect = "direct"
 
 	jsonFieldPath = "path"
 )
@@ -181,7 +181,7 @@ func machineArg(cmd *kingpin.CmdClause, help, cfgDirectory string) *string {
 func modeFlag(cmd *kingpin.CmdClause, help string) *string {
 	flag := cmd.Flag("mode", help)
 	if standaloneRequested() {
-		flag = flag.Default(ModeQUIC)
+		flag = flag.Default(ModeRouted)
 	}
-	return flag.Enum(ModeQUIC, ModeP2P)
+	return flag.Enum(ModeRouted, ModeDirect)
 }

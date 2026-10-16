@@ -25,7 +25,7 @@ func registerShellCommands(app *kingpin.Application, cfgDirectory string) *shell
 	shellCmd := app.Command("shell", "Open a shell or run a command")
 	machine := machineArg(shellCmd, "ID, name or alias of machine", cfgDirectory)
 	command := shellCmd.Arg("command", "Command to run instead of an interactive shell").Strings()
-	mode := modeFlag(shellCmd, "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC")
+	mode := modeFlag(shellCmd, "Connection mode: 'routed' goes via the router over QUIC, 'direct' connects over WebRTC")
 	forwardAgent := shellCmd.Flag("agent-forward",
 		"Forward the local SSH agent to the remote shell (like ssh -A). Only use with hosts you trust.",
 	).Short('A').Bool()

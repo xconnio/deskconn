@@ -91,8 +91,8 @@ Shell, exec, logs, port forwarding, agent forwarding and file transfer don't use
 run on raw streams opened alongside the session (QUIC streams, or WebRTC data channels once the
 connection has upgraded to P2P). By default the CLI opens those on the same persistent connection,
 through `deskconn-userd`'s stream proxy socket (`~/.deskconn/deskconn-streams.sock`), instead of connecting
-to the device itself. `--mode quic` and `--mode p2p` still connect directly, as does the default mode
-when `deskconn-userd` isn't running.
+to the device itself. `--mode routed` and `--mode direct` still open a connection of their own, as does
+the default mode when `deskconn-userd` isn't running.
 
 ```mermaid
 sequenceDiagram

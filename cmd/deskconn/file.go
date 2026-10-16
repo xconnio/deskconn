@@ -51,7 +51,7 @@ type fileCommands struct {
 }
 
 func registerFileCommands(app *kingpin.Application, cfgDirectory string) *fileCommands {
-	const modeHelp = "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC"
+	const modeHelp = "Connection mode: 'routed' goes via the router over QUIC, 'direct' connects over WebRTC"
 	cmds := &fileCommands{}
 
 	fileCmd := app.Command("file", "Browse, copy, and edit files")
@@ -74,7 +74,7 @@ func registerFileCommands(app *kingpin.Application, cfgDirectory string) *fileCo
 	cmds.cpDst = cmds.cp.Arg("dst", "Destination: machine:path for remote, /path for local").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cmds.cpRecursive = cmds.cp.Flag("recursive", "Copy directories recursively").Short('r').Bool()
-	cmds.cpMode = modeFlag(cmds.cp, modeHelp+" (default: try p2p, fall back to quic)")
+	cmds.cpMode = modeFlag(cmds.cp, modeHelp+" (default: try direct, fall back to routed)")
 	cmds.cpStreams = cmds.cp.Flag("streams", "Number of parallel streams to use for the transfer (default 4)").
 		Short('s').Int()
 
@@ -222,9 +222,9 @@ func transferFiles(cfgDirectory, realm, mode string, transfer fileTransfer) erro
 	}
 
 	switch mode {
-	case ModeQUIC:
+	case ModeRouted:
 		return viaQUIC()
-	case ModeP2P:
+	case ModeDirect:
 		p2pSess, err := deskconn.ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
@@ -245,7 +245,7 @@ func transferFiles(cfgDirectory, realm, mode string, transfer fileTransfer) erro
 		defer func() { _ = p2pSess.Close() }()
 		return transfer.p2p(deskconn.P2PChannels(p2pSess))
 	}
-	fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
+	fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 	return viaQUIC()
 }
 
@@ -269,14 +269,14 @@ func catFile(cfgDirectory, target, mode string) error {
 		return err
 	}
 	switch mode {
-	case ModeQUIC:
+	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer quicSess.Connection().Close()
 		return deskconn.CatFile(quicSess.Session, path)
-	case ModeP2P:
+	case ModeDirect:
 		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return err
@@ -361,14 +361,14 @@ func editFile(cfgDirectory, target, mode string) error {
 
 func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 	switch mode {
-	case ModeQUIC:
+	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
 		defer quicSess.Connection().Close()
 		return deskconn.ReadFile(quicSess.Session, path)
-	case ModeP2P:
+	case ModeDirect:
 		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err
@@ -386,7 +386,7 @@ func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 
 func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
 	switch mode {
-	case ModeQUIC:
+	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
@@ -394,7 +394,7 @@ func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload 
 		defer quicSess.Connection().Close()
 		_, err = deskconn.CallFileOp(quicSess.Session, procedure, payload)
 		return err
-	case ModeP2P:
+	case ModeDirect:
 		p2pSess, err := deskconn.ConnectMachineRealmP2P(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err

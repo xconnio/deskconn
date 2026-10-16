@@ -27,7 +27,7 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 	authID := authenticator.AuthID()
 
 	switch mode {
-	case modeP2P:
+	case modeDirect:
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			ready <- err
@@ -35,7 +35,7 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 		}
 		defer func() { _ = p2pSess.Close() }()
 		return runAgentForwardP2P(ctx, P2PChannels(p2pSess), authID, agentSock, ready)
-	case modeQUIC:
+	case modeRouted:
 		return runAgentForwardQUIC(ctx, realm, cfgDirectory, authID, agentSock, ready)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
@@ -55,7 +55,7 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 			defer func() { _ = p2pSess.Close() }()
 			return runAgentForwardP2P(ctx, P2PChannels(p2pSess), authID, agentSock, ready)
 		}
-		fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
+		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 		return runAgentForwardQUIC(ctx, realm, cfgDirectory, authID, agentSock, ready)
 	}
 }
