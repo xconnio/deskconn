@@ -20,7 +20,7 @@ import (
 // RunPortForward is the client entry point for `desk port forward`. It
 // listens on localPort and, for each accepted local connection, opens a
 // fresh raw stream/channel and asks the machine to dial remotePort, then
-// relays. mode picks "quic"/"p2p" directly, or "" uses userd's persistent
+// relays. mode picks "routed"/"direct" itself, or "" uses userd's persistent
 // connection, falling back (without userd) to trying P2P first, then QUIC
 // -- matching file transfer's default-mode policy.
 func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, localPort string) error {
@@ -31,14 +31,14 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 	defer ln.Close()
 
 	switch mode {
-	case modeP2P:
+	case modeDirect:
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
 		return acceptPortForwardLoopP2P(ctx, ln, P2PChannels(p2pSess), remotePort)
-	case modeQUIC:
+	case modeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
@@ -62,7 +62,7 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 			defer func() { _ = p2pSess.Close() }()
 			return acceptPortForwardLoopP2P(ctx, ln, P2PChannels(p2pSess), remotePort)
 		}
-		fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
+		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
@@ -202,14 +202,14 @@ func completePortForwardHandshake(conn shellConn, sendKey, receiveKey []byte, re
 // RunPortForward.
 func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, localPort string) error {
 	switch mode {
-	case modeP2P:
+	case modeDirect:
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
 		return runPortReverseP2P(ctx, P2PChannels(p2pSess), remotePort, localPort)
-	case modeQUIC:
+	case modeRouted:
 		return runPortReverseQUIC(ctx, realm, cfgDirectory, remotePort, localPort)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
@@ -228,7 +228,7 @@ func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 			defer func() { _ = p2pSess.Close() }()
 			return runPortReverseP2P(ctx, P2PChannels(p2pSess), remotePort, localPort)
 		}
-		fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
+		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 		return runPortReverseQUIC(ctx, realm, cfgDirectory, remotePort, localPort)
 	}
 }

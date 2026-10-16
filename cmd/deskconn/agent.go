@@ -40,6 +40,8 @@ type agentCommands struct {
 }
 
 func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agentCommands {
+	const modeHelp = "Connection mode: 'routed' goes via the router over QUIC, 'direct' connects over WebRTC, " +
+		"default uses the daemon's persistent session"
 	agentCmd := app.Command("agent", "List, pull, and resume Claude Code and Codex sessions")
 
 	lsCmd := agentCmd.Command("ls", "List agent sessions for this project, on this machine or another one")
@@ -49,15 +51,13 @@ func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agent
 		lsMachine = lsCmd.Arg("machine", "Machine to list sessions on (default: this machine)").
 			HintAction(machineCompletions(cfgDirectory)).String()
 	}
-	lsMode := modeFlag(lsCmd,
-		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
+	lsMode := modeFlag(lsCmd, modeHelp)
 
 	pullCmd := agentCmd.Command("pull", "Pull agent sessions from another machine onto this one")
 	pullMachine := machineArg(pullCmd, "Machine to pull sessions from", cfgDirectory)
 	pullSessionID := pullCmd.Arg("session-id",
 		"Only pull the session matching this id (or a unique prefix of one); default pulls all").String()
-	pullMode := modeFlag(pullCmd,
-		"Connection mode: 'quic' uses QUIC stream via router, default uses daemon persistent session")
+	pullMode := modeFlag(pullCmd, modeHelp)
 
 	resumeCmd := agentCmd.Command("resume", "Resume an agent session by id (see `agent ls`)")
 	resumeSessionID := resumeCmd.Arg("session-id", "Session id (or a unique prefix of one) to resume").Required().String()
@@ -69,8 +69,7 @@ func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agent
 	resumeAgent := resumeCmd.Flag("agent",
 		"The session's agent when --remote is set (see `agent ls <machine>`)").
 		Default(common.ClaudeTool).Enum(common.AgentTools()...)
-	resumeMode := modeFlag(resumeCmd,
-		"Connection mode when --remote is set: 'quic' uses QUIC stream via router, default uses daemon persistent session")
+	resumeMode := modeFlag(resumeCmd, modeHelp+" (with --remote)")
 
 	return &agentCommands{
 		ls:              lsCmd,
@@ -142,7 +141,7 @@ type agentMachine struct {
 	close func()
 }
 
-// connectAgentMachine connects to machine with mode: 'quic' or 'p2p' directly, otherwise
+// connectAgentMachine connects to machine with mode: 'routed' or 'direct' itself, otherwise
 // through the daemon's persistent session.
 func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, error) {
 	realm, err := machineRealm(machine, cfgDirectory)
@@ -153,13 +152,13 @@ func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, err
 	var session *xconn.Session
 	var closeFn func()
 	switch mode {
-	case ModeQUIC:
+	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
 		session, closeFn = quicSess.Session, func() { _ = quicSess.Connection().Close() }
-	case ModeP2P:
+	case ModeDirect:
 		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err

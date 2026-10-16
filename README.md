@@ -106,7 +106,7 @@ desk ls --detailed   # show realm, ID, and organisation
 
 ```bash
 desk shell <machine>
-desk shell <machine> --mode p2p      # force WebRTC
+desk shell <machine> --mode direct   # force WebRTC
 desk shell <machine> --mode routed   # force cloud router
 ```
 
@@ -270,12 +270,12 @@ desk account whoami
 
 ```
 desk machine ls     [--refresh] [--detailed]
-desk machine info   <machine> [--mode p2p|routed]
+desk machine info   <machine> [--mode direct|routed]
 desk machine attach [--name] [--username]
 desk machine detach
 desk machine alias  <machine> <name>
 desk machine alias  <machine> --unset
-desk machine logs   <machine> [<source>] [-f] [-n N] [--since DURATION] [--mode p2p|routed]
+desk machine logs   <machine> [<source>] [-f] [-n N] [--since DURATION] [--mode direct|routed]
 desk machine ping   <machine> [--count N]
 desk machine connect    <machine>
 desk machine disconnect [<machine>] [--all]
@@ -296,7 +296,7 @@ desk --profile <name> <command>
 ### Shell
 
 ```
-desk shell <machine> [--mode p2p|routed] [-A] [<command>...]
+desk shell <machine> [--mode direct|routed] [-A] [<command>...]
 ```
 
 With a command, `desk shell` runs it on the machine and exits; without one it opens an interactive shell.
@@ -311,11 +311,11 @@ agent to sign on your behalf.
 All file commands accept `machine:path` for remote paths and a bare `/path` for local paths.
 
 ```
-desk file ls  <machine:path> [--mode p2p|routed]
-desk file mv  <src> <dst>   [--mode p2p|routed]
-desk file cp  <src> <dst>   [-r] [--mode p2p|routed]
-desk file rm  <target>      [--mode p2p|routed]
-desk file cat <machine:path> [--mode p2p|routed]
+desk file ls  <machine:path> [--mode direct|routed]
+desk file mv  <src> <dst>   [--mode direct|routed]
+desk file cp  <src> <dst>   [-r] [--mode direct|routed]
+desk file rm  <target>      [--mode direct|routed]
+desk file cat <machine:path> [--mode direct|routed]
 ```
 
 ### Port forwarding
@@ -323,10 +323,10 @@ desk file cat <machine:path> [--mode p2p|routed]
 ```
 # Both commands use listen:target (TCP ports 1–65535).
 # Listen locally on 127.0.0.1:8080; connect to localhost:80 on office.
-desk port forward office 8080:80 [--mode quic|p2p]
+desk port forward office 8080:80 [--mode direct|routed]
 
 # Listen on port 9000 on all interfaces on office; connect to local localhost:3000.
-desk port reverse office 9000:3000 [--mode quic|p2p]
+desk port reverse office 9000:3000 [--mode direct|routed]
 ```
 
 ### Self-update

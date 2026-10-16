@@ -20,12 +20,12 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-// modeQUIC/modeP2P are the "quic"/"p2p" --mode flag values every raw-stream
-// client entry point switches on. cmd/desk has its own ModeQUIC/ModeP2P
+// modeRouted/modeDirect are the "routed"/"direct" --mode flag values every raw-stream
+// client entry point switches on. cmd/desk has its own ModeRouted/ModeDirect
 // with the same values, kept separate since it can't import these.
 const (
-	modeQUIC = "quic"
-	modeP2P  = "p2p"
+	modeRouted = "routed"
+	modeDirect = "direct"
 )
 
 // clampUint16 clamps a terminal dimension (from term.GetSize, always
@@ -340,8 +340,8 @@ func shellReadLoop(active *activeShellConn) error {
 // RunExec: ctrl seeds the initial control message (RunExec sets
 // Command/Args; RunShell leaves them empty for an interactive bash shell),
 // and Op/Cols/Rows are filled in here. mode selects the connection policy:
-//   - "quic": QUIC only, no upgrade attempt.
-//   - "p2p": P2P only, no QUIC fast-start.
+//   - "routed": QUIC only, no upgrade attempt.
+//   - "direct": P2P only, no QUIC fast-start.
 //   - "" (default): use userd's persistent connection: P2P if it has it,
 //     otherwise QUIC, migrating the running PTY to P2P once the connection
 //     upgrades. Without userd, fast-start on a QUIC connection of its own
@@ -369,9 +369,9 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	var primary *shellHandshakeResult
 	var daemon *DaemonStreams
 	switch mode {
-	case modeP2P:
+	case modeDirect:
 		primary, err = dialShellP2P(ctx, realm, cfgDirectory, ctrl)
-	case modeQUIC:
+	case modeRouted:
 		primary, err = dialShellQUIC(ctx, realm, cfgDirectory, ctrl)
 	default:
 		daemon, err = DialDaemonStreams(ctx, realm, cfgDirectory)
@@ -444,7 +444,7 @@ func awaitDaemonP2P(ctx context.Context, realm, cfgDirectory string) (*DaemonStr
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("the connection to the machine did not upgrade to P2P")
+			return nil, fmt.Errorf("the connection to the machine did not upgrade to a direct connection")
 		case <-ticker.C:
 		}
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)

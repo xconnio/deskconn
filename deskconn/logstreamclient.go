@@ -15,7 +15,7 @@ import (
 // RunLogs is the client entry point for `desk machine logs`. It validates since
 // up front, opens one raw stream/channel, sends the one-time log
 // request, then writes every received chunk straight to stdout until the
-// machine finishes or ctx is canceled. mode picks "quic"/"p2p" directly, or
+// machine finishes or ctx is canceled. mode picks "routed"/"direct" itself, or
 // "" uses userd's persistent connection, falling back (without userd)
 // to trying P2P first, then QUIC.
 func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
@@ -27,14 +27,14 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 	}
 
 	switch mode {
-	case modeP2P:
+	case modeDirect:
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
 		return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since)
-	case modeQUIC:
+	case modeRouted:
 		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
@@ -53,7 +53,7 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 			defer func() { _ = p2pSess.Close() }()
 			return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since)
 		}
-		fmt.Fprintln(os.Stderr, "p2p unavailable, falling back to quic")
+		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since)
 	}
 }

@@ -25,7 +25,7 @@ type portCommands struct {
 }
 
 func registerPortCommands(app *kingpin.Application, cfgDirectory string) *portCommands {
-	const modeHelp = "Connection mode: 'quic' uses QUIC stream via router, 'p2p' uses direct WebRTC"
+	const modeHelp = "Connection mode: 'routed' goes via the router over QUIC, 'direct' connects over WebRTC"
 
 	portCmd := app.Command("port", "Forward ports")
 

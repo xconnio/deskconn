@@ -59,7 +59,7 @@ const (
 
 // These are the machine-facing procedures userd's app-layer handlers
 // register (see userd's Deskconn.Register), and that the CLI (this
-// root package) calls directly in --mode quic/p2p. They're wire-protocol
+// root package) calls itself in --mode routed/direct. They're wire-protocol
 // identifiers shared between the CLI and userd regardless of which
 // process implements the handler, so they live here rather than in the
 // host package.
