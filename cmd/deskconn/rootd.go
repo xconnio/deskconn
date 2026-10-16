@@ -14,6 +14,7 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 
 	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/rootd"
 )
 
 // runRootd is the root helper, for now the privileged backend for "desk vpn": it serves
@@ -64,7 +65,7 @@ func runRootd(args []string) {
 		_ = conn.Close()
 	}()
 
-	server := &Server{}
+	server := &rootd.Server{}
 	server.Serve(conn)
 }
 

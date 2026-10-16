@@ -8,8 +8,8 @@ import (
 	"os"
 )
 
-// The vpn subcommand and the root helper it talks to both need the Linux-only iptun
-// package (TUN devices, iptables) - see vpn.go, rootd.go. These stubs keep "desk vpn ..."
+// The vpn subcommand and the root helper it talks to are both Linux-only (TUN devices,
+// iptables) - see vpn.go, rootd.go and the rootd package. These stubs keep "desk vpn ..."
 // and the deskconn-rootd multicall entry valid everywhere, reporting them as unavailable
 // here instead of failing to build.
 
