@@ -130,7 +130,8 @@ func agentProjectPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve current directory relative to home: %w", err)
 	}
-	return path, nil
+	// Slash-separated, which every machine's paths accept, whatever this one's separator.
+	return filepath.ToSlash(path), nil
 }
 
 // agentMachine calls a machine's agent procedures: each agent's are only there while it's
@@ -356,14 +357,10 @@ func runAgentResumeRemote(cfgDirectory, machine, tool, sessionID, mode string) e
 		return fmt.Errorf("unknown machine %q: %w", machine, err)
 	}
 
-	// An interactive login shell, like the web app's terminals, so the agent is found on the
-	// user's PATH, nvm's included (see userd's agentInstalled).
+	// path is relative to home, so the project matches whatever home is on the machine; the
+	// machine runs the agent as the user's own shell finds it (see userd's userCommand).
 	cmdName, args := agentResumeCommand(tool, sessionID)
-	fullArgs := append([]string{
-		"bash", "-lic", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
-	}, args...)
-
-	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, fullArgs)
+	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, path, append([]string{cmdName}, args...))
 }
 
 // launch runs tool as a foreground child, inheriting stdio.
