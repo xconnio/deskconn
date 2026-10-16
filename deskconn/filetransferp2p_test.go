@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/deskconn"
-	"github.com/xconnio/deskconn/deskconnd"
+	"github.com/xconnio/deskconn/userd"
 )
 
 const (
@@ -66,7 +66,7 @@ func newP2PTestPeerConnection(t *testing.T) deskconn.P2PChannelOpener {
 	_, err = offererPC.CreateDataChannel("bootstrap", nil)
 	require.NoError(t, err)
 
-	var d deskconnd.Deskconn
+	var d userd.Deskconn
 	answererPC.OnDataChannel(func(dc *webrtc.DataChannel) {
 		if dc.Label() == "bootstrap" {
 			return

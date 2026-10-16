@@ -18,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/deskconnd"
+	"github.com/xconnio/deskconn/userd"
 	"github.com/xconnio/xconn-go"
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
@@ -90,7 +90,7 @@ func runUserd(args []string) {
 	}
 
 	// xlink runs in this process: its app layer serves deskconn.sock (the CLI's local
-	// realm), and deskconnd registers every app-layer and CLI-facing procedure on it
+	// realm), and userd registers every app-layer and CLI-facing procedure on it
 	// through an in-memory session.
 	appRouter, appListener, appSession, err := xconnd.StartAppLayer(common.LocalRealm,
 		filepath.Join(cfgDirectory, "deskconn.sock"))
@@ -100,7 +100,7 @@ func runUserd(args []string) {
 	defer appRouter.Close()
 	defer appListener.Close()
 
-	clientSessions := deskconnd.NewClientSessions()
+	clientSessions := userd.NewClientSessions()
 
 	// DISPLAY/WAYLAND_DISPLAY only distinguish a desktop from a headless server on Linux.
 	// Windows has no supported headless-server install path, so treat it as desktop
@@ -121,7 +121,7 @@ func runUserd(args []string) {
 			"running in server mode: display APIs disabled")
 	}
 
-	deskconnApis := deskconnd.NewDeskconn(sessionBus, isDesktop, cfgDirectory)
+	deskconnApis := userd.NewDeskconn(sessionBus, isDesktop, cfgDirectory)
 	defer deskconnApis.CloseVPNTunnel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -150,7 +150,7 @@ func runUserd(args []string) {
 	if err := os.Chmod(proxySockPath, 0600); err != nil {
 		log.Fatal(err)
 	}
-	common.SafeGo(func() { deskconnd.ServeStreamProxy(proxyListener, clientSessions, cfgDirectory) })
+	common.SafeGo(func() { userd.ServeStreamProxy(proxyListener, clientSessions, cfgDirectory) })
 
 	session, err := xconn.ConnectInMemory(appRouter, common.LocalRealm)
 	if err != nil {
@@ -169,7 +169,7 @@ func runUserd(args []string) {
 	// streamSockPath.
 	xlinkApp := &xconnd.App{
 		Session: appSession,
-		// A session per remote caller, so deskconnd and apps keep each caller's keys.
+		// A session per remote caller, so userd and apps keep each caller's keys.
 		NewSession: func() (*xconn.Session, error) {
 			return xconn.ConnectInMemory(appRouter, common.LocalRealm)
 		},
@@ -284,17 +284,17 @@ func parseUsers(users []string) (map[string]string, error) {
 }
 
 // registerLocalProcedures registers the CLI-facing procedures on session.
-func registerLocalProcedures(session *xconn.Session, deskconnApis *deskconnd.Deskconn,
-	clientSessions *deskconnd.ClientSessions, cfgDirectory string) error {
+func registerLocalProcedures(session *xconn.Session, deskconnApis *userd.Deskconn,
+	clientSessions *userd.ClientSessions, cfgDirectory string) error {
 	handlers := map[string]xconn.InvocationHandler{
-		common.ProcedureProxyFileOp:       deskconnd.ProxyFileOpHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyMachineInfo:  deskconnd.ProxyMachineInfoHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyPing:         deskconnd.ProxyPingHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyCat:          deskconnd.ProxyCatHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyVPNStart:     deskconnd.ProxyVPNStartHandler(deskconnApis),
-		common.ProcedureProxyVPNStop:      deskconnd.ProxyVPNStopHandler(deskconnApis),
-		common.ProcedureProxyPrinterList:  deskconnd.ProxyPrinterListHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyPrinterPrint: deskconnd.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyFileOp:       userd.ProxyFileOpHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyMachineInfo:  userd.ProxyMachineInfoHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyPing:         userd.ProxyPingHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyCat:          userd.ProxyCatHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyVPNStart:     userd.ProxyVPNStartHandler(deskconnApis),
+		common.ProcedureProxyVPNStop:      userd.ProxyVPNStopHandler(deskconnApis),
+		common.ProcedureProxyPrinterList:  userd.ProxyPrinterListHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyPrinterPrint: userd.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
 		common.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			clientSessions.Login()
 			return xconn.NewInvocationResult()

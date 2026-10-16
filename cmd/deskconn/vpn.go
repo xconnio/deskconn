@@ -102,12 +102,12 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string) 
 
 // runVPNServe arms this machine to let other machines route their traffic
 // through it, then returns right away -- serving continues in the
-// background (deskconnd + deskconn-rootd) until "desk vpn stop" or the
-// daemon shuts down. deskconnd has no capability or terminal of its own
+// background (userd + deskconn-rootd) until "desk vpn stop" or the
+// daemon shuts down. userd has no capability or terminal of its own
 // for this, so this CLI process starts deskconn-rootd as a transient systemd unit
 // (the only blocking part, briefly, for the sudo prompt) and hands
-// deskconnd its socket. systemd owns deskconn-rootd from there; it exits once
-// deskconnd closes its connection.
+// userd its socket. systemd owns deskconn-rootd from there; it exits once
+// userd closes its connection.
 func runVPNServe(cliCtx context.Context, cfgDirectory string) {
 	ctx, cancel := context.WithCancel(cliCtx)
 	defer cancel()
@@ -146,11 +146,11 @@ func runVPNServe(cliCtx context.Context, cfgDirectory string) {
 	fmt.Println("Run \"desk vpn stop\" (from anywhere) to stop.")
 }
 
-// runVPNStop tells this machine's own deskconnd to stop serving as a
+// runVPNStop tells this machine's own userd to stop serving as a
 // VPN exit node, if it currently is -- see runVPNServe. Disarming closes
-// deskconnd's connection to deskconn-rootd, which makes it exit without needing
+// userd's connection to deskconn-rootd, which makes it exit without needing
 // sudo; stopping the unit directly is only the fallback for a deskconn-rootd that
-// deskconnd no longer knows about (e.g. deskconnd isn't running).
+// userd no longer knows about (e.g. userd isn't running).
 func runVPNStop(ctx context.Context, cfgDirectory string) {
 	if err := disarmVPNServing(ctx, cfgDirectory); err == nil {
 		fmt.Println("Stopped serving.")

@@ -249,7 +249,7 @@ func CacheMachines(cfgDirectory string, machines []common.Machine) error {
 
 // CallFileOp performs one key-exchange-then-encrypted-call round trip
 // against machineSession -- used both by direct CLI calls and, with its own
-// key cache, deskconnd's ProxyFileOpHandler.
+// key cache, userd's ProxyFileOpHandler.
 func CallFileOp(machineSession *xconn.Session, procedure string, payload []byte) ([]byte, error) {
 	enc, err := common.ClientKeyExchange(machineSession)
 	if err != nil {

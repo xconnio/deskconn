@@ -358,7 +358,7 @@ func runAgentResumeRemote(cfgDirectory, machine, tool, sessionID, mode string) e
 	}
 
 	// An interactive login shell, like the web app's terminals, so the agent is found on the
-	// user's PATH, nvm's included (see deskconnd's agentInstalled).
+	// user's PATH, nvm's included (see userd's agentInstalled).
 	cmdName, args := agentResumeCommand(tool, sessionID)
 	fullArgs := append([]string{
 		"bash", "-lic", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,

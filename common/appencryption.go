@@ -15,7 +15,7 @@ import (
 type AppHandler func(ctx context.Context, req []byte) (any, error)
 
 // AppEncryption serves an app's key exchange and end-to-end encrypts its procedures with
-// each caller's keys, the same way deskconnd does its own (see the README's "Adding an
+// each caller's keys, the same way userd does its own (see the README's "Adding an
 // app").
 type AppEncryption struct {
 	mu sync.Mutex

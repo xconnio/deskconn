@@ -14,7 +14,7 @@ import (
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
-	"github.com/xconnio/deskconn/deskconnd"
+	"github.com/xconnio/deskconn/userd"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 	xconnd "github.com/xconnio/xconn-go/xconn"
@@ -53,10 +53,10 @@ func (anyKeyAuthenticator) Authenticate(request auth.Request) (auth.Response, er
 }
 
 // startStreamProxy stands up the whole default-mode path short of the cloud: a
-// machine serving raw streams over QUIC through xconn's relay to deskconnd's real
-// handlers, a ClientSessions holding a persistent connection to it, and deskconnd's
+// machine serving raw streams over QUIC through xconn's relay to userd's real
+// handlers, a ClientSessions holding a persistent connection to it, and userd's
 // stream proxy in front of that. It returns the config directory to dial the proxy in.
-func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskconnd.ClientSessions) {
+func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *userd.ClientSessions) {
 	t.Helper()
 	// Short prefix, not t.TempDir(): unix socket paths are length-limited, and t.TempDir()
 	// embeds the full (often long) test name.
@@ -64,12 +64,12 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
-	// Machine: deskconnd's relay listener, fed by xlink's QUIC-stream relay.
+	// Machine: userd's relay listener, fed by xlink's QUIC-stream relay.
 	relaySock := filepath.Join(dir, "xlink-streams.sock")
 	relayListener, err := net.Listen("unix", relaySock)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = relayListener.Close() })
-	machine := deskconnd.NewDeskconn(nil, false, t.TempDir())
+	machine := userd.NewDeskconn(nil, false, t.TempDir())
 	common.SafeGo(func() { machine.ServeStreamRelay(relayListener) })
 
 	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
@@ -96,7 +96,7 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 	conn, err := common.ConnectStandalone(ctx, machineURL, certHash, streamProxyTestRealm, authenticator)
 	require.NoError(t, err)
 
-	clientSessions = deskconnd.NewClientSessions()
+	clientSessions = userd.NewClientSessions()
 	sessCtx, sessCancel := context.WithCancel(context.Background())
 	clientSessions.StoreMachineSession(streamProxyTestRealm, conn.Session, nil, conn, sessCtx, sessCancel)
 	t.Cleanup(clientSessions.DisconnectAll)
@@ -104,7 +104,7 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *deskco
 	proxyListener, err := net.Listen("unix", filepath.Join(dir, common.StreamProxySocket))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = proxyListener.Close() })
-	common.SafeGo(func() { deskconnd.ServeStreamProxy(proxyListener, clientSessions, dir) })
+	common.SafeGo(func() { userd.ServeStreamProxy(proxyListener, clientSessions, dir) })
 
 	return dir, clientSessions
 }
@@ -163,7 +163,7 @@ func TestDaemonStreamsDaemonNotRunning(t *testing.T) {
 	require.ErrorIs(t, err, deskconn.ErrDaemonUnavailable)
 }
 
-// relayedChannels opens each channel the way deskconnd's stream proxy does for a
+// relayedChannels opens each channel the way userd's stream proxy does for a
 // P2P persistent connection: the real data channel is spliced by
 // common.RelayWebRTCChannel onto a local connection whose other end the client
 // uses as a common.RelayChannel.

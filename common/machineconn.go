@@ -42,7 +42,7 @@ func ParseStandaloneURL(rawURL string) (*url.URL, error) {
 }
 
 // StandaloneTLSConfig is how the client verifies a standalone machine's certificate: pinned
-// to certHash (its SHA-256 fingerprint, which deskconnd prints) when set, e.g. for a
+// to certHash (its SHA-256 fingerprint, which userd prints) when set, e.g. for a
 // self-signed certificate, otherwise against the system's trusted CAs.
 func StandaloneTLSConfig(certHash string) (*tls.Config, error) {
 	if certHash != "" {

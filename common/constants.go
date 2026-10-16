@@ -30,9 +30,9 @@ const (
 )
 
 // These are the procedures the local CLI-facing realm exposes (LocalRealm,
-// hosted by xlink on deskconn.sock, with deskconnd registering the
+// hosted by xlink on deskconn.sock, with userd registering the
 // handlers) -- wire-protocol identifiers the CLI (root package) calls
-// directly and deskconnd's proxy handlers implement, so both sides need
+// directly and userd's proxy handlers implement, so both sides need
 // the same string constants regardless of which process implements which
 // half. They're outside ProcedurePrefix, so xlink doesn't expose them.
 const (
@@ -57,10 +57,10 @@ const (
 	StandaloneRealm = "io.xconn.deskconn.standalone"
 )
 
-// These are the machine-facing procedures deskconnd's app-layer handlers
-// register (see deskconnd's Deskconn.Register), and that the CLI (this
+// These are the machine-facing procedures userd's app-layer handlers
+// register (see userd's Deskconn.Register), and that the CLI (this
 // root package) calls directly in --mode quic/p2p. They're wire-protocol
-// identifiers shared between the CLI and deskconnd regardless of which
+// identifiers shared between the CLI and userd regardless of which
 // process implements the handler, so they live here rather than in the
 // host package.
 const (
@@ -125,7 +125,7 @@ const (
 const ProcedureFileCat = "io.xconn.deskconn.deskconnd.file.cat"
 
 // ProcedureCapabilitiesList lists the apps the frontend may show and whether each is
-// enabled. Apps served outside deskconnd, like media-app's, are listed while their process
+// enabled. Apps served outside userd, like media-app's, are listed while their process
 // is connected. ProcedureCapabilitiesSet enables or disables one: it's under
 // io.xconn.deskconn.admin., the procedures only a machine's owner and admins may call.
 const (
@@ -136,13 +136,13 @@ const (
 	TopicCapabilitiesChanged = "io.xconn.deskconn.deskconnd.capabilities.on_change"
 )
 
-// ProcedureAppsRegister is how a process on deskconnd's local socket registers the apps it
+// ProcedureAppsRegister is how a process on userd's local socket registers the apps it
 // serves, with a JSON list of {"id", "name", "key_exchange", "requires", "default_off"}
 // (see the README's "Adding an app"). Local realm only.
 const ProcedureAppsRegister = "io.xconn.deskconn.local.apps.register"
 
-// xlink exposes every procedure registered on deskconnd's local socket under these
-// prefixes to remote clients: deskconnd's own and other apps' alike. Procedures under
+// xlink exposes every procedure registered on userd's local socket under these
+// prefixes to remote clients: userd's own and other apps' alike. Procedures under
 // ProcedureAdminPrefix are only for a machine's owner and admins.
 const (
 	ProcedurePrefix      = "io.xconn.deskconn.deskconnd."
@@ -253,7 +253,7 @@ const (
 	// VPNFrameOpen  and VPNFrameReady are the "type" discriminators for the two
 	// control frames exchanged -- as DataChannel *text* messages -- before
 	// either side starts treating channel messages as raw binary IP
-	// packets. VPNFrameOpen also lets deskconnd's relay dispatch tell a
+	// packets. VPNFrameOpen also lets userd's relay dispatch tell a
 	// VPN channel apart from a file-stream channel.
 	VPNFrameOpen  = "vpn-open"
 	VPNFrameReady = "vpn-ready"
@@ -373,7 +373,7 @@ const (
 	RelayBufferedLow  = 256 * 1024
 )
 
-// StreamProxySocket is deskconnd's stream proxy socket, in the config directory.
+// StreamProxySocket is userd's stream proxy socket, in the config directory.
 const StreamProxySocket = "deskconn-streams.sock"
 
 // StreamProxyConnectTimeout bounds connecting to the machine for a stream proxy request.
@@ -382,8 +382,8 @@ const StreamProxyConnectTimeout = 30 * time.Second
 // Socket and channel buffer sizes for the stream proxy, chosen so a proxied stream
 // buffers about as much as a direct one in each direction.
 const (
-	StreamProxyUpstreamBuffer   = 64 * 1024 // CLI -> deskconnd
-	StreamProxyDownstreamBuffer = 2 << 20   // deskconnd -> CLI
+	StreamProxyUpstreamBuffer   = 64 * 1024 // CLI -> userd
+	StreamProxyDownstreamBuffer = 2 << 20   // userd -> CLI
 	StreamProxyBufferedHigh     = 256 * 1024
 	StreamProxyBufferedLow      = 128 * 1024
 )

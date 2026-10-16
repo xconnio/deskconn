@@ -16,7 +16,7 @@ import (
 // up front, opens one raw stream/channel, sends the one-time log
 // request, then writes every received chunk straight to stdout until the
 // machine finishes or ctx is canceled. mode picks "quic"/"p2p" directly, or
-// "" uses deskconnd's persistent connection, falling back (without deskconnd)
+// "" uses userd's persistent connection, falling back (without userd)
 // to trying P2P first, then QUIC.
 func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 	follow bool, tailN int64, since string) error {

@@ -63,7 +63,7 @@ func (c *fakeChannel) OnBufferedAmountLow(func())           {}
 
 // A channel closed by its remote end must end the relayed connection too, after
 // flushing what arrived before the close -- otherwise the far side (e.g. the CLI
-// behind deskconnd's stream proxy) only notices on its next write.
+// behind userd's stream proxy) only notices on its next write.
 func TestRelayWebRTCChannelPropagatesRemoteClose(t *testing.T) {
 	channel := &fakeChannel{}
 	relaySide, localSide := net.Pipe()
