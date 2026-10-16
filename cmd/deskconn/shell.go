@@ -64,7 +64,7 @@ func runShell(cfgDirectory, machine string, command []string, mode string, forwa
 	defer setupAgentForward(mode, realm, cfgDirectory, agentSock)()
 
 	if len(command) > 0 {
-		return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, command)
+		return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, "", command)
 	}
 	return deskconn.RunShell(context.Background(), mode, realm, cfgDirectory)
 }

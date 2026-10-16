@@ -126,7 +126,7 @@ func listFiles(cfgDirectory, target, mode string) error {
 	if path != "" {
 		args = append(args, path)
 	}
-	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, args)
+	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, "", args)
 }
 
 func moveFile(cfgDirectory, src, dst, mode string) error {

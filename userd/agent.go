@@ -4,24 +4,17 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/xconn-go"
 )
 
-// agentInstalled reports whether the agent tool (claude, codex) is installed: whether an
-// interactive login shell, as the web app's terminals use to run it, finds it. Interactive, as
-// ~/.bashrc is where nvm (codex's usual install) adds itself to PATH, and a systemd service's
-// own PATH has neither it nor ~/.local/bin. Checked once, when userd starts.
+// agentInstalled reports whether the agent tool (claude, codex) is installed: whether the
+// user's own shell finds it, as it does when a terminal runs it (see userCommand). Checked
+// once, when userd starts.
 // ponytail: installing or removing an agent takes a userd restart to show.
-var agentInstalled = func(tool string) bool { //nolint:gochecknoglobals // tests replace it
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return exec.CommandContext(ctx, "bash", "-lic", `command -v "$1"`, "bash", tool).Run() == nil
-}
+var agentInstalled = userHasCommand //nolint:gochecknoglobals // tests replace it
 
 // agentApps are the apps of the agents installed on this machine: each lists and pulls its
 // sessions for the web app and `desk agent`, and resumes them in a terminal.
