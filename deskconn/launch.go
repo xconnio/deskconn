@@ -34,7 +34,7 @@ const (
 // systemd unit named unit, via "sudo systemd-run" -- prompting for a
 // password on this process's terminal -- and waits for its socket to come
 // up. Connect to the returned path with DialVPNHelper, from this process or
-// (serve mode) handed to deskconnd to dial instead; the helper serves
+// (serve mode) handed to userd to dial instead; the helper serves
 // exactly one connection and unwinds and exits once it closes, at which
 // point systemd discards the unit.
 //

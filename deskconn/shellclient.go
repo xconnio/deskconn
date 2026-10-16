@@ -222,7 +222,7 @@ func shellHandshakeP2P(p2pSess ChannelOpener, ctrl common.ShellControlMsg,
 	}, nil
 }
 
-// dialShellDaemon opens the shell on deskconnd's persistent connection.
+// dialShellDaemon opens the shell on userd's persistent connection.
 func dialShellDaemon(ds *DaemonStreams, realm string, ctrl common.ShellControlMsg) (*shellHandshakeResult, error) {
 	release := func() { _ = ds.Close() }
 	if ds.P2P() {
@@ -342,9 +342,9 @@ func shellReadLoop(active *activeShellConn) error {
 // and Op/Cols/Rows are filled in here. mode selects the connection policy:
 //   - "quic": QUIC only, no upgrade attempt.
 //   - "p2p": P2P only, no QUIC fast-start.
-//   - "" (default): use deskconnd's persistent connection: P2P if it has it,
+//   - "" (default): use userd's persistent connection: P2P if it has it,
 //     otherwise QUIC, migrating the running PTY to P2P once the connection
-//     upgrades. Without deskconnd, fast-start on a QUIC connection of its own
+//     upgrades. Without userd, fast-start on a QUIC connection of its own
 //     and migrate to P2P in the background the same way.
 func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctrl common.ShellControlMsg) error {
 	fd := int(os.Stdin.Fd()) // #nosec
@@ -434,7 +434,7 @@ func migrateShell(active *activeShellConn, primary *shellHandshakeResult,
 	log.Debugf("stream: migrated live session %s from QUIC to P2P", primary.shellID)
 }
 
-// awaitDaemonP2P waits, for up to P2PRequestTimeout, for deskconnd's connection to
+// awaitDaemonP2P waits, for up to P2PRequestTimeout, for userd's connection to
 // realm's machine to upgrade to P2P.
 func awaitDaemonP2P(ctx context.Context, realm, cfgDirectory string) (*DaemonStreams, error) {
 	ctx, cancel := context.WithTimeout(ctx, common.P2PRequestTimeout)

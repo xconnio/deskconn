@@ -13,7 +13,7 @@ import (
 
 // MessageChannel is the subset of *webrtc.DataChannel's API every raw
 // data-channel feature actually uses. *webrtc.DataChannel satisfies it
-// directly; deskconnd, which never sees a real one, satisfies it with a
+// directly; userd, which never sees a real one, satisfies it with a
 // RelayChannel backed by a local unix connection to xlink instead.
 type MessageChannel interface {
 	Send(data []byte) error

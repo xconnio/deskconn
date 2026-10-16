@@ -20,8 +20,8 @@ import (
 // RunPortForward is the client entry point for `desk port forward`. It
 // listens on localPort and, for each accepted local connection, opens a
 // fresh raw stream/channel and asks the machine to dial remotePort, then
-// relays. mode picks "quic"/"p2p" directly, or "" uses deskconnd's persistent
-// connection, falling back (without deskconnd) to trying P2P first, then QUIC
+// relays. mode picks "quic"/"p2p" directly, or "" uses userd's persistent
+// connection, falling back (without userd) to trying P2P first, then QUIC
 // -- matching file transfer's default-mode policy.
 func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, localPort string) error {
 	ln, err := net.Listen("tcp", "127.0.0.1:"+localPort)

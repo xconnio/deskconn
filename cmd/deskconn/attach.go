@@ -126,7 +126,7 @@ func detach(cfgDirectory string) error {
 		return err
 	}
 
-	// deskconnd also removes it when it hears about the detach, but not if it isn't running,
+	// userd also removes it when it hears about the detach, but not if it isn't running,
 	// and attach refuses to run while it's there.
 	credFile, err := common.CredentialsFilePath()
 	if err != nil {

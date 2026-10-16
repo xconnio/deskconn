@@ -9,7 +9,7 @@ import (
 
 	"github.com/xconnio/deskconn/common"
 	"github.com/xconnio/deskconn/deskconn"
-	"github.com/xconnio/deskconn/deskconnd"
+	"github.com/xconnio/deskconn/userd"
 	"github.com/xconnio/xconn-go"
 )
 
@@ -21,7 +21,7 @@ func connectFileCatSessions(t *testing.T) *xconn.Session {
 
 	callee, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
-	require.NoError(t, deskconnd.NewDeskconn(nil, false, t.TempDir()).Register(callee))
+	require.NoError(t, userd.NewDeskconn(nil, false, t.TempDir()).Register(callee))
 
 	caller, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)

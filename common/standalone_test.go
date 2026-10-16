@@ -22,7 +22,7 @@ const (
 )
 
 // startStandalone serves the standalone realm over QUIC and WebTransport on local ports,
-// with xconn's standalone authenticator and a self-signed certificate like deskconnd
+// with xconn's standalone authenticator and a self-signed certificate like userd
 // --standalone, and returns the QUIC and WebTransport URLs and the certificate fingerprint.
 func startStandalone(t *testing.T, keys []string, passwords map[string]string) (quicURL, wtURL,
 	certHash string) {

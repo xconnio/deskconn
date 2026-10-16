@@ -131,7 +131,7 @@ func StandaloneTargetFor(realm string) (*StandaloneTarget, bool) {
 	return standaloneTarget, true
 }
 
-// StreamProxyRequest is what the CLI sends on deskconnd's stream proxy socket. With an
+// StreamProxyRequest is what the CLI sends on userd's stream proxy socket. With an
 // empty Kind it only asks which transport the persistent connection to Realm's machine
 // has; otherwise it opens a raw QUIC stream, or a data channel named Label, on it.
 type StreamProxyRequest struct {

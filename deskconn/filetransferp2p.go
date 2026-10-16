@@ -19,7 +19,7 @@ import (
 type P2PChannelOpener = common.DataChannelOpener
 
 // ChannelOpener opens data channels to a machine: on a P2P session of its own (see
-// P2PChannels) or on deskconnd's persistent connection (see DaemonStreams).
+// P2PChannels) or on userd's persistent connection (see DaemonStreams).
 type ChannelOpener interface {
 	OpenMessageChannel(label string) (common.MessageChannel, error)
 }
