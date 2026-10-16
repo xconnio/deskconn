@@ -357,10 +357,11 @@ func runAgentResumeRemote(cfgDirectory, machine, tool, sessionID, mode string) e
 		return fmt.Errorf("unknown machine %q: %w", machine, err)
 	}
 
-	// A login shell, like the web app's terminals, so the agent is found on the user's PATH.
+	// An interactive login shell, like the web app's terminals, so the agent is found on the
+	// user's PATH, nvm's included (see deskconnd's agentInstalled).
 	cmdName, args := agentResumeCommand(tool, sessionID)
 	fullArgs := append([]string{
-		"bash", "-lc", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
+		"bash", "-lic", `cd -- "$HOME/$1" && shift && exec "$@"`, "bash", path, cmdName,
 	}, args...)
 
 	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, fullArgs)
