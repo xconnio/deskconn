@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
 func TestMulticallArgs(t *testing.T) {

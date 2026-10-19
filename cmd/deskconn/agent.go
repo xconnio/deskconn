@@ -15,8 +15,8 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/olekukonko/tablewriter"
 
-	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/xconn-go"
 )
 

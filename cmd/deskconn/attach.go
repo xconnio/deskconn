@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 

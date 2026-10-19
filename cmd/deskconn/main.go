@@ -13,8 +13,8 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
 var version = "v0.1.0-alpha"

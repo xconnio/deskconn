@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/xconn-go"
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )

@@ -11,8 +11,8 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/xconn-go"
 )
 
