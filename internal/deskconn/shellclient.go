@@ -468,12 +468,13 @@ func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
 
 // RunExec is the client entry point for anything that runs one command on a
 // machine's PTY and exits when it finishes (desk shell <command>, file ls, agent
-// resume) -- as opposed to RunShell's open-ended interactive session.
-func RunExec(ctx context.Context, mode, realm, cfgDirectory string, commandWithArgs []string) error {
+// resume) -- as opposed to RunShell's open-ended interactive session. It starts in dir on the
+// machine: home if empty, and relative to it if not absolute.
+func RunExec(ctx context.Context, mode, realm, cfgDirectory, dir string, commandWithArgs []string) error {
 	var command string
 	var args []string
 	if len(commandWithArgs) > 0 {
 		command, args = commandWithArgs[0], commandWithArgs[1:]
 	}
-	return runStreamCommand(ctx, mode, realm, cfgDirectory, common.ShellControlMsg{Command: command, Args: args})
+	return runStreamCommand(ctx, mode, realm, cfgDirectory, common.ShellControlMsg{Command: command, Args: args, Dir: dir})
 }
