@@ -23,9 +23,6 @@ import (
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
-// lanPort is where xlink serves the machine realm to clients on the local network.
-const lanPort = 18080
-
 // streamCloseGrace is how long shutdown gives xlink to pass the closes of the streams
 // still open on to their clients before its connections go down.
 const streamCloseGrace = 500 * time.Millisecond
@@ -262,7 +259,6 @@ func newCloudConfig(cfgDirectory string) (*xconnd.CloudConfig, error) {
 		TopicDetachFormat:     common.TopicDeskconnDesktopDetachFormat,
 		CredentialsFile:       credentialsFile,
 		PrincipalsFile:        filepath.Join(cfgDirectory, "principals.json"),
-		LANPort:               lanPort,
 		ICEServers:            common.ICEServers(),
 	}, nil
 }
