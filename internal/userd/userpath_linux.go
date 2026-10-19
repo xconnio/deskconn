@@ -1,64 +1,10 @@
 package userd
 
 import (
-	"context"
-	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"strings"
-	"time"
 )
-
-// userShell is the user's login shell: $SHELL, which a service often lacks, or the account's.
-func userShell() string {
-	for _, shell := range []string{os.Getenv("SHELL"), accountShell()} {
-		if shell != "" {
-			if _, err := os.Stat(shell); err == nil { //nolint:gosec // the user's own shell setting
-				return shell
-			}
-		}
-	}
-	return "/bin/sh"
-}
-
-// userShellArgs runs script in shell as an interactive login shell, reading every file users
-// set PATH in (~/.profile, ~/.bashrc, ~/.zshrc, ...), with args as its
-// positional arguments: "$@" in POSIX shells, $argv in fish.
-func userShellArgs(shell, posixScript, fishScript string, args ...string) []string {
-	if filepath.Base(shell) == "fish" {
-		return append([]string{"-lic", fishScript}, args...)
-	}
-	return append([]string{"-lic", posixScript, filepath.Base(shell)}, args...)
-}
-
-// userCommand returns how to run command with args, and the environment to run it with (nil
-// inherits userd's). A command on userd's own PATH runs as is: a service's PATH (systemd) can
-// lack the user's (nvm's bin, ~/.local/bin). Any other runs through the user's login shell if
-// that finds it; else as is, so starting it fails with an error (a nonexistent command)
-// instead of the shell starting and printing "command not found".
-func userCommand(command string, args []string) (string, []string, []string) {
-	if resolved, err := exec.LookPath(command); err == nil {
-		return resolved, args, nil
-	}
-	if !userHasCommand(command) {
-		return command, args, nil
-	}
-	shell := userShell()
-	return shell, userShellArgs(shell, `exec "$@"`, `exec $argv`, append([]string{command}, args...)...), nil
-}
-
-// userHasCommand reports whether userd's own PATH or the user's login shell finds command.
-func userHasCommand(command string) bool {
-	if _, err := exec.LookPath(command); err == nil {
-		return true
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	shell := userShell()
-	args := userShellArgs(shell, `command -v "$1"`, `command -v $argv[1]`, command)
-	return exec.CommandContext(ctx, shell, args...).Run() == nil //nolint:gosec
-}
 
 // accountShell returns the user's login shell from the user database (/etc/passwd, LDAP, ...).
 func accountShell() string {

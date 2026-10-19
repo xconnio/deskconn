@@ -42,7 +42,7 @@ the account service, and stores the private key in `~/.deskconn/id_ed25519`.
 
 ## Installation
 
-**Linux**
+**macOS and Linux**
 
 ```bash
 curl -fsSL https://get.deskconn.com | sh
@@ -53,8 +53,8 @@ This installs one multicall binary, `deskconn`, to `~/.local/lib/exec`. It runs 
 | Name             | Installed as                                 | Role                                                                     |
 |------------------|----------------------------------------------|--------------------------------------------------------------------------|
 | `desk`           | `~/.local/bin/desk` (symlink)                | The CLI (so is `deskconn` itself)                                        |
-| `deskconn-userd` | `~/.local/lib/exec/deskconn-userd` (symlink) | User daemon, run by the `deskconn-userd` systemd user service at login   |
-| `deskconn-rootd` | `~/.local/lib/exec/deskconn-rootd` (symlink) | Root helper, started on demand with `sudo` as `deskconn-rootd.service`   |
+| `deskconn-userd` | `~/.local/lib/exec/deskconn-userd` (symlink) | User daemon, run at login by a systemd user service (Linux) or launchd agent (macOS) |
+| `deskconn-rootd` | `~/.local/lib/exec/deskconn-rootd` (symlink) | Root helper, started on demand with `sudo` as `deskconn-rootd.service` (Linux only — VPN serving needs it, and VPN is Linux-only for now) |
 
 On Windows, from PowerShell:
 
