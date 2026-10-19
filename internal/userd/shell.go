@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -212,10 +212,14 @@ func (p *interactiveShellSession) agentSockForAuthID(authID string) string {
 func (p *interactiveShellSession) startPtySession(transport shellTransport, shellID, agentSockPath,
 	dir, command string, cols, rows uint16, echo bool, args ...string) (
 	ptmx pty.Pty, startReader func(), err error) {
-	if dir == "" {
-		if dir, err = p.resolveStartDir(""); err != nil {
+	// Empty means home, and a relative dir is under it (`desk agent resume --remote` names a
+	// project relative to home, to match it across machines).
+	if dir == "" || !filepath.IsAbs(dir) {
+		home, err := p.resolveStartDir("")
+		if err != nil {
 			return nil, nil, err
 		}
+		dir = filepath.Join(home, dir)
 	}
 
 	ptmx, err = pty.New()
@@ -227,14 +231,16 @@ func (p *interactiveShellSession) startPtySession(transport shellTransport, shel
 		disablePTYEcho(ptmx)
 	}
 
-	if resolved, lookErr := exec.LookPath(command); lookErr == nil {
-		command = resolved
-	}
+	command, args, env := userCommand(command, args)
 
 	cmd := ptmx.Command(command, args...)
 	cmd.Dir = dir
+	cmd.Env = env
 	if agentSockPath != "" {
-		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+agentSockPath)
+		if cmd.Env == nil {
+			cmd.Env = os.Environ()
+		}
+		cmd.Env = append(cmd.Env, "SSH_AUTH_SOCK="+agentSockPath)
 	}
 
 	if err := cmd.Start(); err != nil {
