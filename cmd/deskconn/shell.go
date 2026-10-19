@@ -8,8 +8,8 @@ import (
 
 	"github.com/alecthomas/kingpin/v2"
 
-	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/deskconn"
+	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
 type shellCommands struct {

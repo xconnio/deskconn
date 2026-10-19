@@ -1,6 +1,6 @@
 # Router the binaries connect to by default, e.g. `make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081`
 CLOUD_QUIC_ADDRESS ?=
-LDFLAGS := $(if $(CLOUD_QUIC_ADDRESS),-X github.com/xconnio/deskconn/common.cloudQUICAddress=$(CLOUD_QUIC_ADDRESS))
+LDFLAGS := $(if $(CLOUD_QUIC_ADDRESS),-X github.com/xconnio/deskconn/internal/common.cloudQUICAddress=$(CLOUD_QUIC_ADDRESS))
 
 # export (rather than "CGO_ENABLED=0 go build ...") sets this on the recipe's environment
 # directly from make itself, so it works whichever shell runs the recipe - sh/bash here, but

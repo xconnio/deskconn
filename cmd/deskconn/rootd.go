@@ -13,8 +13,8 @@ import (
 
 	"github.com/alecthomas/kingpin/v2"
 
-	"github.com/xconnio/deskconn/deskconn"
-	"github.com/xconnio/deskconn/rootd"
+	"github.com/xconnio/deskconn/internal/deskconn"
+	"github.com/xconnio/deskconn/internal/rootd"
 )
 
 // runRootd is the root helper, for now the privileged backend for "desk vpn": it serves

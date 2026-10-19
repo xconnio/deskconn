@@ -17,8 +17,8 @@ import (
 	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/deskconn/userd"
+	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/userd"
 	"github.com/xconnio/xconn-go"
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
