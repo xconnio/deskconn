@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -363,21 +365,22 @@ func runAgentResumeRemote(cfgDirectory, machine, tool, sessionID, mode string) e
 	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, path, append([]string{cmdName}, args...))
 }
 
-// launch runs tool as a foreground child, inheriting stdio.
+// launch replaces desk with tool where the OS allows it (not Windows, which has no exec),
+// otherwise runs it as a foreground child, inheriting stdio.
 func launch(tool, cmdName string, args []string) error {
-	cmd := exec.Command(cmdName, args...) //nolint:gosec
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
+	path, err := exec.LookPath(cmdName)
+	if err != nil {
 		return fmt.Errorf("failed to launch %s: %w", cmdName, err)
 	}
+	if runtime.GOOS != "windows" {
+		return syscall.Exec(path, append([]string{cmdName}, args...), os.Environ()) //nolint:gosec
+	}
 
-	runErr := cmd.Wait()
-
+	cmd := exec.Command(path, args...) //nolint:gosec
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	var exitErr *exec.ExitError
-	if runErr != nil && !errors.As(runErr, &exitErr) {
-		fmt.Fprintf(os.Stderr, "warning: %s exited abnormally: %v\n", tool, runErr)
+	if err := cmd.Run(); err != nil && !errors.As(err, &exitErr) {
+		fmt.Fprintf(os.Stderr, "warning: %s exited abnormally: %v\n", tool, err)
 	}
 	return nil
 }
