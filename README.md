@@ -342,8 +342,8 @@ Apps beyond deskconn-userd's own (Files, Terminal, Resource Monitor, Text Editor
 [media-app](https://github.com/xconnio/media-app) and [remotecontrol-app](https://github.com/xconnio/remotecontrol-app).
 An app needs no code in deskconn: it connects to deskconn-userd's local socket, registers its procedures there, and
 tells deskconn-userd which apps it serves. deskconn-userd lists them to clients (the web app shows an app only while
-it's listed and enabled), owners and admins enable or disable them, and xlink exposes their procedures to the cloud,
-LAN and P2P.
+it's listed and enabled), owners and admins enable or disable them, and xlink exposes their procedures to the cloud
+and P2P.
 
 1. **Connect** to `~/.deskconn/deskconn.sock` (WAMP over a Unix socket, realm `io.xconn.deskconn.local`, anonymous).
    Reconnect when deskconn-userd restarts.
