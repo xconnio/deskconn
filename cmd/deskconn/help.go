@@ -167,7 +167,7 @@ func groupHelpExamples(group string) []string {
 			"desk serve",
 			"desk serve --mode standalone --public-key <key>",
 			"desk serve init",
-			"desk serve --config ~/.deskconn/serve.yaml",
+			"desk serve --config serve.yaml",
 		}
 	default:
 		return nil

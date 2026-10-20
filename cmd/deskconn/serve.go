@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -57,12 +56,12 @@ type serveCommands struct {
 	setByUser map[string]*bool
 }
 
-func registerServeCommands(app *kingpin.Application, cfgDirectory string) *serveCommands {
+func registerServeCommands(app *kingpin.Application) *serveCommands {
 	serveCmd := app.Command("serve", "Run the deskconn daemon: the user daemon, or the root helper for desk vpn")
 	// "desk serve [<flags>]" runs the daemon: run is the default, so it never has to be named.
 	runCmd := serveCmd.Command("run", "Run the daemon; the default, so \"desk serve [<flags>]\" is the same").Default()
 	initCmd := serveCmd.Command("init", "Write a sample config file for desk serve --config")
-	initPath := initCmd.Arg("path", "Where to write it").Default(filepath.Join(cfgDirectory, "serve.yaml")).String()
+	initPath := initCmd.Arg("path", "Where to write it").Default("serve.yaml").String()
 	initForce := initCmd.Flag("force", "Overwrite the file if it exists").Short('f').Bool()
 
 	setByUser := map[string]*bool{}
