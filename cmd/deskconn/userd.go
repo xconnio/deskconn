@@ -41,11 +41,7 @@ func runUserd(flags userdFlags, standalone bool) {
 		serveFatalf("%v", err)
 	}
 	if standalone && len(standaloneKeys) == 0 && len(standalonePasswords) == 0 {
-		serveFatalf("--mode standalone needs someone allowed to connect, for example:\n" +
-			"  desk serve --mode standalone --user alice:s3cret       alice logs in with a password\n" +
-			"  desk serve --mode standalone --user bob:<public-key>   bob logs in with a key (make one with desk keygen)\n" +
-			"  desk serve --config serve.yaml                         users from a config file (see desk serve init)\n" +
-			"Repeat --user for more users.")
+		serveFatalf("%s", noStandaloneUsersHelp(flags.configPath))
 	}
 	if (*flags.standaloneCert == "") != (*flags.standaloneKey == "") {
 		serveFatalf("--tls-cert and --tls-key go together")
@@ -206,7 +202,7 @@ func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
 		return nil, err
 	}
 	fmt.Printf("standalone: certificate SHA-256 fingerprint %s (clients that don't trust its issuer "+
-		"pin it with desk profile add --cert-hash %s)", common.CertificateFingerprint(cert),
+		"pin it with desk profile add --cert-hash %s)\n", common.CertificateFingerprint(cert),
 		common.CertificateFingerprint(cert))
 
 	config := &xconnd.StandaloneConfig{
@@ -292,6 +288,26 @@ func standaloneAuth(flags userdFlags, logLogins bool) (keys []string, passwords 
 		log.Printf("standalone: %d --public-key key(s) log in as any username", len(*flags.standaloneKeys))
 	}
 	return keys, passwords, nil
+}
+
+// noStandaloneUsersHelp says how to let someone in when standalone mode has no one to: in
+// the config file at configPath, if one is used, or else with --user.
+func noStandaloneUsersHelp(configPath string) string {
+	if configPath != "" {
+		return fmt.Sprintf("%s has no users, so no one could connect in standalone mode. Add some under users:\n"+
+			"  users:\n"+
+			"    - username: alice           # logs in with a password\n"+
+			"      password: s3cret\n"+
+			"    - username: bob             # logs in with a key (make one with desk keygen)\n"+
+			"      authorized-keys:\n"+
+			"        - <public-key>\n"+
+			"(The sample from desk serve init has these commented out.)", configPath)
+	}
+	return "--mode standalone needs someone allowed to connect, for example:\n" +
+		"  desk serve --mode standalone --user alice:s3cret       alice logs in with a password\n" +
+		"  desk serve --mode standalone --user bob:<public-key>   bob logs in with a key (make one with desk keygen)\n" +
+		"  desk serve --config serve.yaml                         users from a config file (see desk serve init)\n" +
+		"Repeat --user for more users."
 }
 
 // parseUserFlag parses a --user value, username:secret. The secret is a public key if it is

@@ -33,7 +33,8 @@ type userdFlags struct {
 	standaloneKeys      *[]string
 	standaloneUsers     *[]string
 
-	// configUsers are the users of a --config file (see serveCommands.apply).
+	// configPath and configUsers are the --config file and its users (see serveCommands.apply).
+	configPath  string
 	configUsers []serveConfigUser
 }
 
@@ -136,6 +137,7 @@ func dispatchServeCommand(parsedCmd string, cmds *serveCommands) bool {
 		if *cmds.mode == serveModeRoot {
 			serveFatalf("--config is for the user and standalone modes")
 		}
+		cmds.userd.configPath = *cmds.configPath
 		config, err := loadServeConfig(*cmds.configPath)
 		if err != nil {
 			serveFatalf("%v", err)
