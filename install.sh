@@ -57,16 +57,11 @@ if [ ! -f "$TMP_DIR/deskconn" ]; then
     exit 1
 fi
 
-# Before the rename the CLI was installed as "deskconn" (with "desk" a symlink to it).
-rm -f "$BIN_DIR/desk" "$BIN_DIR/deskconn"
+rm -f "$BIN_DIR/desk" "$BIN_DIR/deskconn" "$EXEC_DIR/deskconn-userd" "$EXEC_DIR/deskconn-rootd"
 
-# One multicall binary, run by the name it's invoked as: desk is the CLI, deskconn-userd
-# the user daemon and deskconn-rootd the root helper.
 mv "$TMP_DIR/deskconn" "$EXEC_DIR/deskconn"
 chmod 755 "$EXEC_DIR/deskconn"
 ln -sf "$EXEC_DIR/deskconn" "$BIN_DIR/desk"
-ln -sf "$EXEC_DIR/deskconn" "$EXEC_DIR/deskconn-userd"
-ln -sf "$EXEC_DIR/deskconn" "$EXEC_DIR/deskconn-rootd"
 
 BASH_COMP_DIR="$HOME/.local/share/bash-completion/completions"
 ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
@@ -160,13 +155,24 @@ Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
     done
     rm -f "$BIN_DIR/vpnd"
 
+    # Flags added with "systemctl --user edit deskconn-userd" override ExecStart in a drop-in,
+    # which still names the daemon's old path on older installs, and its old --standalone flag
+    # (now "--mode standalone").
+    for drop_in in "$systemd_user_dir/deskconn-userd.service.d"/*.conf; do
+        [ -f "$drop_in" ] || continue
+        sed -i -E \
+            -e "s|^ExecStart=$EXEC_DIR/deskconn-userd( \|\$)|ExecStart=$EXEC_DIR/deskconn serve --mode user\1|" \
+            -e '/^ExecStart=.* serve --mode user( .*)? --standalone( |$)/{s/ --standalone( |$)/\1/;s/ serve --mode user/ serve --mode standalone/}' \
+            "$drop_in"
+    done
+
     cat > "$systemd_user_dir/deskconn-userd.service" <<EOL
 [Unit]
 Description=deskconn user daemon (connectivity, shell, files, VPN control, ...)
 After=network.target
 
 [Service]
-ExecStart=$EXEC_DIR/deskconn-userd
+ExecStart=$EXEC_DIR/deskconn serve --mode user
 Restart=always
 RestartSec=5
 $userd_env_lines

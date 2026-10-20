@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alecthomas/kingpin/v2"
 	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
@@ -27,47 +26,23 @@ import (
 // still open on to their clients before its connections go down.
 const streamCloseGrace = 500 * time.Millisecond
 
-// Standalone transports (--transport).
-const (
-	transportQUIC         = "quic"
-	transportWebTransport = "webtransport"
-	transportBoth         = "both"
-)
-
-// userdName is the name the deskconn binary runs as its user daemon under (see
-// multicallArgs).
-const userdName = "deskconn-userd"
+// userdService is the service the user daemon runs as: a systemd user service on Linux,
+// a scheduled task on Windows.
+const userdService = "deskconn-userd"
 
 // runUserd is the user daemon: the machine's APIs and its connectivity (xlink).
-func runUserd(args []string) {
+func runUserd(flags userdFlags, standalone bool) {
 	detachConsole()
 
-	app := kingpin.New(userdName, "Deskconn user daemon: the machine's APIs and its connectivity (xlink)")
-	standalone := app.Flag("standalone", "Serve this machine directly over --transport to --public-key holders "+
-		"and --user accounts, instead of through the cloud").Bool()
-	standaloneTransport := app.Flag("transport", "Standalone transport to serve: quic, webtransport or both").
-		Default(transportQUIC).Enum(transportQUIC, transportWebTransport, transportBoth)
-	standaloneQUICAddr := app.Flag("quic-address", "Where to serve QUIC in standalone mode (host:port, UDP)").
-		Default("0.0.0.0:18080").String()
-	standaloneWTAddr := app.Flag("webtransport-address", "Where to serve WebTransport in standalone mode "+
-		"(host:port, UDP)").Default("0.0.0.0:18081").String()
-	standaloneCert := app.Flag("tls-cert", "TLS certificate (PEM) for standalone mode; without it, a "+
-		"self-signed one is generated and kept in the config directory").String()
-	standaloneKey := app.Flag("tls-key", "Private key (PEM) of --tls-cert").String()
-	standaloneKeys := app.Flag("public-key", "Public key (hex) allowed to connect in standalone mode; repeat for more "+
-		"(see `desk keygen`)").Strings()
-	standaloneUsers := app.Flag("user", "username:password allowed to connect in standalone mode; repeat for "+
-		"more").Envar("DESKCONND_USERS").Strings()
-	kingpin.MustParse(app.Parse(args))
-	standalonePasswords, err := parseUsers(*standaloneUsers)
+	standalonePasswords, err := parseUsers(*flags.standaloneUsers)
 	if err != nil {
-		app.Fatalf("%v", err)
+		serveFatalf("%v", err)
 	}
-	if *standalone && len(*standaloneKeys) == 0 && len(standalonePasswords) == 0 {
-		app.Fatalf("--standalone needs at least one --public-key or --user")
+	if standalone && len(*flags.standaloneKeys) == 0 && len(standalonePasswords) == 0 {
+		serveFatalf("--mode standalone needs at least one --public-key or --user")
 	}
-	if (*standaloneCert == "") != (*standaloneKey == "") {
-		app.Fatalf("--tls-cert and --tls-key go together")
+	if (*flags.standaloneCert == "") != (*flags.standaloneKey == "") {
+		serveFatalf("--tls-cert and --tls-key go together")
 	}
 
 	cfgDirectory, err := common.CfgDirectory()
@@ -76,13 +51,13 @@ func runUserd(args []string) {
 	}
 
 	var standaloneConfig *xconnd.StandaloneConfig
-	if *standalone {
-		standaloneConfig, err = newStandaloneConfig(cfgDirectory, *standaloneTransport, *standaloneQUICAddr,
-			*standaloneWTAddr, *standaloneCert, *standaloneKey)
+	if standalone {
+		standaloneConfig, err = newStandaloneConfig(cfgDirectory, *flags.standaloneTransport,
+			*flags.standaloneQUICAddr, *flags.standaloneWTAddr, *flags.standaloneCert, *flags.standaloneKey)
 		if err != nil {
 			log.Fatalf("standalone: %v", err)
 		}
-		standaloneConfig.Keys = *standaloneKeys
+		standaloneConfig.Keys = *flags.standaloneKeys
 		standaloneConfig.Passwords = standalonePasswords
 	}
 
@@ -176,7 +151,7 @@ func runUserd(args []string) {
 	xlinkDone := make(chan struct{})
 	common.SafeGo(func() {
 		defer close(xlinkDone)
-		if !*standalone {
+		if !standalone {
 			cloudConfig, err := newCloudConfig(cfgDirectory)
 			if err != nil {
 				log.Fatal(err)

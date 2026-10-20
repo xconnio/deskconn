@@ -63,7 +63,7 @@ Usage: {{.App.Name}} [flags] <command>
 Commands:
 {{CommandRows .App.Commands "ls" "shell" "file" "port" "vpn" "agent" | FormatTwoColumns}}
 Management:
-{{CommandRows .App.Commands "machine" "account" "self" | FormatTwoColumns}}
+{{CommandRows .App.Commands "machine" "account" "self" "serve" | FormatTwoColumns}}
 Standalone:
 {{CommandRows .App.Commands "profile" "keygen" | FormatTwoColumns}}
 Flags:
@@ -162,6 +162,8 @@ func groupHelpExamples(group string) []string {
 		}
 	case "self":
 		return []string{"desk self version", "desk self update"}
+	case "serve":
+		return []string{"desk serve", "desk serve --mode standalone --public-key <key>"}
 	default:
 		return nil
 	}

@@ -47,10 +47,7 @@ try {
     Write-Host "Extracting archive..."
     Expand-Archive -Path $ArchivePath -DestinationPath $TmpDir -Force
 
-    # One multicall binary, run by how it's invoked: with no args it's the CLI, with
-    # "deskconn-userd" as its first argument it's the user daemon (see
-    # cmd/deskconn/rootd.go's multicallArgs). Windows has no unprivileged symlinks, so
-    # unlike Linux this passes the name as an argument instead of renaming a copy.
+    # One binary: the CLI, and with "serve --mode user" the user daemon.
     $DeskconnExe = Join-Path $TmpDir 'deskconn.exe'
     if (-not (Test-Path $DeskconnExe)) {
         Write-Error "Release archive does not contain the deskconn binary."
@@ -102,9 +99,8 @@ Write-Host "Setting up scheduled task for $ServiceName..."
 
 $UserId = "$env:USERDOMAIN\$env:USERNAME"
 
-# "deskconn-userd" as the first argument selects the user-daemon role (see multicallArgs).
 $Action = New-ScheduledTaskAction -Execute (Join-Path $ExecDir 'deskconn.exe') `
-    -Argument 'deskconn-userd' -WorkingDirectory $ExecDir
+    -Argument 'serve --mode user' -WorkingDirectory $ExecDir
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserId
 $Principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Limited
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `

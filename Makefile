@@ -9,16 +9,12 @@ LDFLAGS := $(if $(CLOUD_QUIC_ADDRESS),-X github.com/xconnio/deskconn/internal/co
 export CGO_ENABLED := 0
 
 # 'desk' is reserved by Windows for Display Settings (desk.cpl) and can't be safely
-# overridden (see install.ps1), so there's no 'desk' alias built on Windows - use the
+# overridden (see install.ps1), so there's no 'desk' built on Windows - use the
 # 'deskconn' binary itself there.
 ifeq ($(OS),Windows_NT)
 DESKCONN_BIN := bin/deskconn.exe
-USERD_BIN    := bin/deskconn-userd.exe
-ROOTD_BIN    := bin/deskconn-rootd.exe
 else
 DESKCONN_BIN := bin/deskconn
-USERD_BIN    := bin/deskconn-userd
-ROOTD_BIN    := bin/deskconn-rootd
 endif
 
 test:
@@ -39,20 +35,17 @@ release-snapshot:
 release-check:
 	goreleaser check
 
-# One multicall binary: run as desk (or deskconn) it's the CLI, as deskconn-userd the user
-# daemon and as deskconn-rootd the root helper. Built once per name (rather than symlinked)
-# so this works under whichever shell make ends up using, including cmd.exe on Windows,
-# which has neither unprivileged symlinks nor an "ln"/"cp" builtin.
+# One binary: the CLI, and with "serve --mode user|standalone|root" the user daemon or the
+# root helper. desk is built as a copy (rather than symlinked) so this works under whichever
+# shell make ends up using, including cmd.exe on Windows.
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(DESKCONN_BIN) github.com/xconnio/deskconn/cmd/deskconn
-	go build -ldflags "$(LDFLAGS)" -o $(USERD_BIN) github.com/xconnio/deskconn/cmd/deskconn
-	go build -ldflags "$(LDFLAGS)" -o $(ROOTD_BIN) github.com/xconnio/deskconn/cmd/deskconn
 ifneq ($(OS),Windows_NT)
 	go build -ldflags "$(LDFLAGS)" -o bin/desk github.com/xconnio/deskconn/cmd/deskconn
 endif
 
 run-userd:
-	go run github.com/xconnio/deskconn/cmd/deskconn deskconn-userd
+	go run github.com/xconnio/deskconn/cmd/deskconn serve --mode user
 
 run-desk:
 	go run github.com/xconnio/deskconn/cmd/deskconn

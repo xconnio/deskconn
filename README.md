@@ -48,13 +48,15 @@ the account service, and stores the private key in `~/.deskconn/id_ed25519`.
 curl -fsSL https://get.deskconn.com | sh
 ```
 
-This installs one multicall binary, `deskconn`, to `~/.local/lib/exec`. It runs as whatever it's invoked as:
+This installs one binary, `deskconn`, to `~/.local/lib/exec`, with `desk` on your `PATH` (`~/.local/bin/desk`) a
+symlink to it. It's the CLI, and `desk serve --mode user|standalone|root` runs the daemons:
 
-| Name             | Installed as                                 | Role                                                                     |
-|------------------|----------------------------------------------|--------------------------------------------------------------------------|
-| `desk`           | `~/.local/bin/desk` (symlink)                | The CLI (so is `deskconn` itself)                                        |
-| `deskconn-userd` | `~/.local/lib/exec/deskconn-userd` (symlink) | User daemon, run by the `deskconn-userd` systemd user service at login   |
-| `deskconn-rootd` | `~/.local/lib/exec/deskconn-rootd` (symlink) | Root helper, started on demand with `sudo` as `deskconn-rootd.service`   |
+| Command                        | Role                                                                                      |
+|--------------------------------|-------------------------------------------------------------------------------------------|
+| `desk`                         | The CLI                                                                                   |
+| `desk serve --mode user`       | User daemon (`deskconn-userd`), run by the `deskconn-userd` systemd user service at login |
+| `desk serve --mode standalone` | User daemon serving the machine directly, without the cloud (see below)                   |
+| `desk serve --mode root`       | Root helper (`deskconn-rootd`), started on demand with `sudo` as `deskconn-rootd.service` |
 
 On Windows, from PowerShell:
 
@@ -62,7 +64,7 @@ On Windows, from PowerShell:
 irm https://get.deskconn.com/install.ps1 | iex
 ```
 
-This installs the same multicall binary to `%LOCALAPPDATA%\deskconn`, adds it to your `PATH`, and registers the
+This installs the same binary to `%LOCALAPPDATA%\deskconn`, adds it to your `PATH`, and registers the
 user daemon as a scheduled task that starts at logon (there's no root helper on Windows yet — VPN serving is
 Linux-only for now). Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
 (`desk.cpl`) and can't be safely overridden.
@@ -127,13 +129,13 @@ desk keygen
 ### 2. Start deskconn-userd in standalone mode on the machine
 
 ```bash
-~/.local/lib/exec/deskconn-userd --standalone --public-key 65160c38… [--public-key <another public key> ...]
+desk serve --mode standalone --public-key 65160c38… [--public-key <another public key> ...]
 ```
 
 deskconn-userd serves QUIC on UDP `0.0.0.0:18080` by default. Pick the transport with `--transport quic|webtransport|both`
 and the addresses with `--quic-address` and `--webtransport-address` (default `0.0.0.0:18081`, path `/wamp`). Clients
 holding one of the `--public-key`s can connect, whatever authid they present. To run it as the service, put the flags
-on `ExecStart` with `systemctl --user edit deskconn-userd`.
+on `ExecStart` (as `desk serve --mode standalone ...`) with `systemctl --user edit deskconn-userd`.
 
 Both transports use TLS. Pass your certificate with `--tls-cert cert.pem --tls-key key.pem` (e.g. one issued by a public
 CA); without them deskconn-userd generates a self-signed certificate once and keeps it in `~/.deskconn`. Either way it logs
@@ -147,7 +149,7 @@ To allow username/password logins instead of (or as well as) keys, add `--user u
 accounts (or set `DESKCONND_USERS`, one `username:password` per line, to keep passwords off the command line):
 
 ```bash
-~/.local/lib/exec/deskconn-userd --standalone --user alice:s3cret [--user <username:password> ...]
+desk serve --mode standalone --user alice:s3cret [--user <username:password> ...]
 ```
 
 ### 3. Save it as a profile on the client
@@ -202,7 +204,7 @@ make run
 ### 2. Build the binaries against it
 
 ```bash
-make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081   # builds bin/deskconn, linked as bin/desk, bin/deskconn-userd and bin/deskconn-rootd
+make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081   # builds bin/deskconn and bin/desk
 ```
 
 `CLOUD_QUIC_ADDRESS` is the router's QUIC address, baked in as the default. For a stack on another machine, use its
@@ -246,7 +248,7 @@ foreground:
 ```bash
 systemctl --user stop deskconn-userd   # if the official release is installed; it shares ~/.deskconn
 bin/desk machine attach --username <email>
-bin/deskconn-userd
+bin/desk serve
 ```
 
 Don't run `desk self update` on these builds: it installs the official release, which connects to
@@ -286,7 +288,7 @@ desk machine disconnect [<machine>] [--all]
 Standalone machines (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
-desk keygen                # key pair: public for deskconn-userd --public-key, private for profile add --private-key
+desk keygen                # key pair: public for desk serve --public-key, private for profile add --private-key
 desk profile add    <name> --url <quic://host:port|https://host:port> [--cert-hash <sha256>] [--private-key <hex>] [--authid <user>]
 desk profile remove <name>
 desk profile ls
@@ -398,7 +400,7 @@ result, err := common.EncryptedCall(session, "io.xconn.deskconn.deskconnd.myapp.
 ### Build
 
 ```bash
-make build   # builds bin/deskconn, linked as bin/desk, bin/deskconn-userd and bin/deskconn-rootd
+make build   # builds bin/deskconn and bin/desk
 ```
 
 Override the cloud router for local development (see [Self-hosting](#self-hosting)):
