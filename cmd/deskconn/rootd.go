@@ -11,22 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alecthomas/kingpin/v2"
-
-	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/rootd"
 )
 
 // runRootd is the root helper, for now the privileged backend for "desk vpn": it serves
 // exactly one VPN helper client on a unix socket, then exits.
-func runRootd(args []string) {
-	app := kingpin.New(deskconn.RootdName, "Deskconn root helper: the privileged backend for desk vpn")
-	socketPath := app.Flag("socket", "Unix socket to listen on for the one client this process serves").
-		Required().String()
-	idleTimeout := app.Flag("idle-timeout", "Exit if no client connects within this long").
-		Default("30s").Duration()
-	_, err := app.Parse(args)
-	app.FatalIfError(err, "")
+func runRootd(flags rootdFlags) {
+	socketPath, idleTimeout := flags.socketPath, flags.idleTimeout
 
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(os.Stderr, "deskconn-rootd: must run as root (invoke via sudo)")

@@ -7,7 +7,8 @@ before:
     - go mod tidy
 
 builds:
-  # One multicall binary: the installer links desk, deskconn-userd and deskconn-rootd to it.
+  # One binary: the CLI (the installer links desk to it), and with "serve --mode
+  # user|standalone|root" the user daemon or the root helper.
   - id: deskconn
     main: ./cmd/deskconn
     binary: deskconn
@@ -19,10 +20,8 @@ builds:
     goarch:
       - amd64
       - arm64
-    # No -H=windowsgui here: deskconn is now a multicall binary (see cmd/deskconn), so the
-    # same build also runs as the CLI, which needs its console. Hiding deskconn-userd's
-    # console on Windows needs a runtime fix (e.g. detaching from the console only when
-    # invoked as deskconn-userd/-rootd), not a build-wide linker flag.
+    # No -H=windowsgui here: the same build also runs as the CLI, which needs its console.
+    # desk serve detaches from the console at runtime instead (see detachConsole).
 
 archives:
   - id: release-bundle

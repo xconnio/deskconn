@@ -30,8 +30,8 @@ const (
 	helperStopTimeout = 15 * time.Second
 )
 
-// LaunchVPNHelper starts deskconn-rootd (this same executable) as the transient
-// systemd unit named unit, via "sudo systemd-run" -- prompting for a
+// LaunchVPNHelper starts deskconn-rootd (this same executable, as "desk serve --mode
+// root") as the transient systemd unit named unit, via "sudo systemd-run" -- prompting for a
 // password on this process's terminal -- and waits for its socket to come
 // up. Connect to the returned path with DialVPNHelper, from this process or
 // (serve mode) handed to userd to dial instead; the helper serves
@@ -68,7 +68,7 @@ func LaunchVPNHelper(ctx context.Context, cfgDirectory, unit string) (socketPath
 		"--description=deskconn VPN helper",
 		"--collect", // discard the unit on exit even if it failed, so the name is free again
 		"--quiet",
-		"--", exe, RootdName, "--socket", socketPath)
+		"--", exe, "serve", "--mode", "root", "--socket", socketPath)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

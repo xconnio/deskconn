@@ -14,7 +14,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
 var version = "v0.1.0-alpha"
@@ -27,21 +26,9 @@ const (
 )
 
 func main() {
-	// One binary, several programs: desk (or deskconn) is the CLI, and the daemons run
-	// from symlinks named after them.
-	if args, ok := multicallArgs(os.Args, userdName); ok {
-		runUserd(args)
-		return
-	}
-	if args, ok := multicallArgs(os.Args, deskconn.RootdName); ok {
-		runRootd(args)
-		return
-	}
-
-	cfgDirectory, err := common.CfgDirectory()
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Checked once the command is known: the root helper (desk serve --mode root) doesn't
+	// need it, and runs under systemd-run, possibly without a HOME.
+	cfgDirectory, cfgErr := common.CfgDirectory()
 
 	app := kingpin.New("desk", "Control your machines remotely.")
 	configureHelp(app)
@@ -59,6 +46,7 @@ func main() {
 	machineCmds.registerLsShortcut(app)
 	selfCmds := registerSelfCommands(app)
 	agentCmds := registerAgentCommands(app, cfgDirectory)
+	serveCmds := registerServeCommands(app)
 
 	if len(os.Args) == 1 {
 		app.Usage(nil)
@@ -92,6 +80,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if cfgErr != nil && parsedCmd != serveCmds.serve.FullCommand() {
+		log.Fatal(cfgErr)
+	}
+
 	if *profileName != "" {
 		if err := useProfile(cfgDirectory, *profileName); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -112,7 +104,8 @@ func main() {
 		dispatchPortCommand(parsedCmd, portCmds, cfgDirectory) ||
 		dispatchVPNCommand(parsedCmd, vpnCmds, cfgDirectory) ||
 		dispatchSelfCommand(parsedCmd, selfCmds, cfgDirectory) ||
-		dispatchAgentCommand(parsedCmd, agentCmds, cfgDirectory)
+		dispatchAgentCommand(parsedCmd, agentCmds, cfgDirectory) ||
+		dispatchServeCommand(parsedCmd, serveCmds)
 }
 
 // daemonURI is the address of deskconn.sock, the local daemon's socket.
