@@ -261,3 +261,23 @@ func TestLoginMethods(t *testing.T) {
 	require.Equal(t, "a password and 2 keys",
 		loginMethods(serveConfigUser{Password: "x", AuthorizedKeys: []string{testKeyA, testKeyB}}))
 }
+
+func TestNoStandaloneUsersHelp(t *testing.T) {
+	require.Contains(t, noStandaloneUsersHelp(""), "--user alice:s3cret", "without a config: the flags")
+
+	help := noStandaloneUsersHelp("serve.yaml")
+	require.True(t, strings.HasPrefix(help, "serve.yaml has no users"), help)
+	require.NotContains(t, help, "--user", "with a config: the config")
+
+	// The users it shows are a valid config, once given a real key.
+	var snippet []string
+	for _, line := range strings.Split(help, "\n") {
+		if strings.HasPrefix(line, "  ") {
+			snippet = append(snippet, strings.TrimPrefix(line, "  "))
+		}
+	}
+	yaml := strings.ReplaceAll(strings.Join(snippet, "\n"), "<public-key>", testKeyA)
+	config, err := loadServeConfig(writeServeConfig(t, yaml))
+	require.NoError(t, err, yaml)
+	require.Len(t, config.Users, 2)
+}
