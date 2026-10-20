@@ -283,7 +283,7 @@ func noStandaloneUsersHelp(configPath string) string {
 	}
 	return "--mode standalone needs someone allowed to connect, for example:\n" +
 		"  desk serve --mode standalone --user alice:s3cret   alice logs in with a password\n" +
-		"  desk serve --config serve.yaml                     users from a config file, which can also log in\n" +
+		"  desk serve --config deskconn.yaml                  users from a config file, which can also log in\n" +
 		"                                                     with keys (see desk serve init)\n" +
 		"Repeat --user for more users."
 }

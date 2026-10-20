@@ -12,7 +12,7 @@ import (
 
 func writeServeConfig(t *testing.T, yaml string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "serve.yaml")
+	path := filepath.Join(t.TempDir(), "deskconn.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(yaml), 0o600))
 	return path
 }
@@ -156,13 +156,13 @@ func TestServeCommandParsing(t *testing.T) {
 		require.NoError(t, err, args)
 		require.Equal(t, want, parsed, args)
 		if args == initCmd {
-			require.Equal(t, "serve.yaml", *cmds.initPath, "the current directory by default")
+			require.Equal(t, "deskconn.yaml", *cmds.initPath, "the current directory by default")
 		}
 	}
 }
 
 func TestWriteSampleServeConfig(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "serve.yaml")
+	path := filepath.Join(t.TempDir(), "sub", "deskconn.yaml")
 	require.NoError(t, writeSampleServeConfig(path, false))
 
 	info, err := os.Stat(path)
@@ -248,8 +248,8 @@ func TestLoginMethods(t *testing.T) {
 func TestNoStandaloneUsersHelp(t *testing.T) {
 	require.Contains(t, noStandaloneUsersHelp(""), "--user alice:s3cret", "without a config: the flags")
 
-	help := noStandaloneUsersHelp("serve.yaml")
-	require.True(t, strings.HasPrefix(help, "serve.yaml has no users"), help)
+	help := noStandaloneUsersHelp("deskconn.yaml")
+	require.True(t, strings.HasPrefix(help, "deskconn.yaml has no users"), help)
 	require.NotContains(t, help, "--user", "with a config: the config")
 
 	// The users it shows are a valid config, once given a real key.
