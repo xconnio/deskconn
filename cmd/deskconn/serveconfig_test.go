@@ -17,51 +17,77 @@ func writeServeConfig(t *testing.T, yaml string) string {
 	return path
 }
 
+const (
+	testKeyA = "31f195e2b9f3b05d48fc4e4f7dde83bd97582f42d53e6174f66140a039594830"
+	testKeyB = "65160c38f1c3fa1d0e9cb1c0d8a7bc2f3b2a4fd4bd1bd2f6e2b9cfb1c3a4d5e6"
+)
+
 func TestLoadServeConfig(t *testing.T) {
 	path := writeServeConfig(t, `
 mode: standalone
-standalone:
-  transport: both
-  quic-address: 127.0.0.1:28080
+listen:
+  quic: 127.0.0.1:28080
+  webtransport: 127.0.0.1:28081
   tls-cert: cert.pem
   tls-key: /etc/deskconn/key.pem
-  public-keys:
-    - 31f195e2b9f3b05d48fc4e4f7dde83bd97582f42d53e6174f66140a039594830
-    - "1234"
-  users:
-    - username: alice
-      password: s3cret
-    - username: bob
-      password: "with:colon"
+users:
+  - username: alice
+    password: s3cret
+  - username: bob
+    keys:
+      - `+testKeyA+`
+      - `+testKeyB+`
+  - username: carol
+    password: "with:colon"
 `)
 	config, err := loadServeConfig(path)
 	require.NoError(t, err)
 	require.Equal(t, serveModeStandalone, config.Mode)
-	require.Equal(t, transportBoth, config.Standalone.Transport)
-	require.Equal(t, "127.0.0.1:28080", config.Standalone.QUICAddress)
-	require.Equal(t, filepath.Join(filepath.Dir(path), "cert.pem"), config.Standalone.TLSCert, "relative to the file")
-	require.Equal(t, "/etc/deskconn/key.pem", config.Standalone.TLSKey)
-	require.Len(t, config.Standalone.PublicKeys, 2)
-	require.Equal(t, []serveConfigUser{{"alice", "s3cret"}, {"bob", "with:colon"}}, config.Standalone.Users)
+	require.Equal(t, "127.0.0.1:28080", config.Listen.QUIC)
+	require.Equal(t, filepath.Join(filepath.Dir(path), "cert.pem"), config.Listen.TLSCert, "relative to the file")
+	require.Equal(t, "/etc/deskconn/key.pem", config.Listen.TLSKey)
+	require.Equal(t, []serveConfigUser{
+		{Username: "alice", Password: "s3cret"},
+		{Username: "bob", Keys: []string{testKeyA, testKeyB}},
+		{Username: "carol", Password: "with:colon"},
+	}, config.Users)
 
 	empty, err := loadServeConfig(writeServeConfig(t, ""))
 	require.NoError(t, err)
 	require.Equal(t, serveConfig{}, *empty)
 }
 
+func TestServeConfigListenTransport(t *testing.T) {
+	require.Equal(t, "", serveConfigListen{}.transport())
+	require.Equal(t, transportQUIC, serveConfigListen{QUIC: "a"}.transport())
+	require.Equal(t, transportWebTransport, serveConfigListen{WebTransport: "b"}.transport())
+	require.Equal(t, transportBoth, serveConfigListen{QUIC: "a", WebTransport: "b"}.transport())
+}
+
 func TestLoadServeConfigRejects(t *testing.T) {
-	for name, yaml := range map[string]string{
-		"unknown field":    "mode: user\nstandalon:\n  transport: quic\n",
-		"root mode":        "mode: root\n",
-		"bad mode":         "mode: cloud\n",
-		"bad transport":    "standalone:\n  transport: tcp\n",
-		"user, no pass":    "standalone:\n  users:\n    - username: alice\n",
-		"colon username":   "standalone:\n  users:\n    - username: a:b\n      password: x\n",
-		"not a mapping":    "- mode\n",
-		"wrong value type": "standalone:\n  users: alice\n",
+	for name, test := range map[string]struct{ yaml, want string }{
+		"unknown field":      {"mode: user\nlisten:\n  transport: quic\n", "field transport not found"},
+		"old layout":         {"standalone:\n  quic-address: 0.0.0.0:1\n", "field standalone not found"},
+		"root mode":          {"mode: root\n", "mode root is started by desk vpn"},
+		"bad mode":           {"mode: cloud\n", `invalid mode "cloud"`},
+		"cert without key":   {"listen:\n  tls-cert: c.pem\n", "tls-cert and tls-key go together"},
+		"no username":        {"users:\n  - password: x\n", "user 1: needs a username"},
+		"no password or key": {"users:\n  - username: alice\n", "needs a password or keys"},
+		"empty keys":         {"users:\n  - username: a\n    keys: []\n", "needs a password or keys"},
+		"colon username":     {"users:\n  - username: a:b\n    password: x\n", "can't contain ':'"},
+		"same user twice": {"users:\n  - {username: a, password: x}\n  - {username: a, keys: [" + testKeyA + "]}\n",
+			"listed twice"},
+		"key not hex":     {"users:\n  - username: a\n    keys: [zz]\n", "isn't a public key"},
+		"key too short":   {"users:\n  - username: a\n    keys: [31f1]\n", "isn't a public key"},
+		"keys not a list": {"users:\n  - username: a\n    keys: " + testKeyA + "\n", "into []string"},
+		"old single key":  {"users:\n  - username: a\n    key: " + testKeyA + "\n", "field key not found"},
+		"key for two users": {"users:\n  - {username: a, keys: [" + testKeyA + "]}\n" +
+			"  - {username: b, keys: [" + strings.ToUpper(testKeyA) + "]}\n", `is already "a"'s`},
+		"not a mapping":    {"- mode\n", "cannot unmarshal !!seq"},
+		"users not a list": {"users: alice\n", "cannot unmarshal !!str"},
 	} {
-		_, err := loadServeConfig(writeServeConfig(t, yaml))
-		require.Error(t, err, name)
+		_, err := loadServeConfig(writeServeConfig(t, test.yaml))
+		require.ErrorContains(t, err, test.want, name)
 	}
 
 	_, err := loadServeConfig(filepath.Join(t.TempDir(), "missing.yaml"))
@@ -71,14 +97,13 @@ func TestLoadServeConfigRejects(t *testing.T) {
 func TestServeConfigApply(t *testing.T) {
 	path := writeServeConfig(t, `
 mode: standalone
-standalone:
-  transport: webtransport
-  quic-address: 127.0.0.1:1
-  webtransport-address: 127.0.0.1:2
-  public-keys: [aa]
-  users:
-    - username: alice
-      password: s3cret
+listen:
+  webtransport: 127.0.0.1:2
+users:
+  - username: alice
+    password: s3cret
+  - username: bob
+    keys: [`+testKeyA+`, `+testKeyB+`]
 `)
 	parse := func(args ...string) *serveCommands {
 		app := kingpin.New("desk", "")
@@ -93,21 +118,20 @@ standalone:
 
 	cmds := parse()
 	require.Equal(t, serveModeStandalone, *cmds.mode)
-	require.Equal(t, transportWebTransport, *cmds.userd.standaloneTransport)
-	require.Equal(t, "127.0.0.1:1", *cmds.userd.standaloneQUICAddr)
+	require.Equal(t, transportWebTransport, *cmds.userd.standaloneTransport, "from the addresses set")
 	require.Equal(t, "127.0.0.1:2", *cmds.userd.standaloneWTAddr)
-	require.Equal(t, []string{"aa"}, *cmds.userd.standaloneKeys)
+	require.Equal(t, "0.0.0.0:18080", *cmds.userd.standaloneQUICAddr, "unset: the flag's default")
+	require.Equal(t, []string{testKeyA, testKeyB}, *cmds.userd.standaloneKeys)
 	require.Equal(t, []string{"alice:s3cret"}, *cmds.userd.standaloneUsers)
 
-	cmds = parse("--mode", "user", "--quic-address", "0.0.0.0:9", "--public-key", "bb", "--user", "bob:pw")
+	cmds = parse("--mode", "user", "--webtransport-address", "0.0.0.0:9", "--public-key", "bb", "--user", "eve:pw")
 	require.Equal(t, serveModeUser, *cmds.mode, "flags win")
-	require.Equal(t, "0.0.0.0:9", *cmds.userd.standaloneQUICAddr, "flags win")
-	require.Equal(t, transportWebTransport, *cmds.userd.standaloneTransport, "the rest still from the file")
-	require.Equal(t, []string{"aa", "bb"}, *cmds.userd.standaloneKeys, "keys add up")
-	require.Equal(t, []string{"alice:s3cret", "bob:pw"}, *cmds.userd.standaloneUsers, "users add up")
+	require.Equal(t, "0.0.0.0:9", *cmds.userd.standaloneWTAddr, "flags win")
+	require.Equal(t, []string{testKeyA, testKeyB, "bb"}, *cmds.userd.standaloneKeys, "keys add up")
+	require.Equal(t, []string{"alice:s3cret", "eve:pw"}, *cmds.userd.standaloneUsers, "users add up")
 
-	cmds = parse("--transport", "quic")
-	require.Equal(t, transportQUIC, *cmds.userd.standaloneTransport, "a flag set to its default still wins")
+	cmds = parse("--transport", "both")
+	require.Equal(t, transportBoth, *cmds.userd.standaloneTransport, "--transport wins over the addresses")
 }
 
 func TestServeCommandParsing(t *testing.T) {
@@ -141,7 +165,16 @@ func TestWriteSampleServeConfig(t *testing.T) {
 	config, err := loadServeConfig(path)
 	require.NoError(t, err, "the sample is a valid config")
 	require.Equal(t, serveModeStandalone, config.Mode)
-	require.Equal(t, transportQUIC, config.Standalone.Transport)
+	require.Equal(t, transportQUIC, config.Listen.transport())
+
+	// And so is everything it has commented out, once uncommented.
+	uncommented := strings.NewReplacer("# webtransport:", "webtransport:", "# tls-", "tls-",
+		"# - username:", "- username:", "#   password:", "  password:", "#   keys:", "  keys:", "#     - ", "    - ",
+		"65160c38...", testKeyA).Replace(sampleServeConfig)
+	config, err = loadServeConfig(writeServeConfig(t, uncommented))
+	require.NoError(t, err, uncommented)
+	require.Equal(t, transportBoth, config.Listen.transport())
+	require.Len(t, config.Users, 2)
 
 	require.NoError(t, os.WriteFile(path, []byte("mine"), 0o644))
 	require.Error(t, writeSampleServeConfig(path, false), "keeps an existing file")
