@@ -44,6 +44,7 @@ func main() {
 	portCmds := registerPortCommands(app, cfgDirectory)
 	vpnCmds := registerVPNCommands(app, cfgDirectory)
 	machineCmds.registerLsShortcut(app)
+	appCmds := registerAppCommands(app, cfgDirectory)
 	selfCmds := registerSelfCommands(app)
 	agentCmds := registerAgentCommands(app, cfgDirectory)
 	serveCmds := registerServeCommands(app)
@@ -103,6 +104,7 @@ func main() {
 		dispatchShellCommand(parsedCmd, shellCmds, cfgDirectory) ||
 		dispatchPortCommand(parsedCmd, portCmds, cfgDirectory) ||
 		dispatchVPNCommand(parsedCmd, vpnCmds, cfgDirectory) ||
+		dispatchAppCommand(parsedCmd, appCmds, cfgDirectory) ||
 		dispatchSelfCommand(parsedCmd, selfCmds, cfgDirectory) ||
 		dispatchAgentCommand(parsedCmd, agentCmds, cfgDirectory) ||
 		dispatchServeCommand(parsedCmd, serveCmds)

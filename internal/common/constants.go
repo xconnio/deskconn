@@ -133,9 +133,21 @@ const ProcedureFileCat = "io.xconn.deskconn.file.cat"
 const (
 	ProcedureCapabilitiesList = "io.xconn.deskconn.capabilities.list"
 	ProcedureCapabilitiesSet  = "io.xconn.deskconn.admin.capabilities.set"
+	// ProcedureCapabilitiesWatch sends the apps' list as a progressive result, again whenever
+	// it changes.
+	ProcedureCapabilitiesWatch = "io.xconn.deskconn.capabilities.watch"
 	// TopicCapabilitiesChanged is published on the local realm, with the apps' list, after
 	// an app is enabled or disabled.
 	TopicCapabilitiesChanged = "io.xconn.deskconn.capabilities.on_change"
+)
+
+// Manifest apps' UI is YAML that clients render, calling procedures other apps serve.
+// Owners and admins register them, with their files as JSON {"<path>": "<yaml>"}, and
+// clients get an enabled one's app.yaml with screens and includes resolved.
+const (
+	ProcedureManifestRegister   = "io.xconn.deskconn.admin.manifest.register"
+	ProcedureManifestUnregister = "io.xconn.deskconn.admin.manifest.unregister"
+	ProcedureManifestGet        = "io.xconn.deskconn.manifest.get"
 )
 
 // ProcedureAppsRegister is how a process on userd's local socket registers the apps it
