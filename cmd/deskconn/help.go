@@ -163,7 +163,12 @@ func groupHelpExamples(group string) []string {
 	case "self":
 		return []string{"desk self version", "desk self update"}
 	case "serve":
-		return []string{"desk serve", "desk serve --mode standalone --public-key <key>"}
+		return []string{
+			"desk serve",
+			"desk serve --mode standalone --public-key <key>",
+			"desk serve init",
+			"desk serve --config ~/.deskconn/serve.yaml",
+		}
 	default:
 		return nil
 	}
