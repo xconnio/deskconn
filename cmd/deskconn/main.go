@@ -46,7 +46,7 @@ func main() {
 	machineCmds.registerLsShortcut(app)
 	selfCmds := registerSelfCommands(app)
 	agentCmds := registerAgentCommands(app, cfgDirectory)
-	serveCmds := registerServeCommands(app, cfgDirectory)
+	serveCmds := registerServeCommands(app)
 
 	if len(os.Args) == 1 {
 		app.Usage(nil)

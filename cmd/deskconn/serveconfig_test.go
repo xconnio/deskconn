@@ -82,7 +82,7 @@ standalone:
 `)
 	parse := func(args ...string) *serveCommands {
 		app := kingpin.New("desk", "")
-		cmds := registerServeCommands(app, t.TempDir())
+		cmds := registerServeCommands(app)
 		_, err := app.Parse(append([]string{"serve", "--config", path}, args...))
 		require.NoError(t, err)
 		config, err := loadServeConfig(path)
@@ -112,7 +112,6 @@ standalone:
 
 func TestServeCommandParsing(t *testing.T) {
 	const runCmd, initCmd = "serve run", "serve init"
-	cfgDirectory := t.TempDir()
 	for args, want := range map[string]string{
 		"serve":                     runCmd,
 		"serve --mode user":         runCmd,
@@ -121,12 +120,12 @@ func TestServeCommandParsing(t *testing.T) {
 		"serve init --force x.yaml": initCmd,
 	} {
 		app := kingpin.New("desk", "")
-		cmds := registerServeCommands(app, cfgDirectory)
+		cmds := registerServeCommands(app)
 		parsed, err := app.Parse(strings.Fields(args))
 		require.NoError(t, err, args)
 		require.Equal(t, want, parsed, args)
 		if args == initCmd {
-			require.Equal(t, filepath.Join(cfgDirectory, "serve.yaml"), *cmds.initPath, "the default path")
+			require.Equal(t, "serve.yaml", *cmds.initPath, "the current directory by default")
 		}
 	}
 }

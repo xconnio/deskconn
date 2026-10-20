@@ -141,6 +141,10 @@ func writeSampleServeConfig(path string, force bool) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
+	// The full path, so the command works from anywhere (e.g. in the service's ExecStart).
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	fmt.Printf("Wrote a sample config to %s. Add your public keys or users to it, then run:\n"+
 		"  desk serve --config %s\n", path, path)
 	return nil

@@ -156,7 +156,7 @@ desk serve --mode standalone --user alice:s3cret [--user <username:password> ...
 
 `desk serve --config <file>` reads the mode and the standalone settings from a YAML file instead, which keeps keys and
 passwords off the command line and the service's `ExecStart`. `desk serve init [<path>]` writes a commented sample
-to start from (default `~/.deskconn/serve.yaml`, readable only by you; `--force` to overwrite). Every key is optional
+to start from (default `serve.yaml` in the current directory, readable only by you; `--force` to overwrite). Every key is optional
 and has the default of its flag:
 
 ```yaml
@@ -177,8 +177,8 @@ standalone:
 ```
 
 ```bash
-chmod 600 ~/.deskconn/serve.yaml   # it holds passwords; desk serve warns if others can read it
-desk serve --config ~/.deskconn/serve.yaml
+chmod 600 serve.yaml   # it holds passwords; desk serve warns if others can read it
+desk serve --config serve.yaml
 ```
 
 Flags given as well override the file, and `--public-key`/`--user` add to its keys and users. To run it as the
