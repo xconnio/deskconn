@@ -257,7 +257,7 @@ func (c *capabilities) handleList(_ context.Context, _ *xconn.Invocation) *xconn
 // handleSet enables or disables one app: args are the app id and the new enabled state.
 // It returns the apps' list and whether anything changed (false if the app already was).
 // Only the machine's owner and admins may call it (see ProcedureCapabilitiesSet):
-// deskconn-router checks cloud calls. Direct P2P connections, served by xconn-go's
+// deskconn-router checks cloud calls. Direct P2P connections, served by xconn's
 // machine router, aren't checked yet.
 func (c *capabilities) handleSet(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 	id, err := inv.ArgString(0)

@@ -24,7 +24,7 @@ import (
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
-// streamCloseGrace is how long shutdown gives xlink to pass the closes of the streams
+// streamCloseGrace is how long shutdown gives xconn to pass the closes of the streams
 // still open on to their clients before its connections go down.
 const streamCloseGrace = 500 * time.Millisecond
 
@@ -32,7 +32,7 @@ const streamCloseGrace = 500 * time.Millisecond
 // a scheduled task on Windows.
 const userdService = "deskconn-userd"
 
-// runUserd is the user daemon: the machine's APIs and its connectivity (xlink).
+// runUserd is the user daemon: the machine's APIs and its connectivity (xconn).
 func runUserd(flags userdFlags, standalone bool) {
 	detachConsole()
 
@@ -67,7 +67,7 @@ func runUserd(flags userdFlags, standalone bool) {
 		standaloneConfig.Passwords = standalonePasswords
 	}
 
-	// xlink runs in this process: its app layer serves deskconn.sock (the CLI's local
+	// xconn runs in this process: its app layer serves deskconn.sock (the CLI's local
 	// realm), and userd registers every app-layer and CLI-facing procedure on it
 	// through an in-memory session.
 	appRouter, appListener, appSession, err := xconnd.StartAppLayer(common.LocalRealm,
@@ -105,9 +105,9 @@ func runUserd(flags userdFlags, standalone bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Raw stream relay listener: xlink dials in once per classified
+	// Raw stream relay listener: xconn dials in once per classified
 	// remote stream/channel (see xconnd.RelayHeader).
-	streamSockPath := filepath.Join(cfgDirectory, "xlink-streams.sock")
+	streamSockPath := filepath.Join(cfgDirectory, "xconn-streams.sock")
 	_ = os.Remove(streamSockPath)
 	streamListener, err := net.Listen("unix", streamSockPath)
 	if err != nil {
@@ -141,10 +141,10 @@ func runUserd(flags userdFlags, standalone bool) {
 		log.Fatalf("failed to register CLI-facing procedures: %v", err)
 	}
 
-	// xlink exposes the app layer's machine procedures to remote clients, whichever process
+	// xconn exposes the app layer's machine procedures to remote clients, whichever process
 	// registered them, and relays their raw streams and WebRTC data channels to
 	// streamSockPath.
-	xlinkApp := &xconnd.App{
+	xconnApp := &xconnd.App{
 		Session: appSession,
 		// A session per remote caller, so userd and apps keep each caller's keys.
 		NewSession: func() (*xconn.Session, error) {
@@ -153,15 +153,15 @@ func runUserd(flags userdFlags, standalone bool) {
 		Prefixes:     []string{common.ProcedurePrefix, common.ProcedureAdminPrefix},
 		StreamSocket: streamSockPath,
 	}
-	xlinkDone := make(chan struct{})
+	xconnDone := make(chan struct{})
 	common.SafeGo(func() {
-		defer close(xlinkDone)
+		defer close(xconnDone)
 		if !standalone {
 			cloudConfig, err := newCloudConfig(cfgDirectory)
 			if err != nil {
 				log.Fatal(err)
 			}
-			if err := xconnd.Run(ctx, xlinkApp, cloudConfig); err != nil {
+			if err := xconnd.Run(ctx, xconnApp, cloudConfig); err != nil {
 				log.Fatal(err)
 			}
 			return
@@ -169,7 +169,7 @@ func runUserd(flags userdFlags, standalone bool) {
 
 		// Standalone: serve the machine realm over QUIC and/or WebTransport to --public-key
 		// holders and --user accounts, with no cloud account.
-		if err := xconnd.RunStandalone(ctx, xlinkApp, standaloneConfig); err != nil {
+		if err := xconnd.RunStandalone(ctx, xconnApp, standaloneConfig); err != nil {
 			log.Fatalf("standalone: %v", err)
 		}
 	})
@@ -179,14 +179,14 @@ func runUserd(flags userdFlags, standalone bool) {
 	defer signal.Stop(sigChan)
 	<-sigChan
 
-	// Close every open stream first, while xlink is still up to pass the closes on to
+	// Close every open stream first, while xconn is still up to pass the closes on to
 	// clients, then give it a moment to: a client never learns of a stream that just
 	// vanishes with the process (on P2P, it waits forever).
 	if deskconnApis.CloseStreams() > 0 {
 		time.Sleep(streamCloseGrace)
 	}
 	cancel()
-	<-xlinkDone
+	<-xconnDone
 }
 
 // newStandaloneConfig serves the standalone machine realm over transport (see the transport*
@@ -205,7 +205,7 @@ func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("standalone: certificate SHA-256 fingerprint %s (clients that don't trust its issuer "+
+	fmt.Printf("standalone: certificate SHA-256 fingerprint %s (clients that don't trust its issuer "+
 		"pin it with desk profile add --cert-hash %s)", common.CertificateFingerprint(cert),
 		common.CertificateFingerprint(cert))
 
@@ -223,7 +223,7 @@ func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
 	return config, nil
 }
 
-// newCloudConfig is how xlink attaches this machine to the deskconn cloud.
+// newCloudConfig is how xconn attaches this machine to the deskconn cloud.
 func newCloudConfig(cfgDirectory string) (*xconnd.CloudConfig, error) {
 	credentialsFile, err := common.CredentialsFilePath()
 	if err != nil {
