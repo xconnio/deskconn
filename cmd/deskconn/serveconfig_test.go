@@ -18,6 +18,9 @@ func writeServeConfig(t *testing.T, yaml string) string {
 }
 
 const (
+	alice, bob, carol = "alice", "bob", "carol"
+	testPassword      = "s3cret"
+
 	testKeyA = "31f195e2b9f3b05d48fc4e4f7dde83bd97582f42d53e6174f66140a039594830"
 	testKeyB = "65160c38f1c3fa1d0e9cb1c0d8a7bc2f3b2a4fd4bd1bd2f6e2b9cfb1c3a4d5e6"
 )
@@ -47,9 +50,9 @@ users:
 	require.Equal(t, filepath.Join(filepath.Dir(path), "cert.pem"), config.Listen.TLSCert, "relative to the file")
 	require.Equal(t, "/etc/deskconn/key.pem", config.Listen.TLSKey)
 	require.Equal(t, []serveConfigUser{
-		{Username: "alice", Password: "s3cret"},
-		{Username: "bob", AuthorizedKeys: []string{testKeyA, testKeyB}},
-		{Username: "carol", Password: "with:colon"},
+		{Username: alice, Password: testPassword},
+		{Username: bob, AuthorizedKeys: []string{testKeyA, testKeyB}},
+		{Username: carol, Password: "with:colon"},
 	}, config.Users)
 
 	empty, err := loadServeConfig(writeServeConfig(t, ""))
@@ -122,14 +125,18 @@ users:
 	require.Equal(t, transportWebTransport, *cmds.userd.standaloneTransport, "from the addresses set")
 	require.Equal(t, "127.0.0.1:2", *cmds.userd.standaloneWTAddr)
 	require.Equal(t, "0.0.0.0:18080", *cmds.userd.standaloneQUICAddr, "unset: the flag's default")
-	require.Equal(t, []string{testKeyA, testKeyB}, *cmds.userd.standaloneKeys)
-	require.Equal(t, []string{"alice:s3cret"}, *cmds.userd.standaloneUsers)
+	require.Equal(t, []serveConfigUser{
+		{Username: alice, Password: testPassword},
+		{Username: bob, AuthorizedKeys: []string{testKeyA, testKeyB}},
+	}, cmds.userd.configUsers)
+	require.Empty(t, *cmds.userd.standaloneUsers)
 
 	cmds = parse("--mode", "user", "--webtransport-address", "0.0.0.0:9", "--public-key", "bb", "--user", "eve:pw")
 	require.Equal(t, serveModeUser, *cmds.mode, "flags win")
 	require.Equal(t, "0.0.0.0:9", *cmds.userd.standaloneWTAddr, "flags win")
-	require.Equal(t, []string{testKeyA, testKeyB, "bb"}, *cmds.userd.standaloneKeys, "keys add up")
-	require.Equal(t, []string{"alice:s3cret", "eve:pw"}, *cmds.userd.standaloneUsers, "users add up")
+	require.Len(t, cmds.userd.configUsers, 2, "the file's users stay")
+	require.Equal(t, []string{"bb"}, *cmds.userd.standaloneKeys, "next to the flags'")
+	require.Equal(t, []string{"eve:pw"}, *cmds.userd.standaloneUsers, "next to the flags'")
 
 	cmds = parse("--transport", "both")
 	require.Equal(t, transportBoth, *cmds.userd.standaloneTransport, "--transport wins over the addresses")
@@ -188,4 +195,69 @@ func TestWriteSampleServeConfig(t *testing.T) {
 	info, err = os.Stat(path)
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "and --force tightens its mode")
+}
+
+func TestParseUserFlag(t *testing.T) {
+	user, err := parseUserFlag("alice:s3cret")
+	require.NoError(t, err)
+	require.Equal(t, serveConfigUser{Username: alice, Password: testPassword}, user)
+
+	user, err = parseUserFlag("bob:" + testKeyA)
+	require.NoError(t, err)
+	require.Equal(t, serveConfigUser{Username: bob, AuthorizedKeys: []string{testKeyA}}, user, "a key")
+
+	user, err = parseUserFlag("carol:pa:ss")
+	require.NoError(t, err)
+	require.Equal(t, "pa:ss", user.Password, "the password is everything after the first ':'")
+
+	user, err = parseUserFlag("dave:" + testKeyA[:62])
+	require.NoError(t, err)
+	require.Equal(t, testKeyA[:62], user.Password, "too short for a key: a password")
+
+	for _, value := range []string{alice, "alice:", ":s3cret", ""} {
+		_, err := parseUserFlag(value)
+		require.Error(t, err, value)
+	}
+	_, err = parseUserFlag(alice)
+	require.NotContains(t, err.Error(), alice, "doesn't echo the value, which may be a password")
+}
+
+func TestStandaloneAuth(t *testing.T) {
+	flags := func(users, keys []string, configUsers ...serveConfigUser) userdFlags {
+		return userdFlags{standaloneUsers: &users, standaloneKeys: &keys, configUsers: configUsers}
+	}
+
+	keys, passwords, err := standaloneAuth(flags(
+		[]string{"alice:s3cret", "bob:" + testKeyA},
+		[]string{testKeyB},
+		serveConfigUser{Username: carol, Password: strings.Repeat("a", 64)},
+	), false)
+	require.NoError(t, err)
+	require.Equal(t, []string{testKeyA, testKeyB}, keys)
+	require.Equal(t, map[string]string{alice: testPassword, carol: strings.Repeat("a", 64)}, passwords,
+		"a config password stays a password, even if it looks like a key")
+
+	_, _, err = standaloneAuth(flags([]string{"alice:x"}, nil, serveConfigUser{Username: alice, Password: "y"}), false)
+	require.ErrorContains(t, err, "listed twice", "a user in the config and --user")
+
+	keys, passwords, err = standaloneAuth(flags([]string{"bob:" + testKeyA, "bob:pw", "bob:" + testKeyB}, nil), false)
+	require.NoError(t, err, "--user values of one username add up")
+	require.Equal(t, []string{testKeyA, testKeyB}, keys)
+	require.Equal(t, map[string]string{bob: "pw"}, passwords)
+
+	_, _, err = standaloneAuth(flags([]string{"bob:pw", "bob:pw2"}, nil), false)
+	require.ErrorContains(t, err, "two passwords")
+
+	_, _, err = standaloneAuth(flags([]string{"a:" + testKeyA, "b:" + testKeyA}, nil), false)
+	require.ErrorContains(t, err, "already", "one key for two users")
+
+	_, _, err = standaloneAuth(flags(nil, []string{"zz"}), false)
+	require.ErrorContains(t, err, "--public-key")
+}
+
+func TestLoginMethods(t *testing.T) {
+	require.Equal(t, "a password", loginMethods(serveConfigUser{Password: "x"}))
+	require.Equal(t, "a key", loginMethods(serveConfigUser{AuthorizedKeys: []string{testKeyA}}))
+	require.Equal(t, "a password and 2 keys",
+		loginMethods(serveConfigUser{Password: "x", AuthorizedKeys: []string{testKeyA, testKeyB}}))
 }

@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -34,12 +36,16 @@ const userdService = "deskconn-userd"
 func runUserd(flags userdFlags, standalone bool) {
 	detachConsole()
 
-	standalonePasswords, err := parseUsers(*flags.standaloneUsers)
+	standaloneKeys, standalonePasswords, err := standaloneAuth(flags, standalone)
 	if err != nil {
 		serveFatalf("%v", err)
 	}
-	if standalone && len(*flags.standaloneKeys) == 0 && len(standalonePasswords) == 0 {
-		serveFatalf("--mode standalone needs at least one --public-key or --user")
+	if standalone && len(standaloneKeys) == 0 && len(standalonePasswords) == 0 {
+		serveFatalf("--mode standalone needs someone allowed to connect, for example:\n" +
+			"  desk serve --mode standalone --user alice:s3cret       alice logs in with a password\n" +
+			"  desk serve --mode standalone --user bob:<public-key>   bob logs in with a key (make one with desk keygen)\n" +
+			"  desk serve --config serve.yaml                         users from a config file (see desk serve init)\n" +
+			"Repeat --user for more users.")
 	}
 	if (*flags.standaloneCert == "") != (*flags.standaloneKey == "") {
 		serveFatalf("--tls-cert and --tls-key go together")
@@ -57,7 +63,7 @@ func runUserd(flags userdFlags, standalone bool) {
 		if err != nil {
 			log.Fatalf("standalone: %v", err)
 		}
-		standaloneConfig.Keys = *flags.standaloneKeys
+		standaloneConfig.Keys = standaloneKeys
 		standaloneConfig.Passwords = standalonePasswords
 	}
 
@@ -134,7 +140,6 @@ func runUserd(flags userdFlags, standalone bool) {
 	if err := registerLocalProcedures(session, deskconnApis, clientSessions, cfgDirectory); err != nil {
 		log.Fatalf("failed to register CLI-facing procedures: %v", err)
 	}
-	log.Println("registered procedures with xlink")
 
 	// xlink exposes the app layer's machine procedures to remote clients, whichever process
 	// registered them, and relays their raw streams and WebRTC data channels to
@@ -238,20 +243,85 @@ func newCloudConfig(cfgDirectory string) (*xconnd.CloudConfig, error) {
 	}, nil
 }
 
-// parseUsers parses --user values (username:password) into a username -> password map.
-func parseUsers(users []string) (map[string]string, error) {
-	passwords := make(map[string]string, len(users))
-	for _, u := range users {
-		username, password, ok := strings.Cut(u, ":")
-		if !ok || username == "" || password == "" {
-			return nil, fmt.Errorf("invalid --user: want username:password")
+// standaloneAuth gathers who may connect in standalone mode: the --config users and the --user
+// ones, whose keys and passwords it returns, plus the --public-key keys. With logLogins set,
+// it logs how each can log in.
+func standaloneAuth(flags userdFlags, logLogins bool) (keys []string, passwords map[string]string,
+	err error) {
+	users := slices.Clone(flags.configUsers)
+	// --user values of one username add up, e.g. a key per device.
+	flagUsers := map[string]int{}
+	for _, value := range *flags.standaloneUsers {
+		user, err := parseUserFlag(value)
+		if err != nil {
+			return nil, nil, err
 		}
-		if _, dup := passwords[username]; dup {
-			return nil, fmt.Errorf("duplicate --user %q", username)
+		i, seen := flagUsers[user.Username]
+		if !seen {
+			flagUsers[user.Username] = len(users)
+			users = append(users, user)
+			continue
 		}
-		passwords[username] = password
+		if user.Password != "" && users[i].Password != "" {
+			return nil, nil, fmt.Errorf("--user %q: given two passwords", user.Username)
+		}
+		users[i].Password += user.Password
+		users[i].AuthorizedKeys = append(users[i].AuthorizedKeys, user.AuthorizedKeys...)
 	}
-	return passwords, nil
+	if err := checkUsers(users); err != nil {
+		return nil, nil, err
+	}
+	for _, key := range *flags.standaloneKeys {
+		if !isPublicKey(key) {
+			return nil, nil, fmt.Errorf("--public-key %q isn't a public key (64 hex digits, see desk keygen)", key)
+		}
+	}
+
+	passwords = make(map[string]string, len(users))
+	for _, user := range users {
+		keys = append(keys, user.AuthorizedKeys...)
+		if user.Password != "" {
+			passwords[user.Username] = user.Password
+		}
+		if logLogins {
+			log.Printf("standalone: %s logs in with %s", user.Username, loginMethods(user))
+		}
+	}
+	keys = append(keys, *flags.standaloneKeys...)
+	if logLogins && len(*flags.standaloneKeys) > 0 {
+		log.Printf("standalone: %d --public-key key(s) log in as any username", len(*flags.standaloneKeys))
+	}
+	return keys, passwords, nil
+}
+
+// parseUserFlag parses a --user value, username:secret. The secret is a public key if it is
+// one (64 hex digits, as desk keygen prints it), and a password otherwise.
+func parseUserFlag(value string) (serveConfigUser, error) {
+	username, secret, ok := strings.Cut(value, ":")
+	if !ok || username == "" || secret == "" {
+		// Not the value itself: it may hold a password.
+		return serveConfigUser{}, errors.New("invalid --user: want username:password or username:public-key")
+	}
+	if isPublicKey(secret) {
+		return serveConfigUser{Username: username, AuthorizedKeys: []string{secret}}, nil
+	}
+	return serveConfigUser{Username: username, Password: secret}, nil
+}
+
+// loginMethods describes how user can log in, e.g. "a password and 2 keys".
+func loginMethods(user serveConfigUser) string {
+	var methods []string
+	if user.Password != "" {
+		methods = append(methods, "a password")
+	}
+	switch n := len(user.AuthorizedKeys); n {
+	case 0:
+	case 1:
+		methods = append(methods, "a key")
+	default:
+		methods = append(methods, fmt.Sprintf("%d keys", n))
+	}
+	return strings.Join(methods, " and ")
 }
 
 // registerLocalProcedures registers the CLI-facing procedures on session.

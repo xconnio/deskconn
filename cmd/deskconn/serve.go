@@ -32,6 +32,9 @@ type userdFlags struct {
 	standaloneKey       *string
 	standaloneKeys      *[]string
 	standaloneUsers     *[]string
+
+	// configUsers are the users of a --config file (see serveCommands.apply).
+	configUsers []serveConfigUser
 }
 
 // rootdFlags configure the root helper (desk serve --mode root).
@@ -88,10 +91,11 @@ func registerServeCommands(app *kingpin.Application) *serveCommands {
 		standaloneCert: flag("tls-cert", "TLS certificate (PEM) for standalone mode; without it, a "+
 			"self-signed one is generated and kept in the config directory").String(),
 		standaloneKey: flag("tls-key", "Private key (PEM) of --tls-cert").String(),
-		standaloneKeys: runCmd.Flag("public-key", "Public key (hex) allowed to connect in standalone mode; "+
-			"repeat for more (see `desk keygen`)").Strings(),
-		standaloneUsers: runCmd.Flag("user", "username:password allowed to connect in standalone mode; repeat "+
-			"for more").Envar("DESKCONND_USERS").Strings(),
+		standaloneKeys: runCmd.Flag("public-key", "Public key (hex) allowed to connect in standalone mode, as "+
+			"any username; repeat for more. --user username:public-key names who it is").Strings(),
+		standaloneUsers: runCmd.Flag("user", "Who may connect in standalone mode: username:password, or "+
+			"username:public-key to log in with a key (64 hex digits, see `desk keygen`); repeat for more").
+			Envar("DESKCONND_USERS").Strings(),
 	}
 	configPath := runCmd.Flag("config", "YAML file to read the mode and the standalone settings from (see "+
 		"the README); flags given as well override it, and --public-key/--user add to its keys and users").
@@ -171,15 +175,8 @@ func (cmds *serveCommands) apply(config *serveConfig) {
 	set("tls-cert", cmds.userd.standaloneCert, config.Listen.TLSCert)
 	set("tls-key", cmds.userd.standaloneKey, config.Listen.TLSKey)
 
-	var keys, users []string
-	for _, user := range config.Users {
-		keys = append(keys, user.AuthorizedKeys...)
-		if user.Password != "" {
-			users = append(users, user.Username+":"+user.Password)
-		}
-	}
-	*cmds.userd.standaloneKeys = append(keys, *cmds.userd.standaloneKeys...)
-	*cmds.userd.standaloneUsers = append(users, *cmds.userd.standaloneUsers...)
+	// Kept apart from --user's: a config says which is a password and which a key.
+	cmds.userd.configUsers = config.Users
 
 	if *cmds.mode != serveModeStandalone && (config.Listen != serveConfigListen{} || len(config.Users) > 0) {
 		log.Warnf("config: listen and users are only used in standalone mode, not in %s mode", *cmds.mode)

@@ -129,13 +129,19 @@ desk keygen
 ### 2. Start deskconn-userd in standalone mode on the machine
 
 ```bash
-desk serve --mode standalone --public-key 65160c38… [--public-key <another public key> ...]
+desk serve --mode standalone --user alice:s3cret --user bob:65160c38… [--user <username:secret> ...]
 ```
 
+`--user username:secret` lets a user in with a password, or with a key when the secret is a public key (64 hex digits,
+as `desk keygen` prints it). Repeat it for more users, or for more keys of one user. It logs how each user logs in at
+startup. A key is let in whatever username its holder presents, so the username only labels it; `--public-key <key>`
+adds one without a name. To keep passwords off the command line, set `DESKCONND_USERS` (one `username:secret` per
+line) or use a [config file](#or-from-a-config-file).
+
 deskconn-userd serves QUIC on UDP `0.0.0.0:18080` by default. Pick the transport with `--transport quic|webtransport|both`
-and the addresses with `--quic-address` and `--webtransport-address` (default `0.0.0.0:18081`, path `/wamp`). Clients
-holding one of the `--public-key`s can connect, whatever authid they present. To run it as the service, put the flags
-on `ExecStart` (as `desk serve --mode standalone ...`) with `systemctl --user edit deskconn-userd`.
+and the addresses with `--quic-address` and `--webtransport-address` (default `0.0.0.0:18081`, path `/wamp`). To run it
+as the service, put the flags on `ExecStart` (as `desk serve --mode standalone ...`) with
+`systemctl --user edit deskconn-userd`.
 
 Both transports use TLS. Pass your certificate with `--tls-cert cert.pem --tls-key key.pem` (e.g. one issued by a public
 CA); without them deskconn-userd generates a self-signed certificate once and keeps it in `~/.deskconn`. Either way it logs
@@ -143,13 +149,6 @@ the certificate's SHA-256 fingerprint at startup:
 
 ```
 standalone: certificate SHA-256 fingerprint 3f9a1c… (clients that don't trust its issuer pin it with desk profile add --cert-hash 3f9a1c…)
-```
-
-To allow username/password logins instead of (or as well as) keys, add `--user username:password`, repeated for more
-accounts (or set `DESKCONND_USERS`, one `username:password` per line, to keep passwords off the command line):
-
-```bash
-desk serve --mode standalone --user alice:s3cret [--user <username:password> ...]
 ```
 
 #### Or from a config file
@@ -323,7 +322,7 @@ desk machine disconnect [<machine>] [--all]
 Standalone machines (see [Standalone mode](#standalone-mode-no-cloud)):
 
 ```
-desk keygen                # key pair: public for desk serve --public-key, private for profile add --private-key
+desk keygen                # key pair: public for desk serve --user name:<key>, private for profile add --private-key
 desk profile add    <name> --url <quic://host:port|https://host:port> [--cert-hash <sha256>] [--private-key <hex>] [--authid <user>]
 desk profile remove <name>
 desk profile ls
