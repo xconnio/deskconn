@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -87,12 +88,18 @@ type capabilities struct {
 	own []*app
 	// external are the apps other processes registered, by their session.
 	external map[uint64][]*app
+	// manifests are the manifest apps owners and admins registered, by id, stored in
+	// manifestsPath.
+	manifests     map[string]*manifestApp
+	manifestsPath string
 	// states are the apps' enabled states that were set, by id. Apps without one are
 	// enabled unless DefaultOff.
 	states  map[string]bool
 	path    string
 	session *xconn.Session
 	regs    map[string]xconn.RegisterResponse
+	// changed is closed, and replaced, whenever the apps' list changes, waking watchers.
+	changed chan struct{}
 }
 
 func newCapabilities(own []*app, cfgDirectory string) *capabilities {
@@ -102,7 +109,11 @@ func newCapabilities(own []*app, cfgDirectory string) *capabilities {
 		states:   map[string]bool{},
 		path:     filepath.Join(cfgDirectory, "capabilities.json"),
 		regs:     map[string]xconn.RegisterResponse{},
+		changed:  make(chan struct{}),
+
+		manifestsPath: filepath.Join(cfgDirectory, manifestDirectory),
 	}
+	c.manifests = loadManifests(c.manifestsPath)
 
 	data, err := os.ReadFile(c.path)
 	if err != nil {
@@ -117,11 +128,15 @@ func newCapabilities(own []*app, cfgDirectory string) *capabilities {
 	return c
 }
 
-// apps returns every app: userd's own, then the external ones. c must be locked.
+// apps returns every app: userd's own, the external ones, then the manifest ones. c must be
+// locked.
 func (c *capabilities) apps() []*app {
 	apps := slices.Clone(c.own)
 	for _, sessionID := range slices.Sorted(maps.Keys(c.external)) {
 		apps = append(apps, c.external[sessionID]...)
+	}
+	for _, id := range slices.Sorted(maps.Keys(c.manifests)) {
+		apps = append(apps, c.manifests[id].app)
 	}
 	return apps
 }
@@ -152,7 +167,11 @@ func (c *capabilities) check(id string) error {
 	if c.enabled(id) {
 		return nil
 	}
-	return fmt.Errorf("%s is disabled on this machine, an owner or admin can enable it in the web app's settings", id)
+	return errors.New(disabledMessage(id))
+}
+
+func disabledMessage(id string) string {
+	return fmt.Sprintf("%s is disabled on this machine, an owner or admin can enable it in the web app's settings", id)
 }
 
 // register starts registering the enabled own apps' procedures on session.
@@ -219,6 +238,7 @@ func (c *capabilities) addExternal(sessionID uint64, apps []*app) error {
 		}
 	}
 	c.external[sessionID] = apps
+	c.notify()
 	return nil
 }
 
@@ -230,6 +250,7 @@ func (c *capabilities) removeExternal(sessionID uint64) bool {
 		return false
 	}
 	delete(c.external, sessionID)
+	c.notify()
 	return true
 }
 
@@ -242,10 +263,14 @@ func (c *capabilities) list() []any {
 		if keyExchange == "" {
 			keyExchange = common.ProcedureKeyExchange
 		}
-		result = append(result, map[string]any{
+		entry := map[string]any{
 			"id": a.ID, "name": a.Name, "enabled": c.isEnabled(a.ID), "key_exchange": keyExchange,
 			"requires": append([]string{}, a.Requires...),
-		})
+		}
+		if _, ok := c.manifests[a.ID]; ok {
+			entry["manifest"] = true
+		}
+		result = append(result, entry)
 	}
 	return result
 }
@@ -265,6 +290,42 @@ func isManager(inv *xconn.Invocation) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// watchDuration is how long a watch lasts before the client has to call again, so a
+// watch whose caller vanished without its call being cancelled still ends.
+const watchDuration = 10 * time.Minute
+
+// notify wakes the watchers. c must be locked.
+func (c *capabilities) notify() {
+	close(c.changed)
+	c.changed = make(chan struct{})
+}
+
+// handleWatch sends the apps' list as a progressive result right away and again whenever it
+// changes, so remote clients follow it live: TopicCapabilitiesChanged only reaches the local
+// realm. The caller must ask for progressive results. The call ends after watchDuration.
+func (c *capabilities) handleWatch(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	if inv.SendProgress == nil {
+		return xconn.NewInvocationError(common.ErrInvalidArgument, "call with receive_progress")
+	}
+	timeout := time.NewTimer(watchDuration)
+	defer timeout.Stop()
+	for {
+		c.Lock()
+		apps, changed := c.list(), c.changed
+		c.Unlock()
+		if err := inv.SendProgress([]any{apps}, nil); err != nil {
+			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return xconn.NewInvocationResult()
+		case <-timeout.C:
+			return xconn.NewInvocationResult()
+		}
 	}
 }
 
@@ -315,18 +376,27 @@ func (c *capabilities) handleSet(_ context.Context, inv *xconn.Invocation) *xcon
 	if err := c.sync(); err != nil {
 		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 	}
+	if err := c.save(); err != nil {
+		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+	}
+	c.publish()
+	return xconn.NewInvocationResult(c.list(), true)
+}
 
+// save writes the apps' enabled states to capabilities.json. c must be locked.
+func (c *capabilities) save() error {
 	data, err := json.MarshalIndent(c.states, "", "  ")
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return err
 	}
-	if err := os.WriteFile(c.path, append(data, '\n'), 0600); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-	}
+	return os.WriteFile(c.path, append(data, '\n'), 0600)
+}
 
-	// External apps follow along to stop or resume serving.
+// publish announces the apps' list, for external apps to follow along to stop or resume
+// serving. c must be locked.
+func (c *capabilities) publish() {
+	c.notify()
 	if resp := c.session.Publish(common.TopicCapabilitiesChanged).Args(c.list()).Do(); resp.Err != nil {
 		log.Printf("capabilities: failed to publish change: %v", resp.Err)
 	}
-	return xconn.NewInvocationResult(c.list(), true)
 }

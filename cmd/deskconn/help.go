@@ -63,7 +63,7 @@ Usage: {{.App.Name}} [flags] <command>
 Commands:
 {{CommandRows .App.Commands "top" "ls" "shell" "file" "port" "vpn" "agent" | FormatTwoColumns}}
 Management:
-{{CommandRows .App.Commands "machine" "account" "self" "serve" | FormatTwoColumns}}
+{{CommandRows .App.Commands "machine" "app" "account" "self" "serve" | FormatTwoColumns}}
 Standalone:
 {{CommandRows .App.Commands "profile" "keygen" | FormatTwoColumns}}
 Flags:
@@ -139,6 +139,12 @@ func groupHelpExamples(group string) []string {
 		return []string{"desk machine ls", "desk machine info office", "desk machine alias office work"}
 	case "account":
 		return []string{"desk account login", "desk account whoami", "desk account logout"}
+	case "app":
+		if standaloneRequested() {
+			return []string{"desk app ls", "desk app register ./remote-control", "desk app disable remote-control"}
+		}
+		return []string{"desk app ls office", "desk app register office ./remote-control",
+			"desk app disable office remote-control"}
 	case "port":
 		if standaloneRequested() {
 			return []string{"desk port forward 8080:80", "desk port reverse 9000:3000"}
