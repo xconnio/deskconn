@@ -30,7 +30,6 @@ type userdFlags struct {
 	standaloneWTAddr    *string
 	standaloneCert      *string
 	standaloneKey       *string
-	standaloneKeys      *[]string
 	standaloneUsers     *[]string
 
 	// configPath and configUsers are the --config file and its users (see serveCommands.apply).
@@ -77,8 +76,8 @@ func registerServeCommands(app *kingpin.Application) *serveCommands {
 	}
 
 	mode := flag("mode", "What to run: user (the machine's APIs and its connectivity, through the "+
-		"cloud), standalone (the same, served directly over --transport to --public-key holders and --user "+
-		"accounts instead of through the cloud) or root (the privileged backend for desk vpn, started on "+
+		"cloud), standalone (the same, served directly over --transport to the --user and --config users "+
+		"instead of through the cloud) or root (the privileged backend for desk vpn, started on "+
 		"demand via sudo)").
 		Default(serveModeUser).Enum(serveModeUser, serveModeStandalone, serveModeRoot)
 
@@ -92,14 +91,12 @@ func registerServeCommands(app *kingpin.Application) *serveCommands {
 		standaloneCert: flag("tls-cert", "TLS certificate (PEM) for standalone mode; without it, a "+
 			"self-signed one is generated and kept in the config directory").String(),
 		standaloneKey: flag("tls-key", "Private key (PEM) of --tls-cert").String(),
-		standaloneKeys: runCmd.Flag("public-key", "Public key (hex) allowed to connect in standalone mode, as "+
-			"any username; repeat for more. --user username:public-key names who it is").Strings(),
-		standaloneUsers: runCmd.Flag("user", "Who may connect in standalone mode: username:password, or "+
-			"username:public-key to log in with a key (64 hex digits, see `desk keygen`); repeat for more").
+		standaloneUsers: runCmd.Flag("user", "username:password allowed to connect in standalone mode; repeat for "+
+			"more. Users who log in with keys go in a --config file (see desk serve init)").
 			Envar("DESKCONND_USERS").Strings(),
 	}
 	configPath := runCmd.Flag("config", "YAML file to read the mode and the standalone settings from (see "+
-		"the README); flags given as well override it, and --public-key/--user add to its keys and users").
+		"the README); flags given as well override it, and --user adds to its users").
 		String()
 
 	rootd := rootdFlags{

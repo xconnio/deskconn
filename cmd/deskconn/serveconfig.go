@@ -144,7 +144,7 @@ func isPublicKey(s string) bool {
 
 // sampleServeConfig is what desk serve init writes: every setting, with its default.
 const sampleServeConfig = `# Config for "desk serve --config <this file>". Flags given as well override it, and
-# --public-key/--user add to its users.
+# --user adds to its users.
 
 # user: serve this machine through the cloud, to your account.
 # standalone: serve it directly to the users below, without the cloud.
