@@ -34,7 +34,7 @@ users:
   - username: alice
     password: s3cret
   - username: bob
-    keys:
+    authorized-keys:
       - `+testKeyA+`
       - `+testKeyB+`
   - username: carol
@@ -48,7 +48,7 @@ users:
 	require.Equal(t, "/etc/deskconn/key.pem", config.Listen.TLSKey)
 	require.Equal(t, []serveConfigUser{
 		{Username: "alice", Password: "s3cret"},
-		{Username: "bob", Keys: []string{testKeyA, testKeyB}},
+		{Username: "bob", AuthorizedKeys: []string{testKeyA, testKeyB}},
 		{Username: "carol", Password: "with:colon"},
 	}, config.Users)
 
@@ -72,17 +72,18 @@ func TestLoadServeConfigRejects(t *testing.T) {
 		"bad mode":           {"mode: cloud\n", `invalid mode "cloud"`},
 		"cert without key":   {"listen:\n  tls-cert: c.pem\n", "tls-cert and tls-key go together"},
 		"no username":        {"users:\n  - password: x\n", "user 1: needs a username"},
-		"no password or key": {"users:\n  - username: alice\n", "needs a password or keys"},
-		"empty keys":         {"users:\n  - username: a\n    keys: []\n", "needs a password or keys"},
+		"no password or key": {"users:\n  - username: alice\n", "needs a password or authorized-keys"},
+		"empty keys":         {"users:\n  - username: a\n    authorized-keys: []\n", "needs a password or authorized-keys"},
 		"colon username":     {"users:\n  - username: a:b\n    password: x\n", "can't contain ':'"},
-		"same user twice": {"users:\n  - {username: a, password: x}\n  - {username: a, keys: [" + testKeyA + "]}\n",
-			"listed twice"},
-		"key not hex":     {"users:\n  - username: a\n    keys: [zz]\n", "isn't a public key"},
-		"key too short":   {"users:\n  - username: a\n    keys: [31f1]\n", "isn't a public key"},
-		"keys not a list": {"users:\n  - username: a\n    keys: " + testKeyA + "\n", "into []string"},
+		"same user twice": {"users:\n  - {username: a, password: x}\n" +
+			"  - {username: a, authorized-keys: [" + testKeyA + "]}\n", "listed twice"},
+		"key not hex":     {"users:\n  - username: a\n    authorized-keys: [zz]\n", "isn't a public key"},
+		"key too short":   {"users:\n  - username: a\n    authorized-keys: [31f1]\n", "isn't a public key"},
+		"keys not a list": {"users:\n  - username: a\n    authorized-keys: " + testKeyA + "\n", "into []string"},
+		"plain keys":      {"users:\n  - username: a\n    keys: [" + testKeyA + "]\n", "field keys not found"},
 		"old single key":  {"users:\n  - username: a\n    key: " + testKeyA + "\n", "field key not found"},
-		"key for two users": {"users:\n  - {username: a, keys: [" + testKeyA + "]}\n" +
-			"  - {username: b, keys: [" + strings.ToUpper(testKeyA) + "]}\n", `is already "a"'s`},
+		"key for two users": {"users:\n  - {username: a, authorized-keys: [" + testKeyA + "]}\n" +
+			"  - {username: b, authorized-keys: [" + strings.ToUpper(testKeyA) + "]}\n", `is already "a"'s`},
 		"not a mapping":    {"- mode\n", "cannot unmarshal !!seq"},
 		"users not a list": {"users: alice\n", "cannot unmarshal !!str"},
 	} {
@@ -103,7 +104,7 @@ users:
   - username: alice
     password: s3cret
   - username: bob
-    keys: [`+testKeyA+`, `+testKeyB+`]
+    authorized-keys: [`+testKeyA+`, `+testKeyB+`]
 `)
 	parse := func(args ...string) *serveCommands {
 		app := kingpin.New("desk", "")
@@ -169,7 +170,8 @@ func TestWriteSampleServeConfig(t *testing.T) {
 
 	// And so is everything it has commented out, once uncommented.
 	uncommented := strings.NewReplacer("# webtransport:", "webtransport:", "# tls-", "tls-",
-		"# - username:", "- username:", "#   password:", "  password:", "#   keys:", "  keys:", "#     - ", "    - ",
+		"# - username:", "- username:", "#   password:", "  password:",
+		"#   authorized-keys:", "  authorized-keys:", "#     - ", "    - ",
 		"65160c38...", testKeyA).Replace(sampleServeConfig)
 	config, err = loadServeConfig(writeServeConfig(t, uncommented))
 	require.NoError(t, err, uncommented)
