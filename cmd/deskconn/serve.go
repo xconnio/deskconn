@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -40,55 +41,101 @@ type rootdFlags struct {
 }
 
 type serveCommands struct {
-	serve *kingpin.CmdClause
+	run  *kingpin.CmdClause
+	init *kingpin.CmdClause
 
-	mode  *string
-	userd userdFlags
-	rootd rootdFlags
+	initPath  *string
+	initForce *bool
+
+	mode       *string
+	configPath *string
+	userd      userdFlags
+	rootd      rootdFlags
+
+	// setByUser tells, by flag name, whether a flag a --config file can also set was given
+	// on the command line, which then wins over the file.
+	setByUser map[string]*bool
 }
 
-func registerServeCommands(app *kingpin.Application) *serveCommands {
+func registerServeCommands(app *kingpin.Application, cfgDirectory string) *serveCommands {
 	serveCmd := app.Command("serve", "Run the deskconn daemon: the user daemon, or the root helper for desk vpn")
-	mode := serveCmd.Flag("mode", "What to run: user (the machine's APIs and its connectivity, through the "+
+	// "desk serve [<flags>]" runs the daemon: run is the default, so it never has to be named.
+	runCmd := serveCmd.Command("run", "Run the daemon; the default, so \"desk serve [<flags>]\" is the same").Default()
+	initCmd := serveCmd.Command("init", "Write a sample config file for desk serve --config")
+	initPath := initCmd.Arg("path", "Where to write it").Default(filepath.Join(cfgDirectory, "serve.yaml")).String()
+	initForce := initCmd.Flag("force", "Overwrite the file if it exists").Short('f').Bool()
+
+	setByUser := map[string]*bool{}
+	flag := func(name, help string) *kingpin.FlagClause {
+		set := new(bool)
+		setByUser[name] = set
+		return runCmd.Flag(name, help).IsSetByUser(set)
+	}
+
+	mode := flag("mode", "What to run: user (the machine's APIs and its connectivity, through the "+
 		"cloud), standalone (the same, served directly over --transport to --public-key holders and --user "+
 		"accounts instead of through the cloud) or root (the privileged backend for desk vpn, started on "+
 		"demand via sudo)").
 		Default(serveModeUser).Enum(serveModeUser, serveModeStandalone, serveModeRoot)
 
 	userd := userdFlags{
-		standaloneTransport: serveCmd.Flag("transport", "Standalone transport to serve: quic, webtransport or both").
+		standaloneTransport: flag("transport", "Standalone transport to serve: quic, webtransport or both").
 			Default(transportQUIC).Enum(transportQUIC, transportWebTransport, transportBoth),
-		standaloneQUICAddr: serveCmd.Flag("quic-address", "Where to serve QUIC in standalone mode (host:port, UDP)").
+		standaloneQUICAddr: flag("quic-address", "Where to serve QUIC in standalone mode (host:port, UDP)").
 			Default("0.0.0.0:18080").String(),
-		standaloneWTAddr: serveCmd.Flag("webtransport-address", "Where to serve WebTransport in standalone mode "+
+		standaloneWTAddr: flag("webtransport-address", "Where to serve WebTransport in standalone mode "+
 			"(host:port, UDP)").Default("0.0.0.0:18081").String(),
-		standaloneCert: serveCmd.Flag("tls-cert", "TLS certificate (PEM) for standalone mode; without it, a "+
+		standaloneCert: flag("tls-cert", "TLS certificate (PEM) for standalone mode; without it, a "+
 			"self-signed one is generated and kept in the config directory").String(),
-		standaloneKey: serveCmd.Flag("tls-key", "Private key (PEM) of --tls-cert").String(),
-		standaloneKeys: serveCmd.Flag("public-key", "Public key (hex) allowed to connect in standalone mode; "+
+		standaloneKey: flag("tls-key", "Private key (PEM) of --tls-cert").String(),
+		standaloneKeys: runCmd.Flag("public-key", "Public key (hex) allowed to connect in standalone mode; "+
 			"repeat for more (see `desk keygen`)").Strings(),
-		standaloneUsers: serveCmd.Flag("user", "username:password allowed to connect in standalone mode; repeat "+
+		standaloneUsers: runCmd.Flag("user", "username:password allowed to connect in standalone mode; repeat "+
 			"for more").Envar("DESKCONND_USERS").Strings(),
 	}
+	configPath := runCmd.Flag("config", "YAML file to read the mode and the standalone settings from (see "+
+		"the README); flags given as well override it, and --public-key/--user add to its keys and users").
+		String()
 
 	rootd := rootdFlags{
-		socketPath: serveCmd.Flag("socket", "Unix socket to listen on for the one client the root helper "+
+		socketPath: runCmd.Flag("socket", "Unix socket to listen on for the one client the root helper "+
 			"serves (--mode root)").String(),
-		idleTimeout: serveCmd.Flag("idle-timeout", "Exit the root helper if no client connects within this long "+
+		idleTimeout: runCmd.Flag("idle-timeout", "Exit the root helper if no client connects within this long "+
 			"(--mode root)").Default("30s").Duration(),
 	}
 
 	return &serveCommands{
-		serve: serveCmd,
-		mode:  mode,
-		userd: userd,
-		rootd: rootd,
+		run:        runCmd,
+		init:       initCmd,
+		initPath:   initPath,
+		initForce:  initForce,
+		mode:       mode,
+		configPath: configPath,
+		userd:      userd,
+		rootd:      rootd,
+		setByUser:  setByUser,
 	}
 }
 
 func dispatchServeCommand(parsedCmd string, cmds *serveCommands) bool {
-	if parsedCmd != cmds.serve.FullCommand() {
+	if parsedCmd == cmds.init.FullCommand() {
+		if err := writeSampleServeConfig(*cmds.initPath, *cmds.initForce); err != nil {
+			serveFatalf("%v", err)
+		}
+		return true
+	}
+	if parsedCmd != cmds.run.FullCommand() {
 		return false
+	}
+	if *cmds.configPath != "" {
+		config, err := loadServeConfig(*cmds.configPath)
+		if err != nil {
+			serveFatalf("%v", err)
+		}
+		cmds.apply(config)
+		if *cmds.mode == serveModeRoot {
+			serveFatalf("--config is for the user and standalone modes")
+		}
 	}
 	switch *cmds.mode {
 	case serveModeRoot:
@@ -106,4 +153,27 @@ func dispatchServeCommand(parsedCmd string, cmds *serveCommands) bool {
 func serveFatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "desk serve: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// apply sets the flags not given on the command line from config, and adds its public keys
+// and users to those given.
+func (cmds *serveCommands) apply(config *serveConfig) {
+	set := func(name string, target *string, value string) {
+		if value != "" && !*cmds.setByUser[name] {
+			*target = value
+		}
+	}
+	set("mode", cmds.mode, config.Mode)
+	standalone := config.Standalone
+	set("transport", cmds.userd.standaloneTransport, standalone.Transport)
+	set("quic-address", cmds.userd.standaloneQUICAddr, standalone.QUICAddress)
+	set("webtransport-address", cmds.userd.standaloneWTAddr, standalone.WebTransportAddress)
+	set("tls-cert", cmds.userd.standaloneCert, standalone.TLSCert)
+	set("tls-key", cmds.userd.standaloneKey, standalone.TLSKey)
+	*cmds.userd.standaloneKeys = append(standalone.PublicKeys, *cmds.userd.standaloneKeys...)
+	users := make([]string, 0, len(standalone.Users)+len(*cmds.userd.standaloneUsers))
+	for _, user := range standalone.Users {
+		users = append(users, user.Username+":"+user.Password)
+	}
+	*cmds.userd.standaloneUsers = append(users, *cmds.userd.standaloneUsers...)
 }

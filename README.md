@@ -152,6 +152,38 @@ accounts (or set `DESKCONND_USERS`, one `username:password` per line, to keep pa
 desk serve --mode standalone --user alice:s3cret [--user <username:password> ...]
 ```
 
+#### Or from a config file
+
+`desk serve --config <file>` reads the mode and the standalone settings from a YAML file instead, which keeps keys and
+passwords off the command line and the service's `ExecStart`. `desk serve init [<path>]` writes a commented sample
+to start from (default `~/.deskconn/serve.yaml`, readable only by you; `--force` to overwrite). Every key is optional
+and has the default of its flag:
+
+```yaml
+mode: standalone            # user or standalone
+standalone:
+  transport: quic           # quic, webtransport or both
+  quic-address: 0.0.0.0:18080
+  webtransport-address: 0.0.0.0:18081
+  tls-cert: cert.pem        # relative paths are relative to the config file
+  tls-key: key.pem
+  public-keys:
+    - 65160c38…
+  users:
+    - username: alice
+      password: s3cret
+    - username: bob
+      password: hunter2
+```
+
+```bash
+chmod 600 ~/.deskconn/serve.yaml   # it holds passwords; desk serve warns if others can read it
+desk serve --config ~/.deskconn/serve.yaml
+```
+
+Flags given as well override the file, and `--public-key`/`--user` add to its keys and users. To run it as the
+service, use `ExecStart=… serve --config <file>` with `systemctl --user edit deskconn-userd`.
+
 ### 3. Save it as a profile on the client
 
 ```bash

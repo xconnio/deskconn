@@ -46,7 +46,7 @@ func main() {
 	machineCmds.registerLsShortcut(app)
 	selfCmds := registerSelfCommands(app)
 	agentCmds := registerAgentCommands(app, cfgDirectory)
-	serveCmds := registerServeCommands(app)
+	serveCmds := registerServeCommands(app, cfgDirectory)
 
 	if len(os.Args) == 1 {
 		app.Usage(nil)
@@ -58,7 +58,7 @@ func main() {
 			return
 		}
 		for _, command := range app.Model().Commands {
-			if command.Name == os.Args[1] && len(command.Commands) > 0 {
+			if command.Name == os.Args[1] && len(command.Commands) > 0 && !hasDefaultCommand(command) {
 				app.Usage(os.Args[1:])
 				return
 			}
@@ -80,7 +80,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if cfgErr != nil && parsedCmd != serveCmds.serve.FullCommand() {
+	if cfgErr != nil && parsedCmd != serveCmds.run.FullCommand() {
 		log.Fatal(cfgErr)
 	}
 
@@ -106,6 +106,17 @@ func main() {
 		dispatchSelfCommand(parsedCmd, selfCmds, cfgDirectory) ||
 		dispatchAgentCommand(parsedCmd, agentCmds, cfgDirectory) ||
 		dispatchServeCommand(parsedCmd, serveCmds)
+}
+
+// hasDefaultCommand reports whether command runs one of its subcommands when given none
+// (desk serve), rather than needing one named.
+func hasDefaultCommand(command *kingpin.CmdModel) bool {
+	for _, sub := range command.Commands {
+		if sub.Default {
+			return true
+		}
+	}
+	return false
 }
 
 // daemonURI is the address of deskconn.sock, the local daemon's socket.
