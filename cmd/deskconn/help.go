@@ -165,9 +165,9 @@ func groupHelpExamples(group string) []string {
 	case "serve":
 		return []string{
 			"desk serve",
-			"desk serve --mode standalone --public-key <key>",
+			"desk serve --mode standalone --user alice:s3cret",
 			"desk serve init",
-			"desk serve --config serve.yaml",
+			"desk serve --config deskconn.yaml",
 		}
 	default:
 		return nil

@@ -104,8 +104,8 @@ On the machine, write a config, add your users to it, and serve it. It logs the 
 to pin:
 
 ```bash
-desk serve init                   # writes ./serve.yaml, with every setting explained
-desk serve --config serve.yaml
+desk serve init                   # writes ./deskconn.yaml, with every setting explained
+desk serve --config deskconn.yaml
 ```
 
 On the client, save the machine as a profile and use it with `--profile`:

@@ -163,8 +163,8 @@ func runUserd(flags userdFlags, standalone bool) {
 			return
 		}
 
-		// Standalone: serve the machine realm over QUIC and/or WebTransport to --public-key
-		// holders and --user accounts, with no cloud account.
+		// Standalone: serve the machine realm over QUIC and/or WebTransport to the --user and
+		// --config users, with no cloud account.
 		if err := xconnd.RunStandalone(ctx, xconnApp, standaloneConfig); err != nil {
 			log.Fatalf("standalone: %v", err)
 		}
@@ -239,38 +239,20 @@ func newCloudConfig(cfgDirectory string) (*xconnd.CloudConfig, error) {
 	}, nil
 }
 
-// standaloneAuth gathers who may connect in standalone mode: the --config users and the --user
-// ones, whose keys and passwords it returns, plus the --public-key keys. With logLogins set,
-// it logs how each can log in.
+// standaloneAuth gathers who may connect in standalone mode, the --config users and the --user
+// ones, and returns their keys and passwords. With logLogins set, it logs how each can log in.
 func standaloneAuth(flags userdFlags, logLogins bool) (keys []string, passwords map[string]string,
 	err error) {
 	users := slices.Clone(flags.configUsers)
-	// --user values of one username add up, e.g. a key per device.
-	flagUsers := map[string]int{}
 	for _, value := range *flags.standaloneUsers {
 		user, err := parseUserFlag(value)
 		if err != nil {
 			return nil, nil, err
 		}
-		i, seen := flagUsers[user.Username]
-		if !seen {
-			flagUsers[user.Username] = len(users)
-			users = append(users, user)
-			continue
-		}
-		if user.Password != "" && users[i].Password != "" {
-			return nil, nil, fmt.Errorf("--user %q: given two passwords", user.Username)
-		}
-		users[i].Password += user.Password
-		users[i].AuthorizedKeys = append(users[i].AuthorizedKeys, user.AuthorizedKeys...)
+		users = append(users, user)
 	}
 	if err := checkUsers(users); err != nil {
 		return nil, nil, err
-	}
-	for _, key := range *flags.standaloneKeys {
-		if !isPublicKey(key) {
-			return nil, nil, fmt.Errorf("--public-key %q isn't a public key (64 hex digits, see desk keygen)", key)
-		}
 	}
 
 	passwords = make(map[string]string, len(users))
@@ -282,10 +264,6 @@ func standaloneAuth(flags userdFlags, logLogins bool) (keys []string, passwords 
 		if logLogins {
 			log.Printf("standalone: %s logs in with %s", user.Username, loginMethods(user))
 		}
-	}
-	keys = append(keys, *flags.standaloneKeys...)
-	if logLogins && len(*flags.standaloneKeys) > 0 {
-		log.Printf("standalone: %d --public-key key(s) log in as any username", len(*flags.standaloneKeys))
 	}
 	return keys, passwords, nil
 }
@@ -304,24 +282,21 @@ func noStandaloneUsersHelp(configPath string) string {
 			"(The sample from desk serve init has these commented out.)", configPath)
 	}
 	return "--mode standalone needs someone allowed to connect, for example:\n" +
-		"  desk serve --mode standalone --user alice:s3cret       alice logs in with a password\n" +
-		"  desk serve --mode standalone --user bob:<public-key>   bob logs in with a key (make one with desk keygen)\n" +
-		"  desk serve --config serve.yaml                         users from a config file (see desk serve init)\n" +
+		"  desk serve --mode standalone --user alice:s3cret   alice logs in with a password\n" +
+		"  desk serve --config deskconn.yaml                  users from a config file, which can also log in\n" +
+		"                                                     with keys (see desk serve init)\n" +
 		"Repeat --user for more users."
 }
 
-// parseUserFlag parses a --user value, username:secret. The secret is a public key if it is
-// one (64 hex digits, as desk keygen prints it), and a password otherwise.
+// parseUserFlag parses a --user value, username:password. Users who log in with keys are
+// listed in a --config file instead.
 func parseUserFlag(value string) (serveConfigUser, error) {
-	username, secret, ok := strings.Cut(value, ":")
-	if !ok || username == "" || secret == "" {
-		// Not the value itself: it may hold a password.
-		return serveConfigUser{}, errors.New("invalid --user: want username:password or username:public-key")
+	username, password, ok := strings.Cut(value, ":")
+	if !ok || username == "" || password == "" {
+		// Not the value itself: it holds a password.
+		return serveConfigUser{}, errors.New("invalid --user: want username:password")
 	}
-	if isPublicKey(secret) {
-		return serveConfigUser{Username: username, AuthorizedKeys: []string{secret}}, nil
-	}
-	return serveConfigUser{Username: username, Password: secret}, nil
+	return serveConfigUser{Username: username, Password: password}, nil
 }
 
 // loginMethods describes how user can log in, e.g. "a password and 2 keys".
