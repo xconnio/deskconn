@@ -101,9 +101,14 @@ func (config *serveConfig) check() error {
 		return errors.New("listen: tls-cert and tls-key go together")
 	}
 
-	usernames := make(map[string]bool, len(config.Users))
+	return checkUsers(config.Users)
+}
+
+// checkUsers checks who may connect in standalone mode, from a config or --user.
+func checkUsers(users []serveConfigUser) error {
+	usernames := make(map[string]bool, len(users))
 	keys := map[string]string{}
-	for i, user := range config.Users {
+	for i, user := range users {
 		switch {
 		case user.Username == "":
 			return fmt.Errorf("user %d: needs a username", i+1)
@@ -115,7 +120,7 @@ func (config *serveConfig) check() error {
 			return fmt.Errorf("user %q: needs a password or authorized-keys", user.Username)
 		}
 		for _, key := range user.AuthorizedKeys {
-			if raw, err := hex.DecodeString(key); err != nil || len(raw) != ed25519.PublicKeySize {
+			if !isPublicKey(key) {
 				return fmt.Errorf("user %q: key %q isn't a public key (%d hex digits, see desk keygen)",
 					user.Username, key, 2*ed25519.PublicKeySize)
 			}
@@ -129,6 +134,12 @@ func (config *serveConfig) check() error {
 		usernames[user.Username] = true
 	}
 	return nil
+}
+
+// isPublicKey reports whether s is a public key as desk keygen prints it: 64 hex digits.
+func isPublicKey(s string) bool {
+	raw, err := hex.DecodeString(s)
+	return err == nil && len(raw) == ed25519.PublicKeySize
 }
 
 // sampleServeConfig is what desk serve init writes: every setting, with its default.
