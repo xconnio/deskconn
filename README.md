@@ -71,155 +71,53 @@ Linux-only for now). Use `deskconn` there instead of `desk` — `desk` is reserv
 
 ## Getting started
 
-### 1. Create an account
+1. Create an account at [deskconn.com](https://deskconn.com) or in the mobile app.
+2. Attach the desktop to it. This writes `~/.deskconn/credentials.json`, which the daemon picks up to connect to the
+   cloud:
 
-Sign up at [deskconn.com](https://deskconn.com) or via the mobile app.
+   ```bash
+   desk machine attach --username <email>
+   ```
 
-### 2. Attach the desktop to the cloud
+3. Log in from the CLI with the one-time password emailed to you. The key it creates is valid for 30 days:
 
-```bash
-desk machine attach --username <email>
-# or, without a prompt, read the password from stdin
-echo "$PASSWORD" | desk machine attach --username <email>
-```
+   ```bash
+   desk account login --username <username>
+   ```
 
-This creates a realm for the desktop under your account and writes credentials to `~/.deskconn/credentials.json`. The
-daemon picks these up automatically and connects to the cloud router.
+4. Use your machines:
 
-### 3. Log in from the CLI
+   ```bash
+   desk ls
+   desk shell <machine>
+   ```
 
-```bash
-desk account login --username <username>
-```
-
-You'll then be prompted for the one-time password emailed to you. Once verified, desk generates an Ed25519
-keypair, registers it with the account service, and stores it locally. You only need to do this once per machine;
-the key is valid for 30 days and is renewed on the next login.
-
-### 4. List your machines
-
-```bash
-desk ls
-desk ls --refresh    # fetch the current list from the cloud
-desk ls --detailed   # show realm, ID, and organisation
-```
-
-### 5. Open a shell
-
-```bash
-desk shell <machine>
-desk shell <machine> --mode direct   # force WebRTC
-desk shell <machine> --mode routed   # force cloud router
-```
+Run `desk --help` for the other commands (files, ports, VPN, agents, ...) and `desk <command> --help` for any one of
+them.
 
 ## Standalone mode (no cloud)
 
-`deskconn-userd` can serve a machine directly, without an account or the cloud router, to a fixed list of keys and/or
-username/password accounts. One command starts it; clients point the CLI at its URL. Shell, exec, file operations, port and agent forwarding, logs and P2P
-work the same way.
+`desk serve --mode standalone` serves a machine directly, without an account or the cloud router, to the users you
+list: with a password, or with a key from `desk keygen`. Shell, files, ports, agents, logs and P2P work as usual.
 
-### 1. Generate a key pair
-
-```bash
-desk keygen
-# Public Key:  65160c38…
-# Private Key: 9f2d0b17…
-```
-
-### 2. Start deskconn-userd in standalone mode on the machine
+On the machine, write a config, add your users to it, and serve it. It logs the certificate's fingerprint for clients
+to pin:
 
 ```bash
-desk serve --mode standalone --user alice:s3cret --user bob:65160c38… [--user <username:secret> ...]
-```
-
-`--user username:secret` lets a user in with a password, or with a key when the secret is a public key (64 hex digits,
-as `desk keygen` prints it). Repeat it for more users, or for more keys of one user. It logs how each user logs in at
-startup. A key is let in whatever username its holder presents, so the username only labels it; `--public-key <key>`
-adds one without a name. To keep passwords off the command line, set `DESKCONND_USERS` (one `username:secret` per
-line) or use a [config file](#or-from-a-config-file).
-
-deskconn-userd serves QUIC on UDP `0.0.0.0:18080` by default. Pick the transport with `--transport quic|webtransport|both`
-and the addresses with `--quic-address` and `--webtransport-address` (default `0.0.0.0:18081`, path `/wamp`). To run it
-as the service, put the flags on `ExecStart` (as `desk serve --mode standalone ...`) with
-`systemctl --user edit deskconn-userd`.
-
-Both transports use TLS. Pass your certificate with `--tls-cert cert.pem --tls-key key.pem` (e.g. one issued by a public
-CA); without them deskconn-userd generates a self-signed certificate once and keeps it in `~/.deskconn`. Either way it logs
-the certificate's SHA-256 fingerprint at startup:
-
-```
-standalone: certificate SHA-256 fingerprint 3f9a1c… (clients that don't trust its issuer pin it with desk profile add --cert-hash 3f9a1c…)
-```
-
-#### Or from a config file
-
-`desk serve --config <file>` reads the mode, where to listen and who may connect from a YAML file instead, which keeps
-keys and passwords off the command line and the service's `ExecStart`. `desk serve init [<path>]` writes a commented
-sample to start from (default `serve.yaml` in the current directory, readable only by you; `--force` to overwrite).
-Every key is optional:
-
-```yaml
-mode: standalone              # user or standalone
-
-listen:                       # standalone mode only
-  quic: 0.0.0.0:18080         # serves QUIC, WebTransport or both, by which addresses are set
-  webtransport: 0.0.0.0:18081 # (QUIC on 0.0.0.0:18080 if neither is)
-  tls-cert: cert.pem          # relative paths are relative to the config file
-  tls-key: key.pem
-
-users:                        # standalone mode only
-  - username: alice           # logs in with a password
-    password: s3cret
-  - username: bob             # or with the private key matching any of these public keys (desk keygen)
-    authorized-keys:
-      - 65160c38…             # e.g. his laptop
-      - 9a41e7d2…             # and his phone
-```
-
-A key is let in whatever username its holder presents, as with `--public-key`: the username only labels it.
-
-```bash
-chmod 600 serve.yaml   # it holds passwords; desk serve warns if others can read it
+desk serve init                   # writes ./serve.yaml, with every setting explained
 desk serve --config serve.yaml
 ```
 
-Flags given as well override the file, and `--public-key`/`--user` add to its users. To run it as the service, use
-`ExecStart=… serve --config <file>` with `systemctl --user edit deskconn-userd`.
-
-### 3. Save it as a profile on the client
+On the client, save the machine as a profile and use it with `--profile`:
 
 ```bash
-desk profile add office \
-  --url quic://203.0.113.5:18080 \
-  --cert-hash 3f9a1c… \
-  --private-key 9f2d0b17…
-```
-
-Then pick it with `--profile`. Commands take no machine argument, since the profile is the machine:
-
-```bash
+desk profile add office --url quic://203.0.113.5:18080 --cert-hash <fingerprint> --private-key <key>
 desk --profile office shell
-desk --profile office shell -- uname -a
-desk --profile office file cp ./notes.txt :/home/me/notes.txt   # remote paths start with ':'
-desk --profile office file cat :/etc/hostname
-desk --profile office port forward 8080:80
 ```
 
-For a username/password account, save the profile without `--private-key`, with the username as `--authid` (default:
-the current user). desk asks for the password each time it connects; it's never saved:
-
-```bash
-desk profile add office --url quic://203.0.113.5:18080 --cert-hash 3f9a1c… --authid alice
-desk --profile office shell
-# Password for alice:
-```
-
-Use `https://host:18081` as the URL to connect over WebTransport instead. `--cert-hash` pins the machine's certificate,
-which is what makes a self-signed one trusted; leave it out when the certificate is issued by a CA the client trusts.
-
-Profiles are kept in the `profiles` section of `~/.deskconn/config.yml`, readable only by you. `desk profile ls` lists them and
-`desk profile remove <name>` deletes one. `machine ping`, `machine connect`, `machine disconnect` and `ls` work on
-machines of your account only.
+Leave out `--private-key` to log in with a password instead (`--authid <username>`). `desk serve run --help` and
+`desk profile add --help` cover the rest, such as serving over WebTransport, using your own TLS certificate, and
+passing users as flags instead of a config file.
 
 ## Self-hosting
 
@@ -288,97 +186,13 @@ bin/desk serve
 Don't run `desk self update` on these builds: it installs the official release, which connects to
 `api.deskconn.com`.
 
-## CLI reference
-
-Run `desk` or `desk --help` for a compact overview of daily commands and management groups.
-Use `desk <command> --help` for command details (for example, `desk file --help`), or
-`desk --help-long` for all commands and flags, including standalone authentication options.
-
-### Account
-
-```
-desk account login  [--username]
-desk account logout
-desk account whoami
-```
-
-### Machines
-
-```
-desk machine ls     [--refresh] [--detailed]
-desk machine info   <machine> [--mode direct|routed]
-desk machine attach [--name] [--username]
-desk machine detach
-desk machine alias  <machine> <name>
-desk machine alias  <machine> --unset
-desk machine logs   <machine> [<source>] [-f] [-n N] [--since DURATION] [--mode direct|routed]
-desk machine ping   <machine> [--count N]
-desk machine connect    <machine>
-desk machine disconnect [<machine>] [--all]
-```
-
-`desk ls` is a shortcut for `desk machine ls`.
-
-Standalone machines (see [Standalone mode](#standalone-mode-no-cloud)):
-
-```
-desk keygen                # key pair: public for desk serve --user name:<key>, private for profile add --private-key
-desk profile add    <name> --url <quic://host:port|https://host:port> [--cert-hash <sha256>] [--private-key <hex>] [--authid <user>]
-desk profile remove <name>
-desk profile ls
-desk --profile <name> <command>
-```
-
-### Shell
-
-```
-desk shell <machine> [--mode direct|routed] [-A] [<command>...]
-```
-
-With a command, `desk shell` runs it on the machine and exits; without one it opens an interactive shell.
-
-`-A`/`--agent-forward` forwards your local `ssh-agent` to the shell, like `ssh -A`, so tools run there (`git`,
-`ssh`, ...) can authenticate with your local keys without copying them to the machine. As with `ssh -A`, only use it
-against machines you trust — anyone with access to the remote shell for the session's duration can ask the forwarded
-agent to sign on your behalf.
-
-### File operations
-
-All file commands accept `machine:path` for remote paths and a bare `/path` for local paths.
-
-```
-desk file ls  <machine:path> [--mode direct|routed]
-desk file mv  <src> <dst>   [--mode direct|routed]
-desk file cp  <src> <dst>   [-r] [--mode direct|routed]
-desk file rm  <target>      [--mode direct|routed]
-desk file cat <machine:path> [--mode direct|routed]
-```
-
-### Port forwarding
-
-```
-# Both commands use listen:target (TCP ports 1–65535).
-# Listen locally on 127.0.0.1:8080; connect to localhost:80 on office.
-desk port forward office 8080:80 [--mode direct|routed]
-
-# Listen on port 9000 on all interfaces on office; connect to local localhost:3000.
-desk port reverse office 9000:3000 [--mode direct|routed]
-```
-
-### Self-update
-
-```
-desk self version
-desk self update
-```
-
 ## Adding an app
 
 Apps beyond deskconn-userd's own (Files, Terminal, Resource Monitor, Text Editor) run as their own processes, like
 [media-app](https://github.com/xconnio/media-app) and [remotecontrol-app](https://github.com/xconnio/remotecontrol-app).
 An app needs no code in deskconn: it connects to deskconn-userd's local socket, registers its procedures there, and
 tells deskconn-userd which apps it serves. deskconn-userd lists them to clients (the web app shows an app only while
-it's listed and enabled), owners and admins enable or disable them, and xlink exposes their procedures to the cloud
+it's listed and enabled), owners and admins enable or disable them, and xconn exposes their procedures to the cloud
 and P2P.
 
 1. **Connect** to `~/.deskconn/deskconn.sock` (WAMP over a Unix socket, realm `io.xconn.deskconn.local`, anonymous).

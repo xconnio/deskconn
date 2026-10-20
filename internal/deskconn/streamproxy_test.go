@@ -64,8 +64,8 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *userd.
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
-	// Machine: userd's relay listener, fed by xlink's QUIC-stream relay.
-	relaySock := filepath.Join(dir, "xlink-streams.sock")
+	// Machine: userd's relay listener, fed by xconn's QUIC-stream relay.
+	relaySock := filepath.Join(dir, "xconn-streams.sock")
 	relayListener, err := net.Listen("unix", relaySock)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = relayListener.Close() })

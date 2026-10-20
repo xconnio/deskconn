@@ -28,7 +28,7 @@ func ReadStreamOp(stream net.Conn) (common.FSOp, error) {
 	return route.Op, nil
 }
 
-// ServeStreamRelay accepts xlink's relayed local connections on ln and
+// ServeStreamRelay accepts xconn's relayed local connections on ln and
 // dispatches each to the feature it belongs to.
 func (d *Deskconn) ServeStreamRelay(ln net.Listener) {
 	for {
@@ -47,7 +47,7 @@ func (d *Deskconn) ServeStreamRelay(ln net.Listener) {
 
 // CloseStreams closes every relayed stream and channel still open, and refuses any
 // relayed after, returning how many it closed. Each feature handles it as its client
-// going away, and xlink passes the close on to the client, which a shutdown needs:
+// going away, and xconn passes the close on to the client, which a shutdown needs:
 // otherwise a client on a P2P channel never learns the machine is gone and waits
 // forever (a shell across desk self update, say).
 func (d *Deskconn) CloseStreams() int {
@@ -128,7 +128,7 @@ func (d *Deskconn) handleRelayConn(conn net.Conn) {
 		return
 	}
 
-	// WebRTC-originated: xlink relays the channel's first message as the first frame.
+	// WebRTC-originated: xconn relays the channel's first message as the first frame.
 	firstMessage, _, err := common.ReadRelayFrame(conn)
 	if err != nil {
 		conn.Close()

@@ -141,9 +141,10 @@ Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
     echo "Setting up systemd user services..."
     mkdir -p "$systemd_user_dir"
 
-    # deskconn-userd runs xlink (connectivity: cloud, LAN, remote-client auth, QUIC/WebRTC
-    # streams) in-process. Earlier installs ran xlink as its own service, and then the daemon
-    # as deskconnd: remove those, or they would compete with deskconn-userd for deskconn.sock.
+    # deskconn-userd runs its connectivity (cloud, LAN, remote-client auth, QUIC/WebRTC streams)
+    # in-process, through xconn. Earlier installs ran it as a separate xlink service, and then
+    # the daemon as deskconnd: remove those, or they would compete with deskconn-userd for
+    # deskconn.sock.
     for old_service in xlink deskconnd; do
         if [ -f "$systemd_user_dir/$old_service.service" ]; then
             echo "Removing the old $old_service service (now deskconn-userd)..."

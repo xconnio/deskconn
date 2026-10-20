@@ -17,14 +17,14 @@ import (
 )
 
 // TestCloseStreamsEndsOpenShell confirms CloseStreams, as userd's shutdown calls it,
-// closes a live shell's stream all the way through xlink's relay to the client, and
+// closes a live shell's stream all the way through xconn's relay to the client, and
 // refuses streams relayed after it.
 func TestCloseStreamsEndsOpenShell(t *testing.T) {
 	// Short prefix, not t.TempDir(): unix socket paths are length-limited.
 	dir, err := os.MkdirTemp("", "streamrelay")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	relaySock := filepath.Join(dir, "xlink-streams.sock")
+	relaySock := filepath.Join(dir, "xconn-streams.sock")
 	listener, err := net.Listen("unix", relaySock)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })

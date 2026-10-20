@@ -20,7 +20,7 @@ import (
 
 // pinTargets returns the IPv4 addresses that must be pinned to the current
 // default route before it's replaced: the WebRTC peer (so the tunnel
-// doesn't route into itself) and the cloud relay (so xlink's own
+// doesn't route into itself) and the cloud relay (so the machine's own
 // control connection survives the switch).
 func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []string {
 	var ips []string
@@ -70,7 +70,7 @@ func usesResolvedStub() bool {
 //
 // All privileged networking goes through helper (a deskconn-rootd
 // connection, see iptun.LaunchHelper) rather than being done directly, so
-// neither the CLI nor xlink needs any capability grant of its own.
+// neither the CLI nor deskconn-userd needs any capability grant of its own.
 //
 // onReady, if non-nil, is called once the remote end confirms the tunnel
 // is actually up -- callers printing something like "tunnel up" should

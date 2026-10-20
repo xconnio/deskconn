@@ -16,8 +16,8 @@ const (
 // These WebRTC data-channel labels identify which feature a freshly opened
 // channel belongs to. They're checked both by the client side (when dialing
 // out, see shellclient.go/portstreamclient.go/agentforwardclient.go/
-// logstreamclient.go) and by xlink's channel classification, which
-// relays the channel to whichever local backend handles that feature -- a
+// logstreamclient.go) and by userd's relay dispatch (see its streamrelay.go), which
+// hands the channel xconn relays to whichever local backend handles that feature -- a
 // file-stream channel has no label of its own (checked last, as the
 // fallback case) since its first message -- a plaintext public key -- is
 // content-indistinguishable from these features' first message.
@@ -30,11 +30,11 @@ const (
 )
 
 // These are the procedures the local CLI-facing realm exposes (LocalRealm,
-// hosted by xlink on deskconn.sock, with userd registering the
+// hosted on deskconn.sock by xconn's app layer, with userd registering the
 // handlers) -- wire-protocol identifiers the CLI (root package) calls
 // directly and userd's proxy handlers implement, so both sides need
 // the same string constants regardless of which process implements which
-// half. They're outside ProcedurePrefix, so xlink doesn't expose them.
+// half. They're outside ProcedurePrefix, so xconn doesn't expose them remotely.
 const (
 	ProcedureProxyFileOp       = "io.xconn.deskconn.local.proxy.file.op"
 	ProcedureProxyMachineInfo  = "io.xconn.deskconn.local.proxy.machine.info"
@@ -53,7 +53,7 @@ const (
 
 	LocalRealm = "io.xconn.deskconn.local"
 
-	// StandaloneRealm is the machine realm xlink serves in standalone mode.
+	// StandaloneRealm is the machine realm served in standalone mode.
 	StandaloneRealm = "io.xconn.deskconn.standalone"
 )
 
@@ -116,7 +116,7 @@ const (
 	ProcedureDeskconnDetachDesktop   = "io.xconn.deskconn.desktop.detach"
 	TopicDeskconnDesktopDetachFormat = "io.xconn.deskconn.desktop.%s.detach"
 
-	// The cloud's API for the keys authorized to connect to a desktop (see xconn-go's xconn.CloudConfig).
+	// The cloud's API for the keys authorized to connect to a desktop (see xconn.CloudConfig).
 	ProcedureDesktopKeyList      = "io.xconn.deskconn.desktop.access.key.list"
 	TopicDesktopKeyAddedFormat   = "io.xconn.deskconn.desktop.%s.key.add"
 	TopicDesktopKeyRemovedFormat = "io.xconn.deskconn.desktop.%s.key.remove"
@@ -141,7 +141,7 @@ const (
 // (see the README's "Adding an app"). Local realm only.
 const ProcedureAppsRegister = "io.xconn.deskconn.local.apps.register"
 
-// xlink exposes every procedure registered on userd's local socket under these
+// xconn exposes every procedure registered on userd's local socket under these
 // prefixes to remote clients: userd's own and other apps' alike. Procedures under
 // ProcedureAdminPrefix are only for a machine's owner and admins.
 const (
