@@ -33,12 +33,12 @@ type serveConfigListen struct {
 	TLSKey       string `yaml:"tls-key"`
 }
 
-// serveConfigUser may connect in standalone mode with its password, any of its keys, or
-// either. A key is let in whatever username its holder presents: username only labels it.
+// serveConfigUser may connect in standalone mode with its password, any of its authorized
+// keys, or either. A key is let in whatever username its holder presents: username only labels it.
 type serveConfigUser struct {
-	Username string   `yaml:"username"`
-	Password string   `yaml:"password"`
-	Keys     []string `yaml:"keys"`
+	Username       string   `yaml:"username"`
+	Password       string   `yaml:"password"`
+	AuthorizedKeys []string `yaml:"authorized-keys"`
 }
 
 // transport is the standalone transport the listen addresses set, or "" if they set none.
@@ -111,10 +111,10 @@ func (config *serveConfig) check() error {
 			return fmt.Errorf("user %q: a username can't contain ':'", user.Username)
 		case usernames[user.Username]:
 			return fmt.Errorf("user %q: listed twice", user.Username)
-		case user.Password == "" && len(user.Keys) == 0:
-			return fmt.Errorf("user %q: needs a password or keys", user.Username)
+		case user.Password == "" && len(user.AuthorizedKeys) == 0:
+			return fmt.Errorf("user %q: needs a password or authorized-keys", user.Username)
 		}
-		for _, key := range user.Keys {
+		for _, key := range user.AuthorizedKeys {
 			if raw, err := hex.DecodeString(key); err != nil || len(raw) != ed25519.PublicKeySize {
 				return fmt.Errorf("user %q: key %q isn't a public key (%d hex digits, see desk keygen)",
 					user.Username, key, 2*ed25519.PublicKeySize)
@@ -157,7 +157,7 @@ users:
   # - username: alice
   #   password: change-me
   # - username: bob
-  #   keys:
+  #   authorized-keys:
   #     - 65160c38...
 `
 

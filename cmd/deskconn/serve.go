@@ -173,7 +173,7 @@ func (cmds *serveCommands) apply(config *serveConfig) {
 
 	var keys, users []string
 	for _, user := range config.Users {
-		keys = append(keys, user.Keys...)
+		keys = append(keys, user.AuthorizedKeys...)
 		if user.Password != "" {
 			users = append(users, user.Username+":"+user.Password)
 		}

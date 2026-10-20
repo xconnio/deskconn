@@ -172,7 +172,7 @@ users:                        # standalone mode only
   - username: alice           # logs in with a password
     password: s3cret
   - username: bob             # or with the private key matching any of these public keys (desk keygen)
-    keys:
+    authorized-keys:
       - 65160c38…             # e.g. his laptop
       - 9a41e7d2…             # and his phone
 ```
