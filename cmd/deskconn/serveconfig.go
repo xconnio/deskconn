@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -14,26 +16,43 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// serveConfig is the --config file of desk serve: the mode, and the standalone settings
-// its flags otherwise set.
+// serveConfig is the --config file of desk serve: the mode, and for standalone mode where
+// to listen and who may connect.
 type serveConfig struct {
-	Mode       string                `yaml:"mode"`
-	Standalone standaloneServeConfig `yaml:"standalone"`
+	Mode   string            `yaml:"mode"`
+	Listen serveConfigListen `yaml:"listen"`
+	Users  []serveConfigUser `yaml:"users"`
 }
 
-type standaloneServeConfig struct {
-	Transport           string            `yaml:"transport"`
-	QUICAddress         string            `yaml:"quic-address"`
-	WebTransportAddress string            `yaml:"webtransport-address"`
-	TLSCert             string            `yaml:"tls-cert"`
-	TLSKey              string            `yaml:"tls-key"`
-	PublicKeys          []string          `yaml:"public-keys"`
-	Users               []serveConfigUser `yaml:"users"`
+// serveConfigListen is where standalone mode serves: QUIC, WebTransport or both, by which
+// addresses are set (QUIC on its default address if neither is).
+type serveConfigListen struct {
+	QUIC         string `yaml:"quic"`
+	WebTransport string `yaml:"webtransport"`
+	TLSCert      string `yaml:"tls-cert"`
+	TLSKey       string `yaml:"tls-key"`
 }
 
+// serveConfigUser may connect in standalone mode with its password, any of its keys, or
+// either. A key is let in whatever username its holder presents: username only labels it.
 type serveConfigUser struct {
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
+	Username string   `yaml:"username"`
+	Password string   `yaml:"password"`
+	Keys     []string `yaml:"keys"`
+}
+
+// transport is the standalone transport the listen addresses set, or "" if they set none.
+func (listen serveConfigListen) transport() string {
+	switch {
+	case listen.QUIC != "" && listen.WebTransport != "":
+		return transportBoth
+	case listen.WebTransport != "":
+		return transportWebTransport
+	case listen.QUIC != "":
+		return transportQUIC
+	default:
+		return ""
+	}
 }
 
 // loadServeConfig reads and checks the --config file at path. Relative tls-cert and
@@ -55,13 +74,13 @@ func loadServeConfig(path string) (*serveConfig, error) {
 	}
 
 	dir := filepath.Dir(path)
-	for _, file := range []*string{&config.Standalone.TLSCert, &config.Standalone.TLSKey} {
+	for _, file := range []*string{&config.Listen.TLSCert, &config.Listen.TLSKey} {
 		if *file != "" && !filepath.IsAbs(*file) {
 			*file = filepath.Join(dir, *file)
 		}
 	}
 
-	if len(config.Standalone.Users) > 0 {
+	if slices.ContainsFunc(config.Users, func(user serveConfigUser) bool { return user.Password != "" }) {
 		if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 != 0 {
 			log.Warnf("config %s has passwords but other users can read it (chmod 600 it)", path)
 		}
@@ -78,49 +97,68 @@ func (config *serveConfig) check() error {
 		return fmt.Errorf("invalid mode %q: want %s or %s", config.Mode, serveModeUser, serveModeStandalone)
 	}
 
-	transports := []string{transportQUIC, transportWebTransport, transportBoth}
-	if t := config.Standalone.Transport; t != "" && !slices.Contains(transports, t) {
-		return fmt.Errorf("invalid standalone transport %q: want %s", t, strings.Join(transports, ", "))
+	if (config.Listen.TLSCert == "") != (config.Listen.TLSKey == "") {
+		return errors.New("listen: tls-cert and tls-key go together")
 	}
-	for i, user := range config.Standalone.Users {
-		if user.Username == "" || user.Password == "" {
-			return fmt.Errorf("standalone user %d: needs a username and a password", i+1)
+
+	usernames := make(map[string]bool, len(config.Users))
+	keys := map[string]string{}
+	for i, user := range config.Users {
+		switch {
+		case user.Username == "":
+			return fmt.Errorf("user %d: needs a username", i+1)
+		case strings.Contains(user.Username, ":"):
+			return fmt.Errorf("user %q: a username can't contain ':'", user.Username)
+		case usernames[user.Username]:
+			return fmt.Errorf("user %q: listed twice", user.Username)
+		case user.Password == "" && len(user.Keys) == 0:
+			return fmt.Errorf("user %q: needs a password or keys", user.Username)
 		}
-		if strings.Contains(user.Username, ":") {
-			return fmt.Errorf("standalone user %q: a username can't contain ':'", user.Username)
+		for _, key := range user.Keys {
+			if raw, err := hex.DecodeString(key); err != nil || len(raw) != ed25519.PublicKeySize {
+				return fmt.Errorf("user %q: key %q isn't a public key (%d hex digits, see desk keygen)",
+					user.Username, key, 2*ed25519.PublicKeySize)
+			}
+			// Since a key logs in whatever username its holder presents, one listed for two users
+			// would let either one in as the other.
+			if owner, ok := keys[strings.ToLower(key)]; ok {
+				return fmt.Errorf("user %q: key %s is already %q's", user.Username, key, owner)
+			}
+			keys[strings.ToLower(key)] = user.Username
 		}
+		usernames[user.Username] = true
 	}
 	return nil
 }
 
 // sampleServeConfig is what desk serve init writes: every setting, with its default.
 const sampleServeConfig = `# Config for "desk serve --config <this file>". Flags given as well override it, and
-# --public-key/--user add to its keys and users.
+# --public-key/--user add to its users.
 
 # user: serve this machine through the cloud, to your account.
-# standalone: serve it directly to the public keys and users below, without the cloud.
+# standalone: serve it directly to the users below, without the cloud.
 mode: standalone
 
-# Used in standalone mode only.
-standalone:
-  # quic, webtransport or both.
-  transport: quic
-  quic-address: 0.0.0.0:18080
-  webtransport-address: 0.0.0.0:18081
+# Where standalone mode serves: over QUIC, WebTransport or both, by which addresses are
+# set (QUIC on 0.0.0.0:18080 if neither is).
+listen:
+  quic: 0.0.0.0:18080
+  # webtransport: 0.0.0.0:18081
 
   # TLS certificate and key (PEM); relative paths are relative to this file. Without them,
   # a self-signed certificate is generated and kept in ~/.deskconn.
   # tls-cert: cert.pem
   # tls-key: key.pem
 
-  # Public keys (hex) allowed to connect; make a key pair with "desk keygen".
-  public-keys:
-    # - 65160c38...
-
-  # Accounts allowed to connect with a password.
-  users:
-    # - username: alice
-    #   password: change-me
+# Who may connect in standalone mode: with a password, or with the private key matching
+# any of a user's public keys (make a pair with "desk keygen"). A key is let in whatever
+# username its holder presents.
+users:
+  # - username: alice
+  #   password: change-me
+  # - username: bob
+  #   keys:
+  #     - 65160c38...
 `
 
 // writeSampleServeConfig writes sampleServeConfig to path, readable only by its owner since

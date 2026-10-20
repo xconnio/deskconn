@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
+	log "github.com/sirupsen/logrus"
 )
 
 // What "desk serve" runs (--mode).
@@ -127,14 +128,15 @@ func dispatchServeCommand(parsedCmd string, cmds *serveCommands) bool {
 		return false
 	}
 	if *cmds.configPath != "" {
+		// A config can't set mode root, so only the flag can have.
+		if *cmds.mode == serveModeRoot {
+			serveFatalf("--config is for the user and standalone modes")
+		}
 		config, err := loadServeConfig(*cmds.configPath)
 		if err != nil {
 			serveFatalf("%v", err)
 		}
 		cmds.apply(config)
-		if *cmds.mode == serveModeRoot {
-			serveFatalf("--config is for the user and standalone modes")
-		}
 	}
 	switch *cmds.mode {
 	case serveModeRoot:
@@ -154,8 +156,8 @@ func serveFatalf(format string, args ...any) {
 	os.Exit(1)
 }
 
-// apply sets the flags not given on the command line from config, and adds its public keys
-// and users to those given.
+// apply sets the flags not given on the command line from config, and adds its users to
+// those given.
 func (cmds *serveCommands) apply(config *serveConfig) {
 	set := func(name string, target *string, value string) {
 		if value != "" && !*cmds.setByUser[name] {
@@ -163,16 +165,23 @@ func (cmds *serveCommands) apply(config *serveConfig) {
 		}
 	}
 	set("mode", cmds.mode, config.Mode)
-	standalone := config.Standalone
-	set("transport", cmds.userd.standaloneTransport, standalone.Transport)
-	set("quic-address", cmds.userd.standaloneQUICAddr, standalone.QUICAddress)
-	set("webtransport-address", cmds.userd.standaloneWTAddr, standalone.WebTransportAddress)
-	set("tls-cert", cmds.userd.standaloneCert, standalone.TLSCert)
-	set("tls-key", cmds.userd.standaloneKey, standalone.TLSKey)
-	*cmds.userd.standaloneKeys = append(standalone.PublicKeys, *cmds.userd.standaloneKeys...)
-	users := make([]string, 0, len(standalone.Users)+len(*cmds.userd.standaloneUsers))
-	for _, user := range standalone.Users {
-		users = append(users, user.Username+":"+user.Password)
+	set("transport", cmds.userd.standaloneTransport, config.Listen.transport())
+	set("quic-address", cmds.userd.standaloneQUICAddr, config.Listen.QUIC)
+	set("webtransport-address", cmds.userd.standaloneWTAddr, config.Listen.WebTransport)
+	set("tls-cert", cmds.userd.standaloneCert, config.Listen.TLSCert)
+	set("tls-key", cmds.userd.standaloneKey, config.Listen.TLSKey)
+
+	var keys, users []string
+	for _, user := range config.Users {
+		keys = append(keys, user.Keys...)
+		if user.Password != "" {
+			users = append(users, user.Username+":"+user.Password)
+		}
 	}
+	*cmds.userd.standaloneKeys = append(keys, *cmds.userd.standaloneKeys...)
 	*cmds.userd.standaloneUsers = append(users, *cmds.userd.standaloneUsers...)
+
+	if *cmds.mode != serveModeStandalone && (config.Listen != serveConfigListen{} || len(config.Users) > 0) {
+		log.Warnf("config: listen and users are only used in standalone mode, not in %s mode", *cmds.mode)
+	}
 }
