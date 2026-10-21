@@ -256,12 +256,25 @@ func (c *capabilities) handleList(_ context.Context, _ *xconn.Invocation) *xconn
 	return xconn.NewInvocationResult(c.list(), true)
 }
 
+// isManager reports whether inv's caller is one of the machine's owners or admins. xconn's
+// bridge opens each remote caller's session with the caller's role, and nothing local calls
+// the admin procedures, so local sessions (anonymous or trusted) aren't managers.
+func isManager(inv *xconn.Invocation) bool {
+	switch inv.CallerAuthRole() {
+	case common.RoleOwner, common.RoleAdmin, common.CloudRoleOwner, common.CloudRoleAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
 // handleSet enables or disables one app: args are the app id and the new enabled state.
 // It returns the apps' list and whether anything changed (false if the app already was).
-// Only the machine's owner and admins may call it (see ProcedureCapabilitiesSet):
-// deskconn-router checks cloud calls. Direct P2P connections, served by xconn's
-// machine router, aren't checked yet.
+// Only the machine's owner and admins may call it (see ProcedureCapabilitiesSet).
 func (c *capabilities) handleSet(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	if !isManager(inv) {
+		return xconn.NewInvocationError(common.ErrNotAuthorized, "only the machine's owner and admins may enable apps")
+	}
 	id, err := inv.ArgString(0)
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())

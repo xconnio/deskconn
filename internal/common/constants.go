@@ -130,7 +130,8 @@ const ProcedureFileCat = "io.xconn.deskconn.file.cat"
 // ProcedureCapabilitiesList lists the apps the frontend may show and whether each is
 // enabled. Apps served outside userd, like media-app's, are listed while their process
 // is connected. ProcedureCapabilitiesSet enables or disables one: it's under
-// io.xconn.deskconn.admin., the procedures only a machine's owner and admins may call.
+// ProcedureAdminPrefix, the procedures only a machine's owner and admins may call, which
+// userd checks by the caller's role.
 const (
 	ProcedureCapabilitiesList = "io.xconn.deskconn.capabilities.list"
 	ProcedureCapabilitiesSet  = "io.xconn.deskconn.admin.capabilities.set"
@@ -150,6 +151,16 @@ const ProcedureAppsRegister = LocalProcedurePrefix + "apps.register"
 const (
 	ProcedurePrefix      = "io.xconn.deskconn."
 	ProcedureAdminPrefix = "io.xconn.deskconn.admin."
+)
+
+// The caller roles of a machine's owners and admins, who may call the procedures under
+// ProcedureAdminPrefix: xconn's, for direct (P2P and standalone) callers, and
+// deskconn-router's, for cloud ones.
+const (
+	RoleOwner      = "owner"
+	RoleAdmin      = "admin"
+	CloudRoleOwner = "user:owner"
+	CloudRoleAdmin = "user:admin"
 )
 
 const (
