@@ -20,6 +20,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/userd"
+	"github.com/xconnio/deskconn/relay"
 	"github.com/xconnio/xconn-go"
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
@@ -146,7 +147,7 @@ func runUserd(flags userdFlags, standalone bool) {
 		NewSession: func() (*xconn.Session, error) {
 			return xconn.ConnectInMemory(appRouter, common.LocalRealm)
 		},
-		Prefixes:     []string{common.ProcedurePrefix, common.ProcedureAdminPrefix},
+		Prefixes:     append([]string{common.ProcedurePrefix, common.ProcedureAdminPrefix}, relay.AppPrefixes()...),
 		StreamSocket: streamSockPath,
 	}
 	xconnDone := make(chan struct{})

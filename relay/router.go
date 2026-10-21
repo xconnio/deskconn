@@ -50,6 +50,12 @@ const (
 	MatchWildcard = "wildcard"
 )
 
+// AppPrefixes are where apps other than deskconnd keep their procedures, in a machine's
+// realm: like DeskconndPrefix, the machine may register them and its users call them.
+func AppPrefixes() []string {
+	return []string{"io.xconn.remotecontrol.", "io.xconn.media."}
+}
+
 // Machine is a machine the router serves, in a realm of its own. Its daemon joins that realm
 // as AuthID with MachineAuthRole(AuthID).
 type Machine struct {
@@ -239,33 +245,37 @@ func (r *Router) Serve(ctx context.Context) error {
 }
 
 // MachineUserPermissions is what a user needs in a machine's realm to use it: call its
-// procedures under DeskconndPrefix and signal WebRTC for direct connections.
+// procedures under DeskconndPrefix and AppPrefixes, and signal WebRTC for direct connections.
 func MachineUserPermissions() []xconn.Permission {
-	return []xconn.Permission{
+	permissions := []xconn.Permission{
 		{URI: DeskconndPrefix, MatchPolicy: MatchPrefix, AllowCall: true},
 		{URI: procedureWebRTCOffer, MatchPolicy: MatchExact, AllowCall: true},
 		{URI: topicAnswererOnCandidate, MatchPolicy: MatchExact, AllowPublish: true},
 		{URI: topicOffererOnCandidate, MatchPolicy: MatchExact, AllowSubscribe: true},
 	}
+	for _, prefix := range AppPrefixes() {
+		permissions = append(permissions, xconn.Permission{URI: prefix, MatchPolicy: MatchPrefix, AllowCall: true})
+	}
+	return permissions
 }
 
 // AddMachine serves machine's realm and adds its role to the cloud realm.
 func (r *Router) AddMachine(machine Machine) error {
 	role := MachineAuthRole(machine.AuthID)
-	roles := append([]xconn.RealmRole{
-		{
-			Name: role,
-			Permissions: []xconn.Permission{
-				{URI: DeskconndPrefix, MatchPolicy: MatchPrefix, AllowRegister: true},
-				{URI: AdminPrefix, MatchPolicy: MatchPrefix, AllowRegister: true},
-				{URI: procedureWebRTCOffer, MatchPolicy: MatchExact, AllowRegister: true},
-				{URI: topicAnswererOnCandidate, MatchPolicy: MatchExact, AllowSubscribe: true},
-				{URI: topicOffererOnCandidate, MatchPolicy: MatchExact, AllowPublish: true},
-				{URI: "wamp.session.on_leave", MatchPolicy: MatchExact, AllowSubscribe: true},
-				{URI: "io.xconn.deskconn.desktop.detach", MatchPolicy: MatchExact, AllowCall: true},
-			},
-		},
-	}, r.config.UserRoles...)
+	realmPermissions := []xconn.Permission{
+		{URI: DeskconndPrefix, MatchPolicy: MatchPrefix, AllowRegister: true},
+		{URI: AdminPrefix, MatchPolicy: MatchPrefix, AllowRegister: true},
+		{URI: procedureWebRTCOffer, MatchPolicy: MatchExact, AllowRegister: true},
+		{URI: topicAnswererOnCandidate, MatchPolicy: MatchExact, AllowSubscribe: true},
+		{URI: topicOffererOnCandidate, MatchPolicy: MatchExact, AllowPublish: true},
+		{URI: "wamp.session.on_leave", MatchPolicy: MatchExact, AllowSubscribe: true},
+		{URI: "io.xconn.deskconn.desktop.detach", MatchPolicy: MatchExact, AllowCall: true},
+	}
+	for _, prefix := range AppPrefixes() {
+		realmPermissions = append(realmPermissions,
+			xconn.Permission{URI: prefix, MatchPolicy: MatchPrefix, AllowRegister: true})
+	}
+	roles := append([]xconn.RealmRole{{Name: role, Permissions: realmPermissions}}, r.config.UserRoles...)
 	err := r.router.AddRealm(machine.Realm, &xconn.RealmConfig{
 		AutoDiscloseCaller: true,
 		// The machine follows its callers leaving (wamp.session.on_leave) to drop their keys.

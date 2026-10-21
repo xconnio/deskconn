@@ -205,7 +205,7 @@ and P2P.
 3. **Register the apps** by calling `io.xconn.local.apps.register` with a JSON list:
 
    ```json
-   [{"id": "pictures", "name": "Pictures", "key_exchange": "io.xconn.deskconn.media.key.exchange",
+   [{"id": "pictures", "name": "Pictures", "key_exchange": "io.xconn.media.key.exchange",
      "requires": ["files"], "default_off": true}]
    ```
 
@@ -219,8 +219,9 @@ and P2P.
    exchange registered.
 
 Procedures under `io.xconn.deskconn.` are reachable by remote clients (and `io.xconn.deskconn.admin.` by
-the machine's owner and admins only), so the key exchange and the app's procedures go there. Everything else on the
-socket, such as `io.xconn.local.*`, stays local.
+the machine's owner and admins only), and so are the app prefixes the cloud router allows (`relay.AppPrefixes`:
+`io.xconn.remotecontrol.` and `io.xconn.media.`), so the key exchange and the app's procedures go under one of them.
+Everything else on the socket, such as `io.xconn.local.*`, stays local.
 
 In Go, `common.AppEncryption` does step 2:
 

@@ -34,8 +34,8 @@ const (
 // handlers) -- wire-protocol identifiers the CLI (root package) calls
 // directly and userd's proxy handlers implement, so both sides need
 // the same string constants regardless of which process implements which
-// half. They're under LocalProcedurePrefix, outside ProcedurePrefix, so xconn doesn't
-// expose them remotely.
+// half. They're under LocalProcedurePrefix, outside ProcedurePrefix and the app prefixes,
+// so xconn doesn't expose them remotely.
 const (
 	LocalProcedurePrefix = "io.xconn.local."
 

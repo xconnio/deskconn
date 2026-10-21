@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/relay"
 )
 
 // The local realm's procedures must stay outside every prefix xconn bridges to remote
@@ -19,7 +20,7 @@ func TestLocalProceduresAreNotBridged(t *testing.T) {
 		common.ProcedureLogout, common.ProcedureConnect, common.ProcedureDisconnect,
 		common.ProcedureDisconnectAll, common.ProcedureConnectedMachines, common.ProcedureAppsRegister,
 	}
-	bridged := []string{common.ProcedurePrefix, common.ProcedureAdminPrefix}
+	bridged := append([]string{common.ProcedurePrefix, common.ProcedureAdminPrefix}, relay.AppPrefixes()...)
 	for _, procedure := range local {
 		require.True(t, strings.HasPrefix(procedure, common.LocalProcedurePrefix), procedure)
 		for _, prefix := range bridged {
