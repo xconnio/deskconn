@@ -34,22 +34,25 @@ const (
 // handlers) -- wire-protocol identifiers the CLI (root package) calls
 // directly and userd's proxy handlers implement, so both sides need
 // the same string constants regardless of which process implements which
-// half. They're outside ProcedurePrefix, so xconn doesn't expose them remotely.
+// half. They're under LocalProcedurePrefix, outside ProcedurePrefix, so xconn doesn't
+// expose them remotely.
 const (
-	ProcedureProxyFileOp       = "io.xconn.deskconn.local.proxy.file.op"
-	ProcedureProxyMachineInfo  = "io.xconn.deskconn.local.proxy.machine.info"
-	ProcedureProxyPing         = "io.xconn.deskconn.local.proxy.ping"
-	ProcedureProxyCat          = "io.xconn.deskconn.local.proxy.file.cat"
-	ProcedureProxyPrinterList  = "io.xconn.deskconn.local.proxy.printer.list"
-	ProcedureProxyPrinterPrint = "io.xconn.deskconn.local.proxy.printer.print"
-	ProcedureProxyVPNStart     = "io.xconn.deskconn.local.proxy.vpn.start"
-	ProcedureProxyVPNStop      = "io.xconn.deskconn.local.proxy.vpn.stop"
-	ProcedureLogin             = "io.xconn.deskconn.login"
-	ProcedureLogout            = "io.xconn.deskconn.logout"
-	ProcedureConnect           = "io.xconn.deskconn.connect"
-	ProcedureDisconnect        = "io.xconn.deskconn.disconnect"
-	ProcedureDisconnectAll     = "io.xconn.deskconn.disconnect_all"
-	ProcedureConnectedMachines = "io.xconn.deskconn.connected_machines"
+	LocalProcedurePrefix = "io.xconn.local."
+
+	ProcedureProxyFileOp       = LocalProcedurePrefix + "proxy.file.op"
+	ProcedureProxyMachineInfo  = LocalProcedurePrefix + "proxy.machine.info"
+	ProcedureProxyPing         = LocalProcedurePrefix + "proxy.ping"
+	ProcedureProxyCat          = LocalProcedurePrefix + "proxy.file.cat"
+	ProcedureProxyPrinterList  = LocalProcedurePrefix + "proxy.printer.list"
+	ProcedureProxyPrinterPrint = LocalProcedurePrefix + "proxy.printer.print"
+	ProcedureProxyVPNStart     = LocalProcedurePrefix + "proxy.vpn.start"
+	ProcedureProxyVPNStop      = LocalProcedurePrefix + "proxy.vpn.stop"
+	ProcedureLogin             = LocalProcedurePrefix + "login"
+	ProcedureLogout            = LocalProcedurePrefix + "logout"
+	ProcedureConnect           = LocalProcedurePrefix + "connect"
+	ProcedureDisconnect        = LocalProcedurePrefix + "disconnect"
+	ProcedureDisconnectAll     = LocalProcedurePrefix + "disconnect_all"
+	ProcedureConnectedMachines = LocalProcedurePrefix + "connected_machines"
 
 	LocalRealm = "io.xconn.deskconn.local"
 
@@ -139,7 +142,7 @@ const (
 // ProcedureAppsRegister is how a process on userd's local socket registers the apps it
 // serves, with a JSON list of {"id", "name", "key_exchange", "requires", "default_off"}
 // (see the README's "Adding an app"). Local realm only.
-const ProcedureAppsRegister = "io.xconn.deskconn.local.apps.register"
+const ProcedureAppsRegister = LocalProcedurePrefix + "apps.register"
 
 // xconn exposes every procedure registered on userd's local socket under these
 // prefixes to remote clients: userd's own and other apps' alike. Procedures under

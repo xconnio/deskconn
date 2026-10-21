@@ -202,7 +202,7 @@ and P2P.
    `frontendToBackend` for requests and `backendToFrontend` for results. Every other procedure takes its request as a
    single encrypted JSON argument (nonce + ChaCha20-Poly1305 ciphertext, empty or absent when there is none) and returns
    a single encrypted JSON result. Keys are per caller session.
-3. **Register the apps** by calling `io.xconn.deskconn.local.apps.register` with a JSON list:
+3. **Register the apps** by calling `io.xconn.local.apps.register` with a JSON list:
 
    ```json
    [{"id": "pictures", "name": "Pictures", "key_exchange": "io.xconn.deskconn.media.key.exchange",
@@ -220,7 +220,7 @@ and P2P.
 
 Procedures under `io.xconn.deskconn.` are reachable by remote clients (and `io.xconn.deskconn.admin.` by
 the machine's owner and admins only), so the key exchange and the app's procedures go there. Everything else on the
-socket, such as `io.xconn.deskconn.local.*`, stays local.
+socket, such as `io.xconn.local.*`, stays local.
 
 In Go, `common.AppEncryption` does step 2:
 
