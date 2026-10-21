@@ -223,25 +223,27 @@ the machine's owner and admins only), and so are the app prefixes the cloud rout
 `io.xconn.remotecontrol.` and `io.xconn.media.`), so the key exchange and the app's procedures go under one of them.
 Everything else on the socket, such as `io.xconn.local.*`, stays local.
 
-In Go, `common.AppEncryption` does step 2:
+In Go, the `github.com/xconnio/deskconn/appkit` package has what an app needs: the socket (`appkit.SocketURI`), the
+procedures above, and `appkit.Encryption`, which does step 2:
 
 ```go
-enc := common.NewAppEncryption()
-if err := enc.Register(session, "io.xconn.deskconn.myapp.key.exchange"); err != nil {
+session, err := xconn.ConnectAnonymous(ctx, appkit.SocketURI(cfgDirectory), appkit.LocalRealm)
+enc := appkit.NewEncryption()
+if err := enc.Register(session, "io.xconn.media.key.exchange"); err != nil {
     return err
 }
 handler := enc.Encrypted(func(ctx context.Context, req []byte) (any, error) {
     // req is the decrypted JSON request; the result is sent back as encrypted JSON.
     return map[string]string{"hello": "world"}, nil
 })
-resp := session.Register("io.xconn.deskconn.myapp.hello", handler).Do()
+resp := session.Register("io.xconn.media.hello", handler).Do()
 ```
 
 A client finds the app's key exchange in the apps list, then calls it before the app's procedures:
 
 ```go
-keys, err := common.ClientKeyExchangeWith(session, app.KeyExchange)
-result, err := common.EncryptedCall(session, "io.xconn.deskconn.myapp.hello", nil, keys)
+keys, err := appkit.ClientKeyExchange(session, keyExchange)
+result, err := appkit.EncryptedCall(session, "io.xconn.media.hello", nil, keys)
 ```
 
 ## Development
