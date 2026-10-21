@@ -172,8 +172,8 @@ func gvdbLookup(data []byte, fullKey string) string {
 		}
 		key := getKey(i)
 		parent := getParent(i)
-		if parent >= nItems { // root item
-			return "/" + string(key)
+		if parent >= nItems { // root item, whose key is "/" itself
+			return string(key)
 		}
 		return buildPath(parent, depth+1) + string(key)
 	}
