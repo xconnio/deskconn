@@ -69,7 +69,7 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *userd.
 	relayListener, err := net.Listen("unix", relaySock)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = relayListener.Close() })
-	machine := userd.NewDeskconn(nil, false, t.TempDir())
+	machine := userd.NewDeskconn(false, t.TempDir())
 	common.SafeGo(func() { machine.ServeStreamRelay(relayListener) })
 
 	router, err := xconn.NewRouter(xconn.DefaultRouterConfig())
