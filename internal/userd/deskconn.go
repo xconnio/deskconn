@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"maps"
 	"os"
 
-	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
@@ -23,7 +21,6 @@ type Deskconn struct {
 	agentForwardSessions *agentForwardSessions
 	files                *FileBrowser
 	thumbnails           *thumbnailCache
-	wallpaper            *Wallpaper
 	processes            *ProcessMonitor
 	appRegistry          *AppRegistry
 	desktop              bool
@@ -32,9 +29,8 @@ type Deskconn struct {
 	relayConns           relayConns
 }
 
-// NewDeskconn returns the machine's APIs. sessionBus, nil on a headless server, serves the
-// wallpaper.
-func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool, cfgDirectory string) *Deskconn {
+// NewDeskconn returns the machine's APIs.
+func NewDeskconn(desktopEnvironment bool, cfgDirectory string) *Deskconn {
 	d := &Deskconn{
 		shellSession:         newInteractiveShellSession(),
 		keys:                 newKeyManager(),
@@ -49,9 +45,6 @@ func NewDeskconn(sessionBus *dbus.Conn, desktopEnvironment bool, cfgDirectory st
 	d.shellSession.agentForward = d.agentForwardSessions
 	d.capabilities = newCapabilities(d.apps(), cfgDirectory)
 	common.SafeGo(d.thumbnails.sweepLoop)
-	if sessionBus != nil {
-		d.wallpaper = NewWallpaper(sessionBus)
-	}
 	return d
 }
 
@@ -68,15 +61,8 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		},
 	}
 
-	// The wallpaper depends on a session D-Bus connection, which isn't available on a
-	// headless server. Skip registering it there. Screen, MPRIS, audio, screenshot and
-	// printer procedures are served by remotecontrol-app.
-	if d.desktop && d.wallpaper != nil {
-		maps.Copy(handlers, map[string]xconn.InvocationHandler{
-			common.ProcedureWallpaperGet:      d.handleWallpaperGet,
-			common.ProcedureWallpaperChecksum: d.handleWallpaperChecksum,
-		})
-	}
+	// Screen, wallpaper, MPRIS, audio, screenshot and printer procedures are served by
+	// remotecontrol-app.
 
 	for uri, handler := range handlers {
 		response := session.Register(uri, handler).Invoke(wampproto.InvokeLast).Do()

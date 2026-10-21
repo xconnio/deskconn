@@ -8,7 +8,6 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-ole/go-ole v1.3.0
-	github.com/godbus/dbus/v5 v5.2.0
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/pion/webrtc/v4 v4.1.6
 	github.com/sergi/go-diff v1.4.0

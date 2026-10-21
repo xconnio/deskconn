@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
@@ -83,21 +82,12 @@ func runUserd(flags userdFlags, standalone bool) {
 	// unconditionally rather than misreading an unset X11/Wayland var as "server".
 	isDesktop := runtime.GOOS != "linux" || os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 
-	var sessionBus *dbus.Conn
-	if isDesktop {
-		sessionBus, err = dbus.ConnectSessionBus()
-		if err != nil {
-			log.Printf("session bus unavailable, screen lock/mpris features disabled: %v", err)
-			sessionBus = nil
-		} else {
-			defer sessionBus.Close()
-		}
-	} else {
+	if !isDesktop {
 		log.Println("no display detected (DISPLAY/WAYLAND_DISPLAY unset), " +
 			"running in server mode: display APIs disabled")
 	}
 
-	deskconnApis := userd.NewDeskconn(sessionBus, isDesktop, cfgDirectory)
+	deskconnApis := userd.NewDeskconn(isDesktop, cfgDirectory)
 	defer deskconnApis.CloseVPNTunnel()
 
 	ctx, cancel := context.WithCancel(context.Background())

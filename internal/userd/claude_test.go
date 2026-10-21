@@ -16,7 +16,7 @@ import (
 func setupDeskconnWithInstance(t *testing.T) *xconn.Session {
 	t.Helper()
 	callee, caller := setupRouterAndConnectSessions(t)
-	d := userd.NewDeskconn(nil, false, t.TempDir())
+	d := userd.NewDeskconn(false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 	return caller
 }
