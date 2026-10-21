@@ -205,20 +205,20 @@ and P2P.
 3. **Register the apps** by calling `io.xconn.deskconn.local.apps.register` with a JSON list:
 
    ```json
-   [{"id": "pictures", "name": "Pictures", "key_exchange": "io.xconn.deskconn.deskconnd.media.key.exchange",
+   [{"id": "pictures", "name": "Pictures", "key_exchange": "io.xconn.deskconn.media.key.exchange",
      "requires": ["files"], "default_off": true}]
    ```
 
    `requires` are apps this one can't work without (it's disabled with them), and a `default_off` app stays disabled
    until an owner or admin enables it. Ids must be unique on the machine. The apps are listed until the app's session
    leaves.
-4. **Follow enabled apps.** Call `io.xconn.deskconn.deskconnd.capabilities.list` for every app's
+4. **Follow enabled apps.** Call `io.xconn.deskconn.capabilities.list` for every app's
    `{"id", "name", "enabled", "key_exchange", "requires"}`, and subscribe to
-   `io.xconn.deskconn.deskconnd.capabilities.on_change`, published with the same list whenever an app is enabled or
+   `io.xconn.deskconn.capabilities.on_change`, published with the same list whenever an app is enabled or
    disabled. Register an app's procedures while it's enabled and unregister them while it's disabled; keep the key
    exchange registered.
 
-Procedures under `io.xconn.deskconn.deskconnd.` are reachable by remote clients (and `io.xconn.deskconn.admin.` by
+Procedures under `io.xconn.deskconn.` are reachable by remote clients (and `io.xconn.deskconn.admin.` by
 the machine's owner and admins only), so the key exchange and the app's procedures go there. Everything else on the
 socket, such as `io.xconn.deskconn.local.*`, stays local.
 
@@ -226,21 +226,21 @@ In Go, `common.AppEncryption` does step 2:
 
 ```go
 enc := common.NewAppEncryption()
-if err := enc.Register(session, "io.xconn.deskconn.deskconnd.myapp.key.exchange"); err != nil {
+if err := enc.Register(session, "io.xconn.deskconn.myapp.key.exchange"); err != nil {
     return err
 }
 handler := enc.Encrypted(func(ctx context.Context, req []byte) (any, error) {
     // req is the decrypted JSON request; the result is sent back as encrypted JSON.
     return map[string]string{"hello": "world"}, nil
 })
-resp := session.Register("io.xconn.deskconn.deskconnd.myapp.hello", handler).Do()
+resp := session.Register("io.xconn.deskconn.myapp.hello", handler).Do()
 ```
 
 A client finds the app's key exchange in the apps list, then calls it before the app's procedures:
 
 ```go
 keys, err := common.ClientKeyExchangeWith(session, app.KeyExchange)
-result, err := common.EncryptedCall(session, "io.xconn.deskconn.deskconnd.myapp.hello", nil, keys)
+result, err := common.EncryptedCall(session, "io.xconn.deskconn.myapp.hello", nil, keys)
 ```
 
 ## Development

@@ -30,7 +30,7 @@ const (
 	ProcedureRemoveRealm = "io.xconn.deskconn.realm.remove"
 
 	// DeskconndPrefix is where a machine's procedures live, in its realm.
-	DeskconndPrefix = "io.xconn.deskconn.deskconnd."
+	DeskconndPrefix = "io.xconn.deskconn."
 	// AdminPrefix is where a machine's procedures for only some of its users live: which,
 	// is up to Config.UserRoles.
 	AdminPrefix = "io.xconn.deskconn.admin."

@@ -16,7 +16,7 @@ import (
 
 const (
 	userRole        = "user"
-	procedurePing   = "io.xconn.deskconn.deskconnd.ping"
+	procedurePing   = "io.xconn.deskconn.ping"
 	machineAuthID   = "machine-1"
 	machineRealm    = "realm-1"
 	userAuthID      = "alice"
