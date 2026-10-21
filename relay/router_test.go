@@ -15,13 +15,14 @@ import (
 )
 
 const (
-	userRole        = "user"
-	procedurePing   = "io.xconn.deskconn.ping"
-	machineAuthID   = "machine-1"
-	machineRealm    = "realm-1"
-	userAuthID      = "alice"
-	secondAuthID    = "machine-2"
-	secondRealmName = "realm-2"
+	userRole         = "user"
+	procedurePing    = "io.xconn.deskconn.ping"
+	procedureAppPing = "io.xconn.remotecontrol.ping"
+	machineAuthID    = "machine-1"
+	machineRealm     = "realm-1"
+	userAuthID       = "alice"
+	secondAuthID     = "machine-2"
+	secondRealmName  = "realm-2"
 )
 
 type keyPair struct{ public, private string }
@@ -105,6 +106,19 @@ func TestCustomCallbacks(t *testing.T) {
 	callResp := user.Call(procedurePing).Do()
 	require.NoError(t, callResp.Err)
 	require.Equal(t, "pong", callResp.ArgStringOr(0, ""))
+
+	// Apps' procedures, under AppPrefixes, are served the same way; other prefixes aren't.
+	resp = machine.Register(procedureAppPing, func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
+		return xconn.NewInvocationResult("app pong")
+	}).Do()
+	require.NoError(t, resp.Err)
+	callResp = user.Call(procedureAppPing).Do()
+	require.NoError(t, callResp.Err)
+	require.Equal(t, "app pong", callResp.ArgStringOr(0, ""))
+	resp = machine.Register("io.xconn.other.ping", func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
+		return xconn.NewInvocationResult()
+	}).Do()
+	require.Error(t, resp.Err)
 
 	// Authenticate refuses who it doesn't know.
 	_, err = connect(t, uri, machineRealm, userAuthID, strangerKey.private)

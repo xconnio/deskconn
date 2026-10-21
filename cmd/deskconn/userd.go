@@ -20,6 +20,8 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/userd"
+	"github.com/xconnio/deskconn/relay"
+	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
@@ -142,11 +144,17 @@ func runUserd(flags userdFlags, standalone bool) {
 	// streamSockPath.
 	xconnApp := &xconnd.App{
 		Session: appSession,
-		// A session per remote caller, so userd and apps keep each caller's keys.
-		NewSession: func() (*xconn.Session, error) {
-			return xconn.ConnectInMemory(appRouter, common.LocalRealm)
+		// A session per remote caller, with its authid and authrole, so userd and apps keep
+		// each caller's keys and see its role.
+		NewSession: func(authID, authRole string) (*xconn.Session, error) {
+			base, err := xconn.ConnectInMemoryBase(appRouter, common.LocalRealm, authID, authRole,
+				&serializers.MsgPackSerializer{}, 16)
+			if err != nil {
+				return nil, err
+			}
+			return xconn.NewSession(base, base.Serializer()), nil
 		},
-		Prefixes:     []string{common.ProcedurePrefix, common.ProcedureAdminPrefix},
+		Prefixes:     append([]string{common.ProcedurePrefix, common.ProcedureAdminPrefix}, relay.AppPrefixes()...),
 		StreamSocket: streamSockPath,
 	}
 	xconnDone := make(chan struct{})

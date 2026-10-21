@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/relay"
 	"github.com/xconnio/wampproto-go"
 	"github.com/xconnio/xconn-go"
 )
@@ -208,9 +209,10 @@ func (c *capabilities) addExternal(sessionID uint64, apps []*app) error {
 		if a.KeyExchange == "" {
 			return fmt.Errorf("app %s has no key exchange: only end-to-end encrypted apps are supported", a.ID)
 		}
-		if !strings.HasPrefix(a.KeyExchange, common.ProcedurePrefix) {
-			return fmt.Errorf("app %s's key exchange must be under %s for clients to reach it", a.ID,
-				common.ProcedurePrefix)
+		prefixes := append([]string{common.ProcedurePrefix}, relay.AppPrefixes()...)
+		if !slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(a.KeyExchange, prefix) }) {
+			return fmt.Errorf("app %s's key exchange must be under one of %s for clients to reach it", a.ID,
+				strings.Join(prefixes, ", "))
 		}
 		if slices.ContainsFunc(c.apps(), func(b *app) bool { return b.ID == a.ID }) {
 			return fmt.Errorf("app %s is already registered", a.ID)
@@ -254,12 +256,25 @@ func (c *capabilities) handleList(_ context.Context, _ *xconn.Invocation) *xconn
 	return xconn.NewInvocationResult(c.list(), true)
 }
 
+// isManager reports whether inv's caller is one of the machine's owners or admins. xconn's
+// bridge opens each remote caller's session with the caller's role, and nothing local calls
+// the admin procedures, so local sessions (anonymous or trusted) aren't managers.
+func isManager(inv *xconn.Invocation) bool {
+	switch inv.CallerAuthRole() {
+	case common.RoleOwner, common.RoleAdmin, common.CloudRoleOwner, common.CloudRoleAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
 // handleSet enables or disables one app: args are the app id and the new enabled state.
 // It returns the apps' list and whether anything changed (false if the app already was).
-// Only the machine's owner and admins may call it (see ProcedureCapabilitiesSet):
-// deskconn-router checks cloud calls. Direct P2P connections, served by xconn's
-// machine router, aren't checked yet.
+// Only the machine's owner and admins may call it (see ProcedureCapabilitiesSet).
 func (c *capabilities) handleSet(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	if !isManager(inv) {
+		return xconn.NewInvocationError(common.ErrNotAuthorized, "only the machine's owner and admins may enable apps")
+	}
 	id, err := inv.ArgString(0)
 	if err != nil {
 		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
