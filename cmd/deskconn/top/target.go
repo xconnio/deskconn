@@ -31,14 +31,13 @@ func profileTarget(profile common.Profile) topTarget {
 	return topTarget{name: profile.Name, realm: common.ProfileRealm(profile.Name), profile: profile.Name}
 }
 
-// streamMode is the --mode a shell, logs or port forward to target uses: the daemon's
-// connection when it has one to the machine, otherwise a connection of its own through the
+// streamMode is the --mode a shell, logs or port forward to target uses: for a machine of
+// the account, the daemon's connection to it when the daemon is running (P2P once it has
+// upgraded it, which it starts on connecting), otherwise a connection of its own through the
 // router (which, unlike trying a direct one first, doesn't print on the way).
 func (m *Model) streamMode(target topTarget) string {
-	if target.profile == "" {
-		if _, ok := m.connected[target.realm]; ok {
-			return ""
-		}
+	if target.profile == "" && m.daemonUp {
+		return ""
 	}
 	return deskconn.ModeRouted
 }
@@ -144,13 +143,22 @@ type Remote interface {
 	Close()
 }
 
-// topSessions are the real Remote: the connections desk top calls machines' procedures on
-// (resources, processes, ping), one per machine, kept for as long as they work.
+// topSessions are the real Remote. Calls to a machine of the account go through the local
+// daemon when it's running, on its connection to the machine: P2P once it has upgraded it,
+// and with the keys already exchanged. Otherwise, and for profiles, they go on connections
+// of desk top's own, one per machine, kept for as long as they work.
 type topSessions struct {
 	cfgDirectory string
 
-	mu      sync.Mutex
-	byRealm map[string]*topSession
+	mu     sync.Mutex
+	daemon *xconn.Session  // to the local daemon, or nil if not connected yet
+	ready  map[string]bool // the realms whose machines the daemon has been asked to connect to
+	// proxying lets one call at a time through the daemon to each realm's machine: on a
+	// connection it hasn't used yet, calls at once each exchange keys, and all but the
+	// last are refused for theirs.
+	proxying map[string]*sync.Mutex
+	byRealm  map[string]*topSession
+	dialing  map[string]chan struct{} // by realm, closed once the connection being made is made or fails
 }
 
 type topSession struct {
@@ -159,20 +167,106 @@ type topSession struct {
 }
 
 func newTopSessions(cfgDirectory string) *topSessions {
-	return &topSessions{cfgDirectory: cfgDirectory, byRealm: map[string]*topSession{}}
+	return &topSessions{cfgDirectory: cfgDirectory, ready: map[string]bool{}, proxying: map[string]*sync.Mutex{},
+		byRealm: map[string]*topSession{}, dialing: map[string]chan struct{}{}}
 }
 
-// topConnectTimeout bounds connecting to a machine.
-const topConnectTimeout = 15 * time.Second
+const (
+	// topConnectTimeout bounds connecting to a machine, and a call through the daemon,
+	// which may have to connect to the machine first.
+	topConnectTimeout = 15 * time.Second
+	// topDaemonTimeout bounds connecting to the local daemon.
+	topDaemonTimeout = 2 * time.Second
+)
 
+// viaDaemon returns the local daemon's session if calls to realm's machine go through it:
+// for a machine of the account, while the daemon is running.
+func (s *topSessions) viaDaemon(realm string) *xconn.Session {
+	if _, standalone := common.StandaloneTargetFor(realm); standalone {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.daemon != nil && s.daemon.Connected() {
+		return s.daemon
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), topDaemonTimeout)
+	defer cancel()
+	daemon, err := xconn.ConnectAnonymous(ctx, common.DaemonURI(s.cfgDirectory), common.LocalRealm)
+	if err != nil {
+		s.daemon = nil
+		return nil
+	}
+	s.daemon = daemon
+	return daemon
+}
+
+// proxy calls procedure on realm's machine through the daemon, having it connect to the
+// machine first if it hasn't yet: calls at once would each have it connect, the last
+// connection replacing the others under the calls on them.
+func (s *topSessions) proxy(daemon *xconn.Session, realm, procedure string, args ...any) (xconn.CallResponse, error) {
+	s.mu.Lock()
+	proxying := s.proxying[realm]
+	if proxying == nil {
+		proxying = &sync.Mutex{}
+		s.proxying[realm] = proxying
+	}
+	ready := s.ready[realm]
+	s.mu.Unlock()
+
+	proxying.Lock()
+	defer proxying.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), topConnectTimeout)
+	defer cancel()
+	if !ready {
+		if err := daemon.Call(common.ProcedureConnect).Args(realm).DoContext(ctx).Err; err != nil {
+			return xconn.CallResponse{}, err
+		}
+	}
+	resp := daemon.Call(procedure).Args(args...).DoContext(ctx)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// After a failure, have it connect again first, in case it lost the connection.
+	s.ready[realm] = resp.Err == nil
+	return resp, resp.Err
+}
+
+// get returns realm's session, connecting first if there isn't one. Calls at once share
+// one connection.
 func (s *topSessions) get(realm string) (*topSession, error) {
 	s.mu.Lock()
-	session := s.byRealm[realm]
-	s.mu.Unlock()
-	if session != nil {
-		return session, nil
+	for {
+		if session := s.byRealm[realm]; session != nil {
+			s.mu.Unlock()
+			return session, nil
+		}
+		dialing, ok := s.dialing[realm]
+		if !ok {
+			break
+		}
+		s.mu.Unlock()
+		<-dialing
+		s.mu.Lock()
 	}
+	dialing := make(chan struct{})
+	s.dialing[realm] = dialing
+	s.mu.Unlock()
 
+	session, err := s.dial(realm)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.dialing, realm)
+	close(dialing)
+	if err != nil {
+		return nil, err
+	}
+	s.byRealm[realm] = session
+	return session, nil
+}
+
+func (s *topSessions) dial(realm string) (*topSession, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), topConnectTimeout)
 	defer cancel()
 	conn, err := common.ConnectMachineRealmQUIC(ctx, realm, s.cfgDirectory)
@@ -184,16 +278,7 @@ func (s *topSessions) get(realm string) (*topSession, error) {
 		closeMachineConn(conn)
 		return nil, err
 	}
-	session = &topSession{conn: conn, keys: keys}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing := s.byRealm[realm]; existing != nil {
-		closeMachineConn(conn)
-		return existing, nil
-	}
-	s.byRealm[realm] = session
-	return session, nil
+	return &topSession{conn: conn, keys: keys}, nil
 }
 
 // call runs fn on realm's session, connecting first if needed. A failed call drops the
@@ -211,12 +296,23 @@ func (s *topSessions) call(realm string, fn func(*topSession) error) error {
 }
 
 func (s *topSessions) Call(realm, procedure string, args, result any) error {
-	var payload []byte
+	payload := []byte{}
 	if args != nil {
 		var err error
 		if payload, err = json.Marshal(args); err != nil {
 			return err
 		}
+	}
+	if daemon := s.viaDaemon(realm); daemon != nil {
+		resp, err := s.proxy(daemon, realm, common.ProcedureProxyFileOp, realm, procedure, payload)
+		if err != nil {
+			return err
+		}
+		data, err := resp.ArgBytes(0)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(data, result)
 	}
 	return s.call(realm, func(session *topSession) error {
 		data, err := common.EncryptedCall(session.conn.Session, procedure, payload, session.keys)
@@ -238,6 +334,10 @@ func (s *topSessions) drop(realm string) {
 }
 
 func (s *topSessions) Ping(realm string) error {
+	if daemon := s.viaDaemon(realm); daemon != nil {
+		_, err := s.proxy(daemon, realm, common.ProcedureProxyPing, realm)
+		return err
+	}
 	return s.call(realm, func(session *topSession) error {
 		ctx, cancel := context.WithTimeout(context.Background(), topConnectTimeout)
 		defer cancel()
@@ -258,9 +358,12 @@ func (s *topSessions) Forward(ctx context.Context, mode, realm string, reverse b
 
 func (s *topSessions) Close() {
 	s.mu.Lock()
-	sessions := s.byRealm
-	s.byRealm = map[string]*topSession{}
+	daemon, sessions := s.daemon, s.byRealm
+	s.daemon, s.byRealm = nil, map[string]*topSession{}
 	s.mu.Unlock()
+	if daemon != nil {
+		_ = daemon.Leave()
+	}
 	for _, session := range sessions {
 		closeMachineConn(session.conn)
 	}

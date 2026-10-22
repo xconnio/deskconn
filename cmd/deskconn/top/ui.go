@@ -165,7 +165,7 @@ func (m *Model) headerView() string {
 }
 
 // hintsView lays the top view's keys, then the ones every view has, out in columns of
-// topHeaderHeight rows, as many as fit in width.
+// topHeaderHeight rows, as many as fit in width, each column's labels lined up as k9s's are.
 func (m *Model) hintsView(width int) string {
 	hints := append(m.top().hints(m), topHint{"?", "Help"})
 	if len(m.views) > 1 {
@@ -173,16 +173,21 @@ func (m *Model) hintsView(width int) string {
 	}
 	var columns []string
 	for start := 0; start < len(hints); start += topHeaderHeight {
+		column := hints[start:min(len(hints), start+topHeaderHeight)]
+		keyWidth := 0
+		for _, hint := range column {
+			keyWidth = max(keyWidth, len([]rune(hint.key))+2)
+		}
 		var lines []string
-		for _, hint := range hints[start:min(len(hints), start+topHeaderHeight)] {
-			lines = append(lines, m.styles.hintKey.Render(fmt.Sprintf("<%s>", hint.key))+" "+
+		for _, hint := range column {
+			lines = append(lines, m.styles.hintKey.Render(fmt.Sprintf("%-*s", keyWidth, "<"+hint.key+">"))+" "+
 				m.styles.hintLabel.Render(hint.label))
 		}
-		column := lipgloss.NewStyle().PaddingRight(3).Render(strings.Join(lines, "\n"))
-		if lipgloss.Width(strings.Join(append(columns, column), "")) > width {
+		rendered := lipgloss.NewStyle().PaddingRight(3).Render(strings.Join(lines, "\n"))
+		if lipgloss.Width(strings.Join(append(columns, rendered), "")) > width {
 			break
 		}
-		columns = append(columns, column)
+		columns = append(columns, rendered)
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, columns...)
 }

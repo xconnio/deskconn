@@ -35,9 +35,10 @@ const (
 // fakeRemote stands in for the machines desk top acts on.
 type fakeRemote struct {
 	mu      sync.Mutex
-	results map[string]any // what Call returns, by procedure
-	err     error          // what Call and Ping fail with, if set
-	calls   []string       // the procedures Call was called with, each with its args as JSON
+	results map[string]any           // what Call returns, by procedure
+	hold    map[string]chan struct{} // Call of these procedures waits until it's closed
+	err     error                    // what Call and Ping fail with, if set
+	calls   []string                 // the procedures Call was called with, each with its args as JSON
 
 	logLines  chan string // what Logs writes, a chunk at a time; closing it ends the log
 	logErr    error       // what the log ends with
@@ -49,7 +50,8 @@ type fakeRemote struct {
 }
 
 func newFakeRemote() *fakeRemote {
-	return &fakeRemote{results: map[string]any{}, logLines: make(chan string, 200), forwardErrs: map[string]error{}}
+	return &fakeRemote{results: map[string]any{}, hold: map[string]chan struct{}{}, logLines: make(chan string, 200),
+		forwardErrs: map[string]error{}}
 }
 
 func (f *fakeRemote) set(apply func(f *fakeRemote)) {
@@ -59,6 +61,12 @@ func (f *fakeRemote) set(apply func(f *fakeRemote)) {
 }
 
 func (f *fakeRemote) Call(_, procedure string, args, result any) error {
+	f.mu.Lock()
+	hold := f.hold[procedure]
+	f.mu.Unlock()
+	if hold != nil {
+		<-hold
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	encoded, _ := json.Marshal(args)
@@ -273,9 +281,14 @@ func TestTopMachines(t *testing.T) {
 	d := newDriver(t)
 	screen := d.screen()
 	for _, want := range []string{"Machines[3]", "office", "work", "laptop", labProfile, "quic://10.0.0.5:18080",
-		"key as bob", "<s> Shell", "<shift-f> Port forward", "<machines>", "Version:  v-test",
-		"Daemon:   not running"} {
+		"key as bob", "<shift-f> Port forward", "<machines>", "Version:  v-test", "Daemon:   not running"} {
 		require.Contains(t, screen, want)
+	}
+
+	// The keys' labels line up, column by column.
+	lines := strings.Split(screen, "\n")
+	for i, label := range []string{"Resources", "Shell", "Logs", "Port forward", "Show port forwards", "Ping"} {
+		require.Equal(t, strings.Index(lines[0], "Resources"), strings.Index(lines[i], label), lines[i])
 	}
 	requireOrder(t, screen, "office", "laptop", "quic://")
 
@@ -512,6 +525,26 @@ func TestTopResources(t *testing.T) {
 
 	d.press(keyEsc, keyEsc)
 	require.Contains(t, d.screen(), "Machines[3]", "esc clears the filter, then goes back")
+}
+
+func TestTopResourcesAsTheyCome(t *testing.T) {
+	d := newDriver(t)
+	processes := make(chan struct{})
+	d.remote.set(func(f *fakeRemote) {
+		f.results = resources()
+		f.hold[common.ProcedureProcessList] = processes
+	})
+	d.press("G", keyEnter)
+	screen := d.screen()
+	require.Contains(t, screen, "Tasks: 0", "the machine's info shows without waiting for its processes")
+	require.Contains(t, screen, "Getting the processes…")
+	require.NotContains(t, screen, "firefox")
+
+	close(processes)
+	d.settle()
+	screen = d.screen()
+	require.Contains(t, screen, "firefox")
+	require.NotContains(t, screen, "Getting the processes…")
 }
 
 func TestTopLogs(t *testing.T) {
