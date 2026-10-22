@@ -8,10 +8,17 @@ import (
 	"syscall"
 )
 
-func watchResize(_ int, onResize func()) {
+// watchResize calls onResize each time the terminal is resized, until done is closed.
+func watchResize(_ int, done <-chan struct{}, onResize func()) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGWINCH)
-	for range sigChan {
-		onResize()
+	defer signal.Stop(sigChan)
+	for {
+		select {
+		case <-done:
+			return
+		case <-sigChan:
+			onResize()
+		}
 	}
 }

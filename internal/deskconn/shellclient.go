@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muesli/cancelreader"
 	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
@@ -20,12 +21,11 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-// modeRouted/modeDirect are the "routed"/"direct" --mode flag values every raw-stream
-// client entry point switches on. cmd/desk has its own ModeRouted/ModeDirect
-// with the same values, kept separate since it can't import these.
+// ModeRouted/ModeDirect are the "routed"/"direct" --mode flag values every raw-stream
+// client entry point switches on.
 const (
-	modeRouted = "routed"
-	modeDirect = "direct"
+	ModeRouted = "routed"
+	ModeDirect = "direct"
 )
 
 // clampUint16 clamps a terminal dimension (from term.GetSize, always
@@ -261,10 +261,10 @@ func (a *activeShellConn) cleanupCurrent() {
 	}
 }
 
-func shellStdinLoop(active *activeShellConn) {
+func shellStdinLoop(active *activeShellConn, stdin io.Reader) {
 	buf := make([]byte, 1024)
 	for {
-		n, err := os.Stdin.Read(buf)
+		n, err := stdin.Read(buf)
 		if err != nil {
 			return
 		}
@@ -277,8 +277,8 @@ func shellStdinLoop(active *activeShellConn) {
 	}
 }
 
-func shellResizeLoop(active *activeShellConn, fd int) {
-	watchResize(fd, func() {
+func shellResizeLoop(active *activeShellConn, fd int, done <-chan struct{}) {
+	watchResize(fd, done, func() {
 		cols, rows, err := term.GetSize(fd)
 		if err != nil {
 			return
@@ -301,10 +301,15 @@ func shellResizeLoop(active *activeShellConn, fd int) {
 // user isn't typing or resizing, so the server's idle-connection deadline
 // (ShellIdleTimeout) doesn't mistake a quiet session for a dead one -- see
 // its doc comment for why that deadline exists at all.
-func shellPingLoop(active *activeShellConn) {
+func shellPingLoop(active *activeShellConn, done <-chan struct{}) {
 	ticker := time.NewTicker(common.ShellPingInterval)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+		}
 		conn, sendKey, _ := active.get()
 		_ = sendShellControl(conn, sendKey, common.ShellControlMsg{Op: common.ShellOpPing})
 	}
@@ -369,9 +374,9 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	var primary *shellHandshakeResult
 	var daemon *DaemonStreams
 	switch mode {
-	case modeDirect:
+	case ModeDirect:
 		primary, err = dialShellP2P(ctx, realm, cfgDirectory, ctrl)
-	case modeRouted:
+	case ModeRouted:
 		primary, err = dialShellQUIC(ctx, realm, cfgDirectory, ctrl)
 	default:
 		daemon, err = DialDaemonStreams(ctx, realm, cfgDirectory)
@@ -390,9 +395,18 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	active.set(primary)
 	defer active.cleanupCurrent()
 
-	go shellStdinLoop(active)
-	go shellResizeLoop(active, sizeFd)
-	go shellPingLoop(active)
+	// The loops end with the session, the one reading stdin included: in desk top, the
+	// terminal goes back to it and a read left waiting would take its next key.
+	done := make(chan struct{})
+	defer close(done)
+	stdin, err := cancelreader.NewReader(os.Stdin)
+	if err != nil {
+		return err
+	}
+	defer func() { stdin.Cancel(); _ = stdin.Close() }()
+	go shellStdinLoop(active, stdin)
+	go shellResizeLoop(active, sizeFd, done)
+	go shellPingLoop(active, done)
 
 	migrateCtrl := common.ShellControlMsg{
 		Op: common.ShellOpMigrate, OldID: primary.shellID, Token: primary.token, AuthID: ctrl.AuthID,

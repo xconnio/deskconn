@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -14,12 +15,12 @@ import (
 
 // RunLogs is the client entry point for `desk machine logs`. It validates since
 // up front, opens one raw stream/channel, sends the one-time log
-// request, then writes every received chunk straight to stdout until the
+// request, then writes every received chunk straight to out until the
 // machine finishes or ctx is canceled. mode picks "routed"/"direct" itself, or
 // "" uses userd's persistent connection, falling back (without userd)
 // to trying P2P first, then QUIC.
 func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
-	follow bool, tailN int64, since string) error {
+	follow bool, tailN int64, since string, out io.Writer) error {
 	if since != "" {
 		if _, err := time.ParseDuration(since); err != nil {
 			return fmt.Errorf("invalid since value %q: %w", since, err)
@@ -27,23 +28,23 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 	}
 
 	switch mode {
-	case modeDirect:
+	case ModeDirect:
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since)
-	case modeRouted:
-		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since)
+		return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since, out)
+	case ModeRouted:
+		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since, out)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = daemon.Close() }()
 			if daemon.P2P() {
-				return runLogsP2P(ctx, daemon, source, follow, tailN, since)
+				return runLogsP2P(ctx, daemon, source, follow, tailN, since, out)
 			}
-			return runLogsOnStream(ctx, daemon, realm, source, follow, tailN, since)
+			return runLogsOnStream(ctx, daemon, realm, source, follow, tailN, since, out)
 		}
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			return err
@@ -51,26 +52,26 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
-			return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since)
+			return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since, out)
 		}
 		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
-		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since)
+		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since, out)
 	}
 }
 
 func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
-	follow bool, tailN int64, since string) error {
+	follow bool, tailN int64, since string, out io.Writer) error {
 	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = quicSess.Connection().Close() }()
-	return runLogsOnStream(ctx, quicSess, realm, source, follow, tailN, since)
+	return runLogsOnStream(ctx, quicSess, realm, source, follow, tailN, since, out)
 }
 
 // runLogsOnStream runs the log request on a raw stream opened on sess.
 func runLogsOnStream(ctx context.Context, sess xconn.MultiplexedSession, realm, source string,
-	follow bool, tailN int64, since string) error {
+	follow bool, tailN int64, since string, out io.Writer) error {
 	stream, err := sess.OpenStream()
 	if err != nil {
 		return err
@@ -139,13 +140,13 @@ func runLogsOnStream(ctx context.Context, sess xconn.MultiplexedSession, realm, 
 			continue
 		}
 		if kind == common.LogMsgData {
-			_, _ = os.Stdout.Write(plaintext)
+			_, _ = out.Write(plaintext)
 		}
 	}
 }
 
 func runLogsP2P(ctx context.Context, p2pSess ChannelOpener, source string,
-	follow bool, tailN int64, since string) error {
+	follow bool, tailN int64, since string, out io.Writer) error {
 	channel, err := p2pSess.OpenMessageChannel(common.LogChannelLabel)
 	if err != nil {
 		return err
@@ -207,7 +208,7 @@ func runLogsP2P(ctx context.Context, p2pSess ChannelOpener, source string,
 			continue
 		}
 		if kind == common.LogMsgData {
-			_, _ = os.Stdout.Write(plaintext)
+			_, _ = out.Write(plaintext)
 		}
 	}
 }

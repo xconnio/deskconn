@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/alecthomas/kingpin/v2"
 
@@ -67,7 +65,7 @@ func dispatchPortCommand(parsedCmd string, cmds *portCommands, cfgDirectory stri
 }
 
 func forwardPort(cfgDirectory, machine, mapping, mode string) error {
-	localPort, remotePort, err := parsePortMapping(mapping)
+	localPort, remotePort, err := deskconn.ParsePortMapping(mapping)
 	if err != nil {
 		return err
 	}
@@ -83,7 +81,7 @@ func forwardPort(cfgDirectory, machine, mapping, mode string) error {
 }
 
 func reversePort(cfgDirectory, machine, mapping, mode string) error {
-	remotePort, localPort, err := parsePortMapping(mapping)
+	remotePort, localPort, err := deskconn.ParsePortMapping(mapping)
 	if err != nil {
 		return err
 	}
@@ -96,18 +94,4 @@ func reversePort(cfgDirectory, machine, mapping, mode string) error {
 	return runUntilInterrupted("Stopping reverse port forwarding...", func(ctx context.Context) error {
 		return deskconn.RunPortReverse(ctx, mode, realm, cfgDirectory, remotePort, localPort)
 	})
-}
-
-func parsePortMapping(mapping string) (listen, target string, err error) {
-	listen, target, ok := strings.Cut(mapping, ":")
-	if !ok || listen == "" || target == "" {
-		return "", "", fmt.Errorf("invalid port mapping: use listen:target (e.g. 8080:80)")
-	}
-	for _, port := range []string{listen, target} {
-		n, parseErr := strconv.ParseUint(port, 10, 16)
-		if parseErr != nil || n == 0 {
-			return "", "", fmt.Errorf("invalid port %q: use a number from 1 to 65535", port)
-		}
-	}
-	return listen, target, nil
 }

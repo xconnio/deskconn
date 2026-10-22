@@ -182,7 +182,7 @@ func ConnectMachineRealmP2PSession(
 		return nil, err
 	}
 
-	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, realm, authenticator, func() {})
+	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, common.ServedRealm(realm), authenticator, func() {})
 	quicSess.Connection().Close()
 	if err != nil {
 		return nil, err
@@ -245,6 +245,36 @@ func CacheMachines(cfgDirectory string, machines []common.Machine) error {
 	}
 	config.Machines = machines
 	return writeConfig(cfgDirectory, config)
+}
+
+// RefreshMachines fetches the account's machines from the cloud, keeping the aliases set on
+// cached (the machines in config.yml) and telling machines of the same name apart by their
+// ID. Callers cache the result (CacheMachines).
+func RefreshMachines(cfgDirectory string, cached []common.Machine) ([]common.Machine, error) {
+	machines, err := FetchMachinesFromCloud(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	cfgMap := make(map[string]common.Machine, len(cached))
+	for _, d := range cached {
+		cfgMap[d.Authid] = d
+	}
+
+	nameCount := make(map[string]int)
+	for i, d := range machines {
+		count := nameCount[d.Name]
+		if count > 0 {
+			newName := fmt.Sprintf("%s-%s", d.Name, d.Authid[:6])
+			machines[i].Name = newName
+		}
+		if localMachine, ok := cfgMap[d.Authid]; ok {
+			machines[i].Alias = localMachine.Alias
+		}
+		nameCount[machines[i].Name]++
+	}
+
+	return machines, nil
 }
 
 // CallFileOp performs one key-exchange-then-encrypted-call round trip

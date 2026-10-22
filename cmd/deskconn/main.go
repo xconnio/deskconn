@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -14,13 +13,14 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
 var version = "v0.1.0-alpha"
 
 const (
-	ModeRouted = "routed"
-	ModeDirect = "direct"
+	ModeRouted = deskconn.ModeRouted
+	ModeDirect = deskconn.ModeDirect
 
 	jsonFieldPath = "path"
 )
@@ -47,6 +47,7 @@ func main() {
 	selfCmds := registerSelfCommands(app)
 	agentCmds := registerAgentCommands(app, cfgDirectory)
 	serveCmds := registerServeCommands(app)
+	topCmds := registerTopCommands(app)
 
 	if len(os.Args) == 1 {
 		app.Usage(nil)
@@ -105,7 +106,8 @@ func main() {
 		dispatchVPNCommand(parsedCmd, vpnCmds, cfgDirectory) ||
 		dispatchSelfCommand(parsedCmd, selfCmds, cfgDirectory) ||
 		dispatchAgentCommand(parsedCmd, agentCmds, cfgDirectory) ||
-		dispatchServeCommand(parsedCmd, serveCmds)
+		dispatchServeCommand(parsedCmd, serveCmds) ||
+		dispatchTopCommand(parsedCmd, topCmds, cfgDirectory)
 }
 
 // hasDefaultCommand reports whether command runs one of its subcommands when given none
@@ -117,11 +119,6 @@ func hasDefaultCommand(command *kingpin.CmdModel) bool {
 		}
 	}
 	return false
-}
-
-// daemonURI is the address of deskconn.sock, the local daemon's socket.
-func daemonURI(cfgDirectory string) string {
-	return common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
 }
 
 // printErr reports a failed command on stderr. Most commands still exit 0 after.

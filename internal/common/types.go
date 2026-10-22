@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -118,17 +119,59 @@ func (t *StandaloneTarget) password() (string, error) {
 	return t.Password, nil
 }
 
-var standaloneTarget *StandaloneTarget //nolint:gochecknoglobals // set once from the CLI's flags
+// SetPassword sets the password target connects with, for one asked for other than by
+// ReadPassword (desk top), or "" to forget a wrong one.
+func (t *StandaloneTarget) SetPassword(password string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Password = password
+}
+
+// NeedsPassword reports whether target connects with a password it doesn't have yet.
+func (t *StandaloneTarget) NeedsPassword() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.PrivateKey == "" && t.Password == ""
+}
+
+// standaloneTargets are the standalone machines this process connects to, by the realm the
+// CLI names each by: StandaloneRealm for desk --profile, ProfileRealm for each of desk top's.
+var standaloneTargets = struct { //nolint:gochecknoglobals // set from the CLI's flags or desk top
+	sync.Mutex
+	byRealm map[string]*StandaloneTarget
+}{byRealm: map[string]*StandaloneTarget{}}
 
 // SetStandaloneTarget makes StandaloneRealm resolve to target for this process.
-func SetStandaloneTarget(target *StandaloneTarget) { standaloneTarget = target }
+func SetStandaloneTarget(target *StandaloneTarget) { SetStandaloneTargetFor(StandaloneRealm, target) }
 
-// StandaloneTargetFor returns the standalone target if realm refers to it.
+// SetStandaloneTargetFor makes realm (StandaloneRealm or a ProfileRealm) resolve to target
+// for this process.
+func SetStandaloneTargetFor(realm string, target *StandaloneTarget) {
+	standaloneTargets.Lock()
+	defer standaloneTargets.Unlock()
+	standaloneTargets.byRealm[realm] = target
+}
+
+// StandaloneTargetFor returns the standalone target if realm refers to one.
 func StandaloneTargetFor(realm string) (*StandaloneTarget, bool) {
-	if standaloneTarget == nil || realm != StandaloneRealm {
-		return nil, false
+	standaloneTargets.Lock()
+	defer standaloneTargets.Unlock()
+	target, ok := standaloneTargets.byRealm[realm]
+	return target, ok && target != nil
+}
+
+// ProfileRealm is the realm the CLI names profile's standalone machine by, so that one process
+// can use several (desk top). The machine itself serves StandaloneRealm, which connecting
+// to it asks for instead (see ServedRealm).
+func ProfileRealm(profile string) string { return StandaloneRealm + "/" + profile }
+
+// ServedRealm is the realm realm's machine serves: StandaloneRealm for a ProfileRealm,
+// otherwise realm itself.
+func ServedRealm(realm string) string {
+	if strings.HasPrefix(realm, StandaloneRealm+"/") {
+		return StandaloneRealm
 	}
-	return standaloneTarget, true
+	return realm
 }
 
 // StreamProxyRequest is what the CLI sends on userd's stream proxy socket. With an
