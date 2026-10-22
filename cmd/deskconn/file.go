@@ -284,7 +284,7 @@ func catFile(cfgDirectory, target, mode string) error {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.CatFile(p2pSess, path)
 	default:
-		localSession, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+		localSession, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 		if err != nil {
 			return err
 		}
@@ -376,7 +376,7 @@ func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.ReadFile(p2pSess, path)
 	default:
-		localSession, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+		localSession, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 		if err != nil {
 			return nil, err
 		}
@@ -403,7 +403,7 @@ func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload 
 		_, err = deskconn.CallFileOp(p2pSess, procedure, payload)
 		return err
 	default:
-		localSession, err := xconn.ConnectAnonymous(ctx, daemonURI(cfgDirectory), common.LocalRealm)
+		localSession, err := xconn.ConnectAnonymous(ctx, common.DaemonURI(cfgDirectory), common.LocalRealm)
 		if err != nil {
 			return err
 		}
@@ -466,7 +466,7 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	localSession, err := xconn.ConnectAnonymous(ctx, daemonURI(cfgDirectory), common.LocalRealm)
+	localSession, err := xconn.ConnectAnonymous(ctx, common.DaemonURI(cfgDirectory), common.LocalRealm)
 	if err != nil {
 		return nil
 	}

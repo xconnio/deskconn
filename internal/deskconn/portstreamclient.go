@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,14 +33,14 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 	defer ln.Close()
 
 	switch mode {
-	case modeDirect:
+	case ModeDirect:
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
 		return acceptPortForwardLoopP2P(ctx, ln, P2PChannels(p2pSess), remotePort)
-	case modeRouted:
+	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
@@ -202,14 +204,14 @@ func completePortForwardHandshake(conn shellConn, sendKey, receiveKey []byte, re
 // RunPortForward.
 func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, localPort string) error {
 	switch mode {
-	case modeDirect:
+	case ModeDirect:
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
 		return runPortReverseP2P(ctx, P2PChannels(p2pSess), remotePort, localPort)
-	case modeRouted:
+	case ModeRouted:
 		return runPortReverseQUIC(ctx, realm, cfgDirectory, remotePort, localPort)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
@@ -396,6 +398,29 @@ func runPortReverseClientLoop(ctx context.Context, readNext func() (byte, []byte
 		mu.Unlock()
 	}()
 
+	// The machine ends the session after ShellIdleTimeout without hearing from this side,
+	// which an idle forward would otherwise be: ping it, as it pings this side.
+	stopPing := make(chan struct{})
+	defer close(stopPing)
+	common.SafeGo(func() {
+		ticker := time.NewTicker(common.ShellPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopPing:
+				return
+			case <-ticker.C:
+				env, err := common.BuildPortEnvelope(common.PortMsgControl, common.MustJSON(common.PortReverseMsg{}), sendKey)
+				if err != nil {
+					continue
+				}
+				if !writer.Send(env) {
+					return
+				}
+			}
+		}
+	})
+
 	for {
 		kind, plaintext, err := readNext()
 		if err != nil {
@@ -478,4 +503,20 @@ func pumpPortReverseLocalConn(localConn net.Conn, connID uint64, sendKey []byte,
 			writer.Send(env)
 		}
 	}
+}
+
+// ParsePortMapping splits a listen:target port mapping, as desk port takes it, checking
+// both are ports.
+func ParsePortMapping(mapping string) (listen, target string, err error) {
+	listen, target, ok := strings.Cut(mapping, ":")
+	if !ok || listen == "" || target == "" {
+		return "", "", fmt.Errorf("invalid port mapping: use listen:target (e.g. 8080:80)")
+	}
+	for _, port := range []string{listen, target} {
+		n, parseErr := strconv.ParseUint(port, 10, 16)
+		if parseErr != nil || n == 0 {
+			return "", "", fmt.Errorf("invalid port %q: use a number from 1 to 65535", port)
+		}
+	}
+	return listen, target, nil
 }

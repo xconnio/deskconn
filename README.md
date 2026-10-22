@@ -88,6 +88,7 @@ Linux-only for now). Use `deskconn` there instead of `desk` — `desk` is reserv
 4. Use your machines:
 
    ```bash
+   desk top               # your machines and profiles: resources, logs, shells, port forwards
    desk ls
    desk shell <machine>
    ```

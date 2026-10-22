@@ -8,7 +8,8 @@ import (
 	"golang.org/x/term"
 )
 
-func watchResize(fd int, onResize func()) {
+// watchResize calls onResize each time the terminal is resized, until done is closed.
+func watchResize(fd int, done <-chan struct{}, onResize func()) {
 	width, height, err := term.GetSize(fd)
 	if err != nil {
 		return
@@ -16,7 +17,12 @@ func watchResize(fd int, onResize func()) {
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+		}
 		w, h, err := term.GetSize(fd)
 		if err != nil {
 			continue

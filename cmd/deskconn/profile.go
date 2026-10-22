@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"strings"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -107,7 +106,7 @@ func addProfile(cfgDirectory string, profile common.Profile) error {
 		return err
 	}
 	if profile.AuthID == "" {
-		profile.AuthID = currentUsername()
+		profile.AuthID = common.CurrentUsername()
 	}
 	if profile.PrivateKey != "" {
 		if _, err := xconnauth.NewCryptoSignAuthenticator(profile.AuthID, profile.PrivateKey, nil); err != nil {
@@ -141,7 +140,7 @@ func useProfile(cfgDirectory, name string) error {
 	}
 	authID := profile.AuthID
 	if authID == "" {
-		authID = currentUsername()
+		authID = common.CurrentUsername()
 	}
 	common.SetStandaloneTarget(&common.StandaloneTarget{URL: profile.URL, CertHash: profile.CertHash,
 		AuthID: authID, PrivateKey: profile.PrivateKey,
@@ -173,14 +172,6 @@ func listProfiles(cfgDirectory string) error {
 		_ = table.Append([]any{profile.Name, profile.URL, auth, cert})
 	}
 	return table.Render()
-}
-
-// currentUsername is the authid a profile presents unless --authid says otherwise.
-func currentUsername() string {
-	if u, err := user.Current(); err == nil && u.Username != "" {
-		return u.Username
-	}
-	return "deskconn"
 }
 
 func profileCompletions(cfgDirectory string) func() []string {

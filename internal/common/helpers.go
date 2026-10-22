@@ -121,7 +121,7 @@ func ConnectMachineRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*
 		if err != nil {
 			return nil, err
 		}
-		return ConnectStandalone(ctx, target.URL, target.CertHash, realm, authenticator)
+		return ConnectStandalone(ctx, target.URL, target.CertHash, ServedRealm(realm), authenticator)
 	}
 
 	authid, privKey, err := ReadCredentials(cfgDirectory)

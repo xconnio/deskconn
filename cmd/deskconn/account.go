@@ -68,7 +68,7 @@ func runLogin(cfgDirectory, username string) error {
 	if err := login(username); err != nil {
 		return err
 	}
-	session, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func runLogout(cfgDirectory string) error {
 	if err := logout(cfgDirectory); err != nil {
 		return err
 	}
-	session, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 	if err != nil {
 		log.Fatal(err)
 	}

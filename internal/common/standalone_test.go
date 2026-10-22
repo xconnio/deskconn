@@ -204,3 +204,30 @@ func TestStandaloneTargetReadsPasswordOnce(t *testing.T) {
 	}
 	require.Equal(t, 1, reads)
 }
+
+func TestProfileRealms(t *testing.T) {
+	const otherUser = "dave"
+	url, _, certHash := startStandalone(t, nil, map[string]string{testUser: testPassword, otherUser: "pa55"})
+	common.SetStandaloneTargetFor(common.ProfileRealm("one"),
+		&common.StandaloneTarget{URL: url, CertHash: certHash, AuthID: testUser, Password: testPassword})
+	common.SetStandaloneTargetFor(common.ProfileRealm("two"),
+		&common.StandaloneTarget{URL: url, CertHash: certHash, AuthID: otherUser, Password: "pa55"})
+	t.Cleanup(func() {
+		common.SetStandaloneTargetFor(common.ProfileRealm("one"), nil)
+		common.SetStandaloneTargetFor(common.ProfileRealm("two"), nil)
+	})
+
+	_, ok := common.StandaloneTargetFor(common.StandaloneRealm)
+	require.False(t, ok, "desk --profile's target is apart from desk top's")
+	require.Equal(t, common.StandaloneRealm, common.ServedRealm(common.ProfileRealm("one")))
+	require.Equal(t, "realm.office", common.ServedRealm("realm.office"))
+
+	// Both at once, each as its own user, on the realm the machine serves.
+	for profile, user := range map[string]string{"one": testUser, "two": otherUser} {
+		conn, err := common.ConnectMachineRealmQUIC(context.Background(), common.ProfileRealm(profile), t.TempDir())
+		require.NoError(t, err, profile)
+		t.Cleanup(func() { _ = conn.Close() })
+		require.Equal(t, user, conn.Details().AuthID(), profile)
+		require.Equal(t, common.StandaloneRealm, conn.Details().Realm(), profile)
+	}
+}

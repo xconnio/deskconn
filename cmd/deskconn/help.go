@@ -61,7 +61,7 @@ Usage: {{.App.Name}} [flags] <command>
 {{.App.Help}}
 
 Commands:
-{{CommandRows .App.Commands "ls" "shell" "file" "port" "vpn" "agent" | FormatTwoColumns}}
+{{CommandRows .App.Commands "top" "ls" "shell" "file" "port" "vpn" "agent" | FormatTwoColumns}}
 Management:
 {{CommandRows .App.Commands "machine" "account" "self" "serve" | FormatTwoColumns}}
 Standalone:

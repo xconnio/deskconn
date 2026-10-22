@@ -168,7 +168,7 @@ func dispatchMachineCommand(parsedCmd string, cmds *machineCommands, cfgDirector
 // listMachines prints the machines of your account and when each got connected, from the
 // cached list unless refresh is set or there isn't one.
 func listMachines(cfgDirectory string, refresh, detailed bool) error {
-	session, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -201,11 +201,11 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.Header(tableHeader)
 	appendRow := func(d common.Machine) {
-		since := connectedSince(connectedMachines, d.Realm)
+		since := common.ConnectedSince(connectedMachines, d.Realm)
 		if detailed {
-			_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
+			_ = table.Append([]any{common.ShortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
 		} else {
-			_ = table.Append([]any{shortID(d.Authid), d.Name, d.Alias, since})
+			_ = table.Append([]any{common.ShortID(d.Authid), d.Name, d.Alias, since})
 		}
 	}
 
@@ -219,30 +219,13 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 		return table.Render()
 	}
 
-	machines, err := deskconn.FetchMachinesFromCloud(cfgDirectory)
+	machines, err := deskconn.RefreshMachines(cfgDirectory, machinesFromCfg)
 	if err != nil {
 		return err
 	}
-
-	cfgMap := make(map[string]common.Machine, len(machinesFromCfg))
-	for _, d := range machinesFromCfg {
-		cfgMap[d.Authid] = d
+	for _, machine := range machines {
+		appendRow(machine)
 	}
-
-	nameCount := make(map[string]int)
-	for i, d := range machines {
-		count := nameCount[d.Name]
-		if count > 0 {
-			newName := fmt.Sprintf("%s-%s", d.Name, d.Authid[:6])
-			machines[i].Name = newName
-		}
-		if localMachine, ok := cfgMap[d.Authid]; ok {
-			machines[i].Alias = localMachine.Alias
-		}
-		nameCount[machines[i].Name]++
-		appendRow(machines[i])
-	}
-
 	if err := table.Render(); err != nil {
 		return err
 	}
@@ -256,7 +239,7 @@ func pingMachine(cfgDirectory, machine string, count int) error {
 	if err != nil {
 		return err
 	}
-	localSession, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+	localSession, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 	if err != nil {
 		return err
 	}
@@ -322,7 +305,7 @@ func connectMachine(cfgDirectory, machine string) error {
 	if err != nil {
 		return err
 	}
-	session, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 	if err != nil {
 		return err
 	}
@@ -334,7 +317,7 @@ func connectMachine(cfgDirectory, machine string) error {
 }
 
 func disconnectMachine(cfgDirectory, machine string, all bool) error {
-	session, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 	if err != nil {
 		return err
 	}
@@ -393,7 +376,7 @@ func fetchMachineInfo(cfgDirectory, realm, mode string) ([]byte, error) {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.CallFileOp(p2pSess, common.ProcedureMachineInfo, nil)
 	default:
-		localSession, err := xconn.ConnectAnonymous(context.Background(), daemonURI(cfgDirectory), common.LocalRealm)
+		localSession, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
 		if err != nil {
 			return nil, err
 		}
@@ -441,7 +424,7 @@ func streamMachineLogs(cfgDirectory, machine, source string, follow bool, tail i
 		return err
 	}
 	return runUntilInterrupted("Stopping log stream...", func(ctx context.Context) error {
-		return deskconn.RunLogs(ctx, mode, realm, cfgDirectory, source, follow, tail, since)
+		return deskconn.RunLogs(ctx, mode, realm, cfgDirectory, source, follow, tail, since, os.Stdout)
 	})
 }
 
@@ -501,48 +484,6 @@ func machineCompletions(cfgDirectory string) func() []string {
 		}
 		return names
 	}
-}
-
-func shortID(id string) string {
-	if len(id) <= 6 {
-		return id
-	}
-	return id[:6]
-}
-
-func connectedSince(connectedMachines map[string]any, realm string) string {
-	v, ok := connectedMachines[realm]
-	if !ok {
-		return ""
-	}
-	var ts int64
-	switch t := v.(type) {
-	case int64:
-		ts = t
-	case uint64:
-		ts = int64(t) // nolint: gosec
-	case float64:
-		ts = int64(t)
-	default:
-		return "connected"
-	}
-	return formatSince(time.Since(time.Unix(ts, 0)))
-}
-
-func formatSince(d time.Duration) string {
-	d = d.Round(time.Second)
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	h := int(d.Hours())
-	m := int(d.Minutes()) % 60
-	if m == 0 {
-		return fmt.Sprintf("%dh", h)
-	}
-	return fmt.Sprintf("%dh%dm", h, m)
 }
 
 func toMiB(b uint64) float64 {
