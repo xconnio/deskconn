@@ -1,0 +1,24 @@
+id: home
+title: Remote Control
+
+layout:
+  type: grid
+  columns: 2
+  children:
+    - id: lock
+      include: app-engine/blocks/button.yaml
+      visible:
+        bind: context.capabilities.screen
+      label: Lock screen
+      icon: https://example.com/icons/lock.png
+      call: io.xconn.remotecontrol.screen.lock
+
+    - id: mute
+      include: app-engine/blocks/toggle.yaml
+      visible:
+        bind: context.capabilities.audio
+      label:
+        on: Unmute
+        off: Mute
+      read: io.xconn.remotecontrol.audio.ismuted
+      toggle: io.xconn.remotecontrol.audio.togglemute

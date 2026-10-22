@@ -50,12 +50,16 @@ func NewDeskconn(desktopEnvironment bool, cfgDirectory string) *Deskconn {
 
 func (d *Deskconn) Register(session *xconn.Session) error {
 	handlers := map[string]xconn.InvocationHandler{
-		common.ProcedureKeyExchange:      d.handleKeyExchange,
-		common.ProcedureMachineInfo:      d.handleMachineInfo,
-		common.ProcedureMachineIsDesktop: d.handleMachineIsDesktop,
-		common.ProcedureCapabilitiesList: d.capabilities.handleList,
-		common.ProcedureCapabilitiesSet:  d.capabilities.handleSet,
-		common.ProcedureAppsRegister:     d.handleAppsRegister,
+		common.ProcedureKeyExchange:        d.handleKeyExchange,
+		common.ProcedureMachineInfo:        d.handleMachineInfo,
+		common.ProcedureMachineIsDesktop:   d.handleMachineIsDesktop,
+		common.ProcedureCapabilitiesList:   d.capabilities.handleList,
+		common.ProcedureCapabilitiesSet:    d.capabilities.handleSet,
+		common.ProcedureCapabilitiesWatch:  d.capabilities.handleWatch,
+		common.ProcedureManifestRegister:   d.capabilities.handleManifestRegister,
+		common.ProcedureManifestUnregister: d.capabilities.handleManifestUnregister,
+		common.ProcedureManifestGet:        d.capabilities.handleManifestGet,
+		common.ProcedureAppsRegister:       d.handleAppsRegister,
 		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
