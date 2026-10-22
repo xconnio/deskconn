@@ -55,10 +55,15 @@ type topResourcesView struct {
 	target topTarget
 	id     int
 
-	info    *common.MachineInfo
-	procs   []topProcess
-	err     error
-	fetched time.Time
+	info        *common.MachineInfo
+	procs       []topProcess
+	procsLoaded bool
+	err         error // the last update's
+
+	// pending is how many calls of the update under way are still to come back, and
+	// pendingErr the first of them that failed.
+	pending    int
+	pendingErr error
 
 	cpuHistory []float64
 	netHistory []float64
@@ -72,10 +77,12 @@ type topResourcesView struct {
 }
 
 type (
+	// topResourcesMsg is a call of an update coming back: the machine's info, or its
+	// processes.
 	topResourcesMsg struct {
 		id    int
 		info  *common.MachineInfo
-		procs []topProcess
+		procs []topProcess // with info nil
 		err   error
 	}
 	topResourcesTickMsg struct{ id int }
@@ -108,17 +115,27 @@ func (v *topResourcesView) setFilter(filter string) {
 	v.list = topList{}
 }
 
+// fetch updates the machine's info and processes, asking for both at once: each is shown
+// as it comes.
 func (v *topResourcesView) fetch(m *Model) tea.Cmd {
 	id, realm := v.id, v.target.realm
-	return func() tea.Msg {
+	if v.pending == 0 {
+		v.pendingErr = nil
+	}
+	v.pending += 2
+	info := func() tea.Msg {
 		var info common.MachineInfo
 		if err := m.remote.Call(realm, common.ProcedureMachineInfo, nil, &info); err != nil {
 			return topResourcesMsg{id: id, err: err}
 		}
-		var procs []topProcess
-		err := m.remote.Call(realm, common.ProcedureProcessList, nil, &procs)
-		return topResourcesMsg{id: id, info: &info, procs: procs, err: err}
+		return topResourcesMsg{id: id, info: &info}
 	}
+	procs := func() tea.Msg {
+		procs := []topProcess{}
+		err := m.remote.Call(realm, common.ProcedureProcessList, nil, &procs)
+		return topResourcesMsg{id: id, procs: procs, err: err}
+	}
+	return tea.Batch(info, procs)
 }
 
 func (v *topResourcesView) handle(m *Model, msg tea.Msg) (tea.Cmd, bool) {
@@ -127,19 +144,29 @@ func (v *topResourcesView) handle(m *Model, msg tea.Msg) (tea.Cmd, bool) {
 		if msg.id != v.id {
 			return nil, false
 		}
-		v.err = msg.err
-		if msg.info != nil {
-			v.info, v.fetched = msg.info, time.Now()
+		v.pending--
+		switch {
+		case msg.err != nil:
+			if strings.Contains(strings.ToLower(msg.err.Error()), "auth") {
+				// A wrong password: asking again beats retrying it.
+				m.closeView(v)
+				return m.failed(v.target, "Resources of "+v.target.name, msg.err), true
+			}
+			if v.pendingErr == nil {
+				v.pendingErr = msg.err
+			}
+		case msg.info != nil:
+			v.info = msg.info
 			v.cpuHistory = pushHistory(v.cpuHistory, averageCPU(msg.info.CPUUsages))
 			v.netHistory = pushHistory(v.netHistory, networkRate(msg.info))
+		default:
+			v.procs, v.procsLoaded = msg.procs, true
 		}
-		if msg.err == nil {
-			v.procs = msg.procs
-		} else if strings.Contains(strings.ToLower(msg.err.Error()), "auth") {
-			// A wrong password: asking again beats retrying it.
-			m.closeView(v)
-			return m.failed(v.target, "Resources of "+v.target.name, msg.err), true
+		if v.pending > 0 {
+			return nil, true
 		}
+		// The update is done: the next one comes after the interval.
+		v.err = v.pendingErr
 		id := v.id
 		return tea.Tick(v.interval, func(time.Time) tea.Msg { return topResourcesTickMsg{id: id} }), true
 	case topResourcesTickMsg:
@@ -318,7 +345,7 @@ func (v *topResourcesView) body(m *Model, width, height int) []string {
 				m.styles.dim.Render(fmt.Sprintf("Trying again every %s. Press esc to go back.", v.interval)),
 			}
 		}
-		return []string{m.styles.dim.Render("Connecting to " + v.target.name + "…")}
+		return []string{m.styles.dim.Render("Getting the resources of " + v.target.name + "…")}
 	}
 
 	lines := v.meterLines(m, width)
@@ -355,7 +382,11 @@ func (v *topResourcesView) body(m *Model, width, height int) []string {
 	}
 	tableHeight := max(2, height-len(lines))
 	v.height = tableHeight - 1
-	return append(lines, m.table(columns, rows, &v.list, width, tableHeight)...)
+	lines = append(lines, m.table(columns, rows, &v.list, width, tableHeight)...)
+	if !v.procsLoaded {
+		lines = append(lines, m.styles.dim.Render("Getting the processes…"))
+	}
+	return lines
 }
 
 // sortTitle marks the column the processes are sorted by.
