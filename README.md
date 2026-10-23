@@ -122,16 +122,16 @@ passing users as flags instead of a config file.
 
 ## Self-hosting
 
-Run your own cloud (router, account service, web app and database) locally with
-[deskconn-docker](https://github.com/xconnio/deskconn-docker), then build `deskconn` pointed at it.
+Run your own cloud (router, account service, web app and database) locally with the Docker Compose setup in
+[`docker/`](docker), then build `deskconn` pointed at it.
 
 ### 1. Start the stack
 
 ```bash
-git clone https://github.com/xconnio/deskconn-docker
-cd deskconn-docker
+cd docker
 make setup
 make run
+cd ..
 ```
 
 ### 2. Build the binaries against it
@@ -172,7 +172,7 @@ Environment=DESKCONN_TURN_PASSWORD=<password>
 Sign up at http://localhost:3000/register. The stack prints one-time passwords to its logs instead of emailing them:
 
 ```bash
-docker compose logs -f account-service   # in deskconn-docker
+docker compose logs -f account-service   # in docker/
 ```
 
 Then follow [Getting started](#getting-started) from step 2 with the binaries from `bin/`, and run the daemon in the
