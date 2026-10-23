@@ -8,6 +8,9 @@ import (
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/userd"
 )
 
 func writeServeConfig(t *testing.T, yaml string) string {
@@ -36,10 +39,12 @@ listen:
 users:
   - username: alice
     password: s3cret
+    role: admin
   - username: bob
     authorized-keys:
       - `+testKeyA+`
       - `+testKeyB+`
+    role: member
   - username: carol
     password: "with:colon"
 `)
@@ -50,8 +55,8 @@ users:
 	require.Equal(t, filepath.Join(filepath.Dir(path), "cert.pem"), config.Listen.TLSCert, "relative to the file")
 	require.Equal(t, "/etc/deskconn/key.pem", config.Listen.TLSKey)
 	require.Equal(t, []serveConfigUser{
-		{Username: alice, Password: testPassword},
-		{Username: bob, AuthorizedKeys: []string{testKeyA, testKeyB}},
+		{Username: alice, Password: testPassword, Role: common.RoleAdmin},
+		{Username: bob, AuthorizedKeys: []string{testKeyA, testKeyB}, Role: common.RoleMember},
 		{Username: carol, Password: "with:colon"},
 	}, config.Users)
 
@@ -78,6 +83,8 @@ func TestLoadServeConfigRejects(t *testing.T) {
 		"no password or key": {"users:\n  - username: alice\n", "needs a password or authorized-keys"},
 		"empty keys":         {"users:\n  - username: a\n    authorized-keys: []\n", "needs a password or authorized-keys"},
 		"colon username":     {"users:\n  - username: a:b\n    password: x\n", "can't contain ':'"},
+		"bad role": {"users:\n  - {username: a, password: x, role: owner}\n",
+			`invalid role "owner": want admin or member`},
 		"same user twice": {"users:\n  - {username: a, password: x}\n" +
 			"  - {username: a, authorized-keys: [" + testKeyA + "]}\n", "listed twice"},
 		"key not hex":     {"users:\n  - username: a\n    authorized-keys: [zz]\n", "isn't a public key"},
@@ -222,19 +229,22 @@ func TestStandaloneAuth(t *testing.T) {
 		return userdFlags{standaloneUsers: &users, configUsers: configUsers}
 	}
 
-	keys, passwords, err := standaloneAuth(flags(
+	users, err := standaloneAuth(flags(
 		[]string{"alice:s3cret"},
 		serveConfigUser{Username: bob, AuthorizedKeys: []string{testKeyA, testKeyB}},
 		serveConfigUser{Username: carol, Password: "pw"},
 	), false)
 	require.NoError(t, err)
-	require.Equal(t, []string{testKeyA, testKeyB}, keys, "keys only from the config")
-	require.Equal(t, map[string]string{alice: testPassword, carol: "pw"}, passwords)
+	require.Equal(t, []userd.StandaloneUser{
+		{Username: bob, AuthorizedKeys: []string{testKeyA, testKeyB}},
+		{Username: carol, Password: "pw"},
+		{Username: alice, Password: testPassword},
+	}, users, "the config's users, then --user's, with keys only from the config")
 
-	_, _, err = standaloneAuth(flags([]string{"alice:x"}, serveConfigUser{Username: alice, Password: "y"}), false)
+	_, err = standaloneAuth(flags([]string{"alice:x"}, serveConfigUser{Username: alice, Password: "y"}), false)
 	require.ErrorContains(t, err, "listed twice", "a user in the config and --user")
 
-	_, _, err = standaloneAuth(flags([]string{"bob:pw", "bob:pw2"}), false)
+	_, err = standaloneAuth(flags([]string{"bob:pw", "bob:pw2"}), false)
 	require.ErrorContains(t, err, "listed twice", "a --user twice")
 }
 
