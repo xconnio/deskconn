@@ -1,0 +1,92 @@
+services:
+  # Copies the Postgres init script from the account-service image, then exits
+  postgres-init:
+    image: xconnio/deskconn-account-service:latest
+    command: cp -r /app/postgres-init/. /init/
+    volumes:
+      - postgres_init:/init
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+      ACCOUNT_SERVICE_DB_USER: ${ACCOUNT_SERVICE_DB_USER:-account-service}
+      ACCOUNT_SERVICE_DB_PASSWORD: ${ACCOUNT_SERVICE_DB_PASSWORD:-account-service-password}
+      ROUTER_DB_USER: ${ROUTER_DB_USER:-router}
+      ROUTER_DB_PASSWORD: ${ROUTER_DB_PASSWORD:-router-password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_init:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  router:
+    image: xconnio/deskconn-router:latest
+    environment:
+      DESKCONN_POSTGRES_URL: "postgres://${ROUTER_DB_USER:-router}:${ROUTER_DB_PASSWORD:-router-password}@postgres:5432/deskconn_account_service?sslmode=disable&search_path=deskconn"
+      DESKCONN_ROUTER_WT_HASH_ADDRESS: 0.0.0.0:8083
+      # Matches the default DESKCONN_ACCOUNT_PRIVATE_KEY below (a local-only key pair)
+      DESKCONN_ACCOUNT_SERVICE_PUBLIC_KEY: ${DESKCONN_ACCOUNT_SERVICE_PUBLIC_KEY:-5d8fefe8116b43c1d0bbbdf2ba19f389eb1af2b9ed32a32bdb39965c335127e1}
+    ports:
+      - "8081:8081/udp"
+      - "8082:8082/udp"
+      - "8083:8083"
+      - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Runs the account-service migrations once, then exits
+  migrate:
+    image: xconnio/deskconn-account-service:latest
+    command: alembic upgrade head
+    environment:
+      DESKCONN_DATABASE_URL: "postgresql+asyncpg://${ACCOUNT_SERVICE_DB_USER:-account-service}:${ACCOUNT_SERVICE_DB_PASSWORD:-account-service-password}@postgres:5432/deskconn_account_service"
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      X_DEBUG: ${X_DEBUG:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  account-service:
+    image: xconnio/deskconn-account-service:latest
+    environment:
+      DESKCONN_DATABASE_URL: "postgresql+asyncpg://${ACCOUNT_SERVICE_DB_USER:-account-service}:${ACCOUNT_SERVICE_DB_PASSWORD:-account-service-password}@postgres:5432/deskconn_account_service"
+      ROUTER_URL: rss://router:8084/rs
+      DESKCONN_ACCOUNT_AUTHID: deskconn-account-service
+      DESKCONN_ACCOUNT_PRIVATE_KEY: ${DESKCONN_ACCOUNT_PRIVATE_KEY:-11d1f3c03e779bd33a4757dbb390415418dc89d49c990a90a6980fe8ea4e1d9f}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # true prints OTPs to the logs instead of emailing them (RESEND_API_KEY not required)
+      X_DEBUG: ${X_DEBUG:-true}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      router:
+        condition: service_started
+    restart: unless-stopped
+
+  web-app:
+    image: xconnio/deskconn-web-app:latest
+    environment:
+      # Used by the browser, so these are host addresses, not container names
+      VITE_WAMP_WT_URL: https://127.0.0.1:8082/wamp
+      VITE_WAMP_WT_CERT_URL: http://127.0.0.1:8083/wt-cert-hash
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - router
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  postgres_init:
