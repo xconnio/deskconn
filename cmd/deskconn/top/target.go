@@ -232,9 +232,9 @@ func (s *topSessions) proxy(daemon *xconn.Session, realm, procedure string, args
 	return resp, resp.Err
 }
 
-// get returns realm's session, connecting first if there isn't one. Calls at once share
-// one connection.
-func (s *topSessions) get(realm string) (*topSession, error) {
+// sessionFor returns realm's session, connecting first if there isn't one. Calls at once
+// share one connection.
+func (s *topSessions) sessionFor(realm string) (*topSession, error) {
 	s.mu.Lock()
 	for {
 		if session := s.byRealm[realm]; session != nil {
@@ -284,7 +284,7 @@ func (s *topSessions) dial(realm string) (*topSession, error) {
 // call runs fn on realm's session, connecting first if needed. A failed call drops the
 // session, so the next one starts on a fresh connection.
 func (s *topSessions) call(realm string, fn func(*topSession) error) error {
-	session, err := s.get(realm)
+	session, err := s.sessionFor(realm)
 	if err != nil {
 		return err
 	}

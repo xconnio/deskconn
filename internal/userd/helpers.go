@@ -35,30 +35,57 @@ func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessio
 	return strArg, bytesArg, sess, nil
 }
 
-// proxyKeyCache caches the client-role SessionKeys ProxyFileOpHandler
-// derives per outbound machine session, so repeated proxied calls to the
-// same machine don't re-run the key exchange every time. It's keyed by the
-// session itself: session IDs aren't unique across machines.
+// proxyKeyCache caches the client-role SessionKeys the proxy handlers derive per outbound
+// machine session, so repeated proxied calls to the same machine don't re-run the key
+// exchange every time. It's keyed by the session itself: session IDs aren't unique across
+// machines. All the handlers share one (see ClientSessions), and calls at once share one
+// exchange: the machine keeps a single set of keys per session, so each exchange replaces
+// the keys of the one before.
 type proxyKeyCache struct {
-	mu   sync.Mutex
-	keys map[*xconn.Session]*common.SessionKeys
+	mu         sync.Mutex
+	keys       map[*xconn.Session]*common.SessionKeys
+	exchanging map[*xconn.Session]chan struct{} // closed once the exchange under way is done
 }
 
 func newProxyKeyCache() *proxyKeyCache {
-	return &proxyKeyCache{keys: make(map[*xconn.Session]*common.SessionKeys)}
+	return &proxyKeyCache{
+		keys:       make(map[*xconn.Session]*common.SessionKeys),
+		exchanging: make(map[*xconn.Session]chan struct{}),
+	}
 }
 
-func (c *proxyKeyCache) fetch(session *xconn.Session) (*common.SessionKeys, bool) {
+// keysFor returns session's keys, exchanging them first if there are none yet or the ones
+// there are rejected: the machine refused them.
+func (c *proxyKeyCache) keysFor(session *xconn.Session, rejected *common.SessionKeys) (*common.SessionKeys, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	enc, ok := c.keys[session]
-	return enc, ok
-}
+	for {
+		if enc := c.keys[session]; enc != nil && enc != rejected {
+			c.mu.Unlock()
+			return enc, nil
+		}
+		exchanging, ok := c.exchanging[session]
+		if !ok {
+			break
+		}
+		c.mu.Unlock()
+		<-exchanging
+		c.mu.Lock()
+	}
+	exchanging := make(chan struct{})
+	c.exchanging[session] = exchanging
+	c.mu.Unlock()
 
-func (c *proxyKeyCache) store(session *xconn.Session, enc *common.SessionKeys) {
+	enc, err := common.ClientKeyExchange(session)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	delete(c.exchanging, session)
+	close(exchanging)
+	if err != nil {
+		return nil, err
+	}
 	c.keys[session] = enc
+	return enc, nil
 }
 
 // keysRejected reports whether the machine refused a call because it doesn't have the
@@ -69,8 +96,6 @@ func keysRejected(err error) bool {
 }
 
 func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	km := newProxyKeyCache()
-
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		procedure, payload, machineSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
 		if invErr != nil {
@@ -79,7 +104,7 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 		realm, _ := inv.ArgString(0)
 		defer clientSessions.holdSession(realm, machineSession)()
 
-		result, err := km.call(machineSession, procedure, payload)
+		result, err := clientSessions.keys.call(machineSession, procedure, payload)
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
@@ -90,33 +115,23 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 // call makes an encrypted call to procedure on machineSession with the session's cached
 // keys, exchanging keys first if there are none.
 func (c *proxyKeyCache) call(machineSession *xconn.Session, procedure string, payload []byte) ([]byte, error) {
-	enc, cached := c.fetch(machineSession)
-	for {
-		if enc == nil {
-			var err error
-			enc, err = common.ClientKeyExchange(machineSession)
-			if err != nil {
-				return nil, err
-			}
-			c.store(machineSession, enc)
-		}
-
-		result, err := common.EncryptedCall(machineSession, procedure, payload, enc)
-		if err == nil {
-			return result, nil
-		}
-		// Cached keys the machine no longer has: exchange again and retry once. The
-		// machine rejected the request before running it, so nothing is repeated.
-		if cached && keysRejected(err) {
-			enc, cached = nil, false
-			continue
-		}
+	enc, err := c.keysFor(machineSession, nil)
+	if err != nil {
 		return nil, err
 	}
+	result, err := common.EncryptedCall(machineSession, procedure, payload, enc)
+	if err != nil && keysRejected(err) {
+		// Keys the machine no longer has: exchange again and retry once. The machine
+		// rejected the request before running it, so nothing is repeated.
+		if enc, err = c.keysFor(machineSession, enc); err != nil {
+			return nil, err
+		}
+		result, err = common.EncryptedCall(machineSession, procedure, payload, enc)
+	}
+	return result, err
 }
 
 func ProxyMachineInfoHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	km := newProxyKeyCache()
 
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		realm, err := inv.ArgString(0)
@@ -128,11 +143,10 @@ func ProxyMachineInfoHandler(clientSessions *ClientSessions, cfgDirectory string
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
+		defer clientSessions.holdSession(realm, machineSess)()
 
-		result, err := km.call(machineSess, common.ProcedureMachineInfo, nil)
+		result, err := clientSessions.keys.call(machineSess, common.ProcedureMachineInfo, nil)
 		if err != nil {
-			_ = machineSess.Leave()
-			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
@@ -151,12 +165,11 @@ func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
+		defer clientSessions.holdSession(realm, machineSess)()
 
 		start := time.Now()
 		callResp := machineSess.Call(common.ProcedurePing).Do()
 		if callResp.Err != nil {
-			_ = machineSess.Leave()
-			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
 		}
 
@@ -175,11 +188,10 @@ func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
+		defer clientSessions.holdSession(realm, machineSess)()
 
 		var printers []any
 		if err := appCall(machineSess, printerAppID, common.ProcedurePrinterList, nil, &printers); err != nil {
-			_ = machineSess.Leave()
-			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
@@ -210,12 +222,11 @@ func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory strin
 		if err != nil {
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
+		defer clientSessions.holdSession(realm, machineSess)()
 
 		req := map[string]any{"printer": printer, "filename": filename, "data": data}
 		var jobID string
 		if err := appCall(machineSess, printerAppID, common.ProcedurePrinterPrint, req, &jobID); err != nil {
-			_ = machineSess.Leave()
-			clientSessions.DeleteMachineSession(realm)
 			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 		}
 
@@ -281,8 +292,6 @@ func appCall(session *xconn.Session, appID, procedure string, req, out any) erro
 // path and decrypts the chunks with its cached keys for that machine, so they reach the
 // CLI in plain text over the local socket.
 func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	km := newProxyKeyCache()
-
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 		realm, err := inv.ArgString(0)
 		if err != nil {
@@ -298,14 +307,11 @@ func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.
 		}
 		defer clientSessions.holdSession(realm, machineSession)()
 
-		enc, cached := km.fetch(machineSession)
+		var rejected *common.SessionKeys
 		for {
-			if enc == nil {
-				enc, err = common.ClientKeyExchange(machineSession)
-				if err != nil {
-					return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-				}
-				km.store(machineSession, enc)
+			enc, err := clientSessions.keys.keysFor(machineSession, rejected)
+			if err != nil {
+				return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
 			}
 
 			pathJSON, err := json.Marshal(remotePath)
@@ -344,10 +350,10 @@ func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.
 				return xconn.NewInvocationError(common.ErrOperationFailed, chunkErr.Error())
 			}
 			if callResp.Err != nil {
-				// Cached keys the machine no longer has: it rejected the call before sending
-				// anything, so exchange again and retry once.
-				if cached && keysRejected(callResp.Err) {
-					enc, cached = nil, false
+				// Keys the machine no longer has: it rejected the call before sending anything,
+				// so exchange again and retry once.
+				if rejected == nil && keysRejected(callResp.Err) {
+					rejected = enc
 					continue
 				}
 				return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
