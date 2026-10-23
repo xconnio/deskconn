@@ -33,16 +33,21 @@ const streamCloseGrace = 500 * time.Millisecond
 // a scheduled task on Windows.
 const userdService = "deskconn-userd"
 
+// standaloneUsersFile is the database of the users added in standalone mode, in the config
+// directory.
+const standaloneUsersFile = "standalone-users.db"
+
+// standaloneWebSocketAddress is where standalone mode also serves plain WebSocket, for WAMP
+// clients without QUIC or WebTransport. It has no TLS, so it's only on localhost.
+const standaloneWebSocketAddress = "127.0.0.1:18082"
+
 // runUserd is the user daemon: the machine's APIs and its connectivity (xconn).
 func runUserd(flags userdFlags, standalone bool) {
 	detachConsole()
 
-	standaloneKeys, standalonePasswords, err := standaloneAuth(flags, standalone)
+	fixedUsers, err := standaloneAuth(flags, standalone)
 	if err != nil {
 		serveFatalf("%v", err)
-	}
-	if standalone && len(standaloneKeys) == 0 && len(standalonePasswords) == 0 {
-		serveFatalf("%s", noStandaloneUsersHelp(flags.configPath))
 	}
 	if (*flags.standaloneCert == "") != (*flags.standaloneKey == "") {
 		serveFatalf("--tls-cert and --tls-key go together")
@@ -54,14 +59,39 @@ func runUserd(flags userdFlags, standalone bool) {
 	}
 
 	var standaloneConfig *xconnd.StandaloneConfig
+	var standaloneUsers *userd.StandaloneUsers
 	if standalone {
+		// Users added through the API (see common.ProcedureStandaloneUsersAdd) are kept
+		// here, beside the fixed ones.
+		standaloneUsers, err = userd.OpenStandaloneUsers(filepath.Join(cfgDirectory, standaloneUsersFile), fixedUsers)
+		if err != nil {
+			serveFatalf("standalone: %v", err)
+		}
+		defer standaloneUsers.Close()
+		count, err := standaloneUsers.Count()
+		if err != nil {
+			serveFatalf("standalone: %v", err)
+		}
+		if count == 0 {
+			serveFatalf("%s", noStandaloneUsersHelp(flags.configPath))
+		}
+		if added := count - len(fixedUsers); added > 0 {
+			log.Printf("standalone: %d user(s) added since, in %s", added, standaloneUsersFile)
+		}
+		if !slices.ContainsFunc(fixedUsers, func(user userd.StandaloneUser) bool {
+			return user.Role == common.RoleAdmin
+		}) {
+			log.Printf("standalone: no user has role %s, so no one can add or remove users while serving",
+				common.RoleAdmin)
+		}
+
 		standaloneConfig, err = newStandaloneConfig(cfgDirectory, *flags.standaloneTransport,
 			*flags.standaloneQUICAddr, *flags.standaloneWTAddr, *flags.standaloneCert, *flags.standaloneKey)
 		if err != nil {
 			log.Fatalf("standalone: %v", err)
 		}
-		standaloneConfig.Keys = standaloneKeys
-		standaloneConfig.Passwords = standalonePasswords
+		standaloneConfig.WebSocketAddress = standaloneWebSocketAddress
+		standaloneConfig.Authenticator = standaloneUsers
 	}
 
 	// xconn runs in this process: its app layer serves deskconn.sock (the CLI's local
@@ -92,6 +122,9 @@ func runUserd(flags userdFlags, standalone bool) {
 	}
 
 	deskconnApis := userd.NewDeskconn(isDesktop, cfgDirectory)
+	if standaloneUsers != nil {
+		deskconnApis.ServeStandaloneUsers(standaloneUsers)
+	}
 	defer deskconnApis.CloseVPNTunnel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -241,33 +274,34 @@ func newCloudConfig(cfgDirectory string) (*xconnd.CloudConfig, error) {
 	}, nil
 }
 
-// standaloneAuth gathers who may connect in standalone mode, the --config users and the --user
-// ones, and returns their keys and passwords. With logLogins set, it logs how each can log in.
-func standaloneAuth(flags userdFlags, logLogins bool) (keys []string, passwords map[string]string,
-	err error) {
+// standaloneAuth gathers who may always connect in standalone mode, the --config users and the
+// --user ones, checking them. With logLogins set, it logs how each can log in.
+func standaloneAuth(flags userdFlags, logLogins bool) ([]userd.StandaloneUser, error) {
 	users := slices.Clone(flags.configUsers)
 	for _, value := range *flags.standaloneUsers {
 		user, err := parseUserFlag(value)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		users = append(users, user)
 	}
 	if err := checkUsers(users); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	passwords = make(map[string]string, len(users))
+	fixed := make([]userd.StandaloneUser, 0, len(users))
 	for _, user := range users {
-		keys = append(keys, user.AuthorizedKeys...)
-		if user.Password != "" {
-			passwords[user.Username] = user.Password
-		}
+		fixed = append(fixed, userd.StandaloneUser{Username: user.Username, Password: user.Password,
+			AuthorizedKeys: user.AuthorizedKeys, Role: user.Role})
 		if logLogins {
-			log.Printf("standalone: %s logs in with %s", user.Username, loginMethods(user))
+			role := common.RoleMember
+			if user.Role == common.RoleAdmin {
+				role = common.RoleAdmin
+			}
+			log.Printf("standalone: %s logs in with %s, as %s", user.Username, loginMethods(user), role)
 		}
 	}
-	return keys, passwords, nil
+	return fixed, nil
 }
 
 // noStandaloneUsersHelp says how to let someone in when standalone mode has no one to: in

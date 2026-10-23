@@ -1,9 +1,11 @@
 package common
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"io"
 
@@ -143,4 +145,10 @@ func DecryptPayload(data, key []byte) ([]byte, error) {
 		return nil, fmt.Errorf("payload too short: %d bytes", len(data))
 	}
 	return DecryptChaCha20Poly1305(data[12:], data[:12], key)
+}
+
+// IsPublicKey reports whether s is a public key as desk keygen prints it: 64 hex digits.
+func IsPublicKey(s string) bool {
+	raw, err := hex.DecodeString(s)
+	return err == nil && len(raw) == ed25519.PublicKeySize
 }

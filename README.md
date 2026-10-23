@@ -120,6 +120,14 @@ Leave out `--private-key` to log in with a password instead (`--authid <username
 `desk profile add --help` cover the rest, such as serving over WebTransport, using your own TLS certificate, and
 passing users as flags instead of a config file.
 
+Users can also be added and removed while the machine is served, by its admins: the config file's users with
+`role: admin`. They do it through the `io.xconn.deskconn.admin.users.list`, `.add` and `.remove` procedures. The
+users added are members, kept in `~/.deskconn/standalone-users.db` beside the config file's users, which only the
+config file changes.
+
+The procedures take plain arguments, so any WAMP client can call them. For clients that only speak WebSocket,
+standalone mode also serves `ws://127.0.0.1:18082/ws`: plain, without TLS, so only on localhost.
+
 ## Self-hosting
 
 Run your own cloud (router, account service, web app and database) locally with the Docker Compose setup in
@@ -277,6 +285,7 @@ All credentials and configuration are stored under `~/.deskconn/`:
 | `id_ed25519`            | CLI private key, username, and key expiry                               |
 | `id_ed25519.pub`        | CLI public key, username, and account name                              |
 | `config.yml`            | Machine list and aliases, and standalone machine profiles (`desk profile add`) with their private keys |
+| `standalone-users.db`   | Standalone mode's users added through its API, with their keys and salted password hashes |
 | `principals.json`       | Local CryptoSign principals (used by the local WAMP router)             |
 | `turn_credentials.json` | Cached TURN server credentials for WebRTC                               |
 | `deskconn.sock`         | Unix socket for local CLI–daemon communication                          |

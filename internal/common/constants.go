@@ -138,6 +138,16 @@ const (
 	TopicCapabilitiesChanged = "io.xconn.deskconn.capabilities.on_change"
 )
 
+// The users of a standalone machine, whom its admins (the config file's users with role admin)
+// may list, add and remove. Under ProcedureAdminPrefix, with plain arguments so any WAMP client
+// can call them, and only in standalone mode: list takes nothing, add a user's username,
+// password and authorized_keys as kwargs, who is a member, and remove a username.
+const (
+	ProcedureStandaloneUsersList   = ProcedureAdminPrefix + "users.list"
+	ProcedureStandaloneUsersAdd    = ProcedureAdminPrefix + "users.add"
+	ProcedureStandaloneUsersRemove = ProcedureAdminPrefix + "users.remove"
+)
+
 // ProcedureAppsRegister is how a process on userd's local socket registers the apps it
 // serves, with a JSON list of {"id", "name", "key_exchange", "requires", "default_off"}
 // (see the README's "Adding an app"). Local realm only.
@@ -160,6 +170,9 @@ const (
 	CloudRoleOwner = "user:owner"
 	CloudRoleAdmin = "user:admin"
 )
+
+// RoleMember is the caller role of a standalone machine's users other than its admins.
+const RoleMember = "member"
 
 const (
 	ExtJpg  = ".jpg"

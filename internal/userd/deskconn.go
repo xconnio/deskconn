@@ -27,6 +27,14 @@ type Deskconn struct {
 	vpn                  *vpnServer
 	capabilities         *capabilities
 	relayConns           relayConns
+	// standaloneUsers are who may connect in standalone mode, or nil in user mode.
+	standaloneUsers *StandaloneUsers
+}
+
+// ServeStandaloneUsers has Register serve the procedures that list, add and remove users,
+// for standalone mode.
+func (d *Deskconn) ServeStandaloneUsers(users *StandaloneUsers) {
+	d.standaloneUsers = users
 }
 
 // NewDeskconn returns the machine's APIs.
@@ -59,6 +67,11 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},
+	}
+	if d.standaloneUsers != nil {
+		handlers[common.ProcedureStandaloneUsersList] = d.handleStandaloneUsersList
+		handlers[common.ProcedureStandaloneUsersAdd] = d.handleStandaloneUsersAdd
+		handlers[common.ProcedureStandaloneUsersRemove] = d.handleStandaloneUsersRemove
 	}
 
 	// Screen, wallpaper, MPRIS, audio, screenshot and printer procedures are served by

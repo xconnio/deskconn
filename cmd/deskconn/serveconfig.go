@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
+
+	"github.com/xconnio/deskconn/internal/common"
 )
 
 // serveConfig is the --config file of desk serve: the mode, and for standalone mode where
@@ -34,11 +35,13 @@ type serveConfigListen struct {
 }
 
 // serveConfigUser may connect in standalone mode with its password, any of its authorized
-// keys, or either. A key is let in whatever username its holder presents: username only labels it.
+// keys, or either, as the user it is with its role: admin, who may also add and remove users
+// through the API, or member, the default.
 type serveConfigUser struct {
 	Username       string   `yaml:"username"`
 	Password       string   `yaml:"password"`
 	AuthorizedKeys []string `yaml:"authorized-keys"`
+	Role           string   `yaml:"role"`
 }
 
 // transport is the standalone transport the listen addresses set, or "" if they set none.
@@ -118,14 +121,16 @@ func checkUsers(users []serveConfigUser) error {
 			return fmt.Errorf("user %q: listed twice", user.Username)
 		case user.Password == "" && len(user.AuthorizedKeys) == 0:
 			return fmt.Errorf("user %q: needs a password or authorized-keys", user.Username)
+		case user.Role != "" && user.Role != common.RoleAdmin && user.Role != common.RoleMember:
+			return fmt.Errorf("user %q: invalid role %q: want %s or %s", user.Username, user.Role,
+				common.RoleAdmin, common.RoleMember)
 		}
 		for _, key := range user.AuthorizedKeys {
-			if !isPublicKey(key) {
+			if !common.IsPublicKey(key) {
 				return fmt.Errorf("user %q: key %q isn't a public key (%d hex digits, see desk keygen)",
 					user.Username, key, 2*ed25519.PublicKeySize)
 			}
-			// Since a key logs in whatever username its holder presents, one listed for two users
-			// would let either one in as the other.
+			// A key logs in as its user: one listed for two users would be either.
 			if owner, ok := keys[strings.ToLower(key)]; ok {
 				return fmt.Errorf("user %q: key %s is already %q's", user.Username, key, owner)
 			}
@@ -134,12 +139,6 @@ func checkUsers(users []serveConfigUser) error {
 		usernames[user.Username] = true
 	}
 	return nil
-}
-
-// isPublicKey reports whether s is a public key as desk keygen prints it: 64 hex digits.
-func isPublicKey(s string) bool {
-	raw, err := hex.DecodeString(s)
-	return err == nil && len(raw) == ed25519.PublicKeySize
 }
 
 // sampleServeConfig is what desk serve init writes: every setting, with its default.
@@ -162,11 +161,12 @@ listen:
   # tls-key: key.pem
 
 # Who may connect in standalone mode: with a password, or with the private key matching
-# any of a user's public keys (make a pair with "desk keygen"). A key is let in whatever
-# username its holder presents.
+# any of a user's public keys (make a pair with "desk keygen"). Admins may also add and
+# remove users while the machine is served; the others, and the users added so, are members.
 users:
   # - username: alice
   #   password: change-me
+  #   role: admin
   # - username: bob
   #   authorized-keys:
   #     - 65160c38...
