@@ -76,6 +76,10 @@ func runUserd(flags userdFlags, standalone bool) {
 	defer appListener.Close()
 
 	clientSessions := userd.NewClientSessions()
+	// Logged in already: desk account login only tells a daemon that's running.
+	if _, _, err := common.ReadCredentials(cfgDirectory); err == nil {
+		clientSessions.Login()
+	}
 
 	// DISPLAY/WAYLAND_DISPLAY only distinguish a desktop from a headless server on Linux.
 	// Windows has no supported headless-server install path, so treat it as desktop

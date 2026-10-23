@@ -2,7 +2,9 @@ package userd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,7 +129,11 @@ func (ds *machineSession) notifyReplaced(newSession *xconn.Session) {
 type ClientSessions struct {
 	sessions     map[string]*machineSession
 	disconnected map[string]struct{}
+	connecting   map[string]chan struct{} // by realm, closed once the connection being made is made or fails
 	loggedIn     bool
+
+	// keys are the proxy handlers' keys for each machine session.
+	keys *proxyKeyCache
 
 	sync.Mutex
 }
@@ -136,7 +142,37 @@ func NewClientSessions() *ClientSessions {
 	return &ClientSessions{
 		sessions:     make(map[string]*machineSession),
 		disconnected: make(map[string]struct{}),
+		connecting:   make(map[string]chan struct{}),
+		keys:         newProxyKeyCache(),
 	}
+}
+
+// ErrMachineOffline is the error connecting to a machine that isn't online fails with.
+var ErrMachineOffline = errors.New("the machine is offline")
+
+// legacyProcedurePing is ProcedurePing before procedures lost their "deskconnd." part, for
+// machines that haven't updated since.
+const legacyProcedurePing = "io.xconn.deskconn.deskconnd.ping"
+
+// machineAnswersTimeout bounds waiting for a machine to answer.
+const machineAnswersTimeout = 10 * time.Second
+
+// machineAnswers pings session's machine, failing with ErrMachineOffline if no machine is
+// there to answer: the router takes a session for a machine's realm whether or not the
+// machine is online.
+func machineAnswers(ctx context.Context, session *xconn.Session) error {
+	ctx, cancel := context.WithTimeout(ctx, machineAnswersTimeout)
+	defer cancel()
+	for _, procedure := range []string{common.ProcedurePing, legacyProcedurePing} {
+		err := session.Call(procedure).DoContext(ctx).Err
+		if err == nil {
+			return nil
+		}
+		if !strings.Contains(err.Error(), common.ErrNoSuchProcedure) {
+			return err
+		}
+	}
+	return ErrMachineOffline
 }
 
 func (c *ClientSessions) isDisconnected(realm string) bool {
@@ -186,15 +222,18 @@ func (c *ClientSessions) storeMachineSession(realm string, session *xconn.Sessio
 	webrtcSession *xconnwebrtc.WebRTCSession, quic *quicConn, ctx context.Context,
 	cancel context.CancelFunc) {
 	c.Lock()
+	connectedAt := time.Now()
 	old, hadOld := c.sessions[realm]
 	if hadOld {
 		old.cancel()
+		// Still connected since then: only the connection's transport changed.
+		connectedAt = old.connectedAt
 	}
 	c.sessions[realm] = &machineSession{
 		session:       session,
 		webrtcSession: webrtcSession,
 		quic:          quic,
-		connectedAt:   time.Now(),
+		connectedAt:   connectedAt,
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -284,12 +323,15 @@ func (c *ClientSessions) EnsureMachineSessionWithUpgrade(ctx context.Context, re
 	return c.ensureMachineSession(ctx, realm, cfgDirectory, true)
 }
 
+// ensureMachineSession is EnsureMachineSession and EnsureMachineSessionWithUpgrade. Callers at
+// once wait for one connection: each making its own, the last would replace the others
+// under the calls on them.
 func (c *ClientSessions) ensureMachineSession(ctx context.Context, realm, cfgDirectory string,
 	subscribe bool) (*xconn.Session, <-chan *xconn.Session, error) {
 	c.Lock()
 	delete(c.disconnected, realm)
-	if ds, ok := c.sessions[realm]; ok {
-		if ds.session.Connected() {
+	for {
+		if ds, ok := c.sessions[realm]; ok && ds.session.Connected() {
 			var upgradeCh <-chan *xconn.Session
 			if subscribe {
 				upgradeCh = ds.subscribeUpgrade()
@@ -297,14 +339,35 @@ func (c *ClientSessions) ensureMachineSession(ctx context.Context, realm, cfgDir
 			c.Unlock()
 			return ds.session, upgradeCh, nil
 		}
-		ds.cancel()
-		delete(c.sessions, realm)
+		connecting, ok := c.connecting[realm]
+		if !ok {
+			break
+		}
 		c.Unlock()
-		return c.connectAndUpgrade(ctx, realm, cfgDirectory, ds, subscribe)
+		select {
+		case <-connecting:
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
+		c.Lock()
+	}
+	connecting := make(chan struct{})
+	c.connecting[realm] = connecting
+	// A disconnected entry: its subscribers hear of what replaces it.
+	stale := c.sessions[realm]
+	if stale != nil {
+		stale.cancel()
+		delete(c.sessions, realm)
 	}
 	c.Unlock()
 
-	return c.connectAndUpgrade(ctx, realm, cfgDirectory, nil, subscribe)
+	defer func() {
+		c.Lock()
+		delete(c.connecting, realm)
+		close(connecting)
+		c.Unlock()
+	}()
+	return c.connectAndUpgrade(ctx, realm, cfgDirectory, stale, subscribe)
 }
 
 // connectAndUpgrade establishes a fresh QUIC session for realm and starts the background
@@ -314,7 +377,7 @@ func (c *ClientSessions) ensureMachineSession(ctx context.Context, realm, cfgDir
 // so nobody who subscribed to it is left waiting on a channel that would otherwise never fire.
 func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirectory string,
 	staleEntry *machineSession, subscribe bool) (*xconn.Session, <-chan *xconn.Session, error) {
-	machineConn, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	machineConn, err := c.connectMachine(ctx, realm, cfgDirectory)
 	if err != nil {
 		if staleEntry != nil {
 			staleEntry.notifyReplaced(nil)
@@ -405,7 +468,8 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 		conn.Close()
 	}
 
-	if c.isDisconnected(realm) {
+	// The connection is gone whatever happens next, unless one that replaced it is current.
+	if !c.forget(realm, session) || c.isDisconnected(realm) {
 		return
 	}
 
@@ -413,9 +477,9 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 	maxDelay := 30 * time.Second
 	for c.LoggedIn() && !c.isDisconnected(realm) {
 		c.DeleteMachineSession(realm)
-		machineConn, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+		machineConn, err := c.connectMachine(context.Background(), realm, cfgDirectory)
 		if err != nil {
-			log.Printf("failed to connect cloud: %v", err)
+			log.Printf("reconnect %s: %v", realm, err)
 			retryDelay *= 2
 			if retryDelay > maxDelay {
 				retryDelay = maxDelay
@@ -430,6 +494,41 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 		common.SafeGo(func() { c.upgradeToWebRTC(newSess, realm, cfgDirectory) }) //nolint
 		return
 	}
+}
+
+// forget removes realm's entry if it's session's, reporting whether realm is left without
+// one: false if another session replaced it.
+func (c *ClientSessions) forget(realm string, session *xconn.Session) bool {
+	c.Lock()
+	entry, ok := c.sessions[realm]
+	if ok && entry.session != session {
+		c.Unlock()
+		return false
+	}
+	if ok {
+		entry.cancel()
+		delete(c.sessions, realm)
+	}
+	c.Unlock()
+	if ok {
+		entry.closeTransports(nil)
+	}
+	return true
+}
+
+// connectMachine connects to realm's machine through the router, failing with
+// ErrMachineOffline unless the machine answers on the connection.
+func (c *ClientSessions) connectMachine(ctx context.Context, realm, cfgDirectory string) (*common.MachineConn, error) {
+	conn, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+	if err := machineAnswers(ctx, conn.Session); err != nil {
+		_ = conn.Close()
+		_ = conn.Connection().Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 // machineTransports returns what raw streams to realm's machine can be opened on, connecting
