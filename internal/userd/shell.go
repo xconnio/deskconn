@@ -15,7 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 type encryptionKeys struct {
@@ -139,7 +139,7 @@ func (p *interactiveShellSession) isBusy(shellID string) (bool, error) {
 	return foregroundPGIDDiffers(ptmx, pid)
 }
 
-func (d *Deskconn) handleShellIsBusy(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleShellIsBusy(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult

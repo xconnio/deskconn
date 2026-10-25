@@ -18,12 +18,12 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/wampproto-go/serializers"
-	"github.com/xconnio/xconn-go"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/serializers"
 )
 
 // streamCloseGrace is how long shutdown gives xconn to pass the closes of the streams
@@ -180,7 +180,7 @@ func runUserd(flags userdFlags, standalone bool) {
 			if err != nil {
 				return nil, err
 			}
-			return xconn.NewSession(base, base.Serializer()), nil
+			return xconn.NewSession(base, base.Serializer())
 		},
 		Prefixes:     append([]string{common.ProcedurePrefix, common.ProcedureAdminPrefix}, relay.AppPrefixes()...),
 		StreamSocket: streamSockPath,
@@ -344,44 +344,44 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *userd.Deskcon
 		common.ProcedureProxyVPNStop:      userd.ProxyVPNStopHandler(deskconnApis),
 		common.ProcedureProxyPrinterList:  userd.ProxyPrinterListHandler(clientSessions, cfgDirectory),
 		common.ProcedureProxyPrinterPrint: userd.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
-		common.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
 			clientSessions.Login()
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		},
-		common.ProcedureLogout: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureLogout: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
 			clientSessions.Logout()
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		},
-		common.ProcedureConnect: func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureConnect: func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 			realm, err := inv.ArgString(0)
 			if err != nil {
-				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+				return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 			}
 			_, err = clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 			if err != nil {
-				return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+				return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 			}
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		},
-		common.ProcedureDisconnect: func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureDisconnect: func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 			realm, err := inv.ArgString(0)
 			if err != nil {
-				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+				return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 			}
 			clientSessions.Disconnect(realm)
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		},
-		common.ProcedureDisconnectAll: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureDisconnectAll: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
 			clientSessions.DisconnectAll()
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		},
-		common.ProcedureConnectedMachines: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-			return xconn.NewInvocationResult(clientSessions.MachineSessions())
+		common.ProcedureConnectedMachines: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
+			return xconn.NewResult(clientSessions.MachineSessions())
 		},
 	}
 
 	for uri, handler := range handlers {
-		if resp := session.Register(uri, handler).Do(); resp.Err != nil {
+		if resp := session.Register(uri, handler).Execute(); resp.Err != nil {
 			return resp.Err
 		}
 	}

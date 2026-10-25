@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 )
 
 // streamOpReadTimeout bounds how long ReadStreamOp waits for the leading

@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 func agentProxyCall(localSession *xconn.Session, realm, procedure string, payload []byte) ([]byte, error) {
-	resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Do()
+	resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Execute()
 	if resp.Err != nil {
 		return nil, resp.Err
 	}

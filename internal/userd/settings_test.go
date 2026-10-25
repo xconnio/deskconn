@@ -7,8 +7,8 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/wampproto-go"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/protocol"
 )
 
 // Each user lists only the settings they saved, and saving a key again replaces it.
@@ -17,7 +17,7 @@ func TestSettingsPerUser(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, r.AddRealm("realm1", &xconn.RealmConfig{AutoDiscloseCaller: true,
 		Roles: []xconn.RealmRole{{Name: common.RoleMember, Permissions: []xconn.Permission{
-			{URI: "io.xconn.", MatchPolicy: wampproto.MatchPrefix, AllowCall: true},
+			{URI: "io.xconn.", MatchPolicy: protocol.MatchPrefix, AllowCall: true},
 		}}}}))
 	callee, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
@@ -32,7 +32,7 @@ func TestSettingsPerUser(t *testing.T) {
 	require.NoError(t, err)
 
 	list := func(caller *xconn.Session) map[string]string {
-		resp := caller.Call(common.ProcedureSettingsList).Do()
+		resp := caller.Call(common.ProcedureSettingsList).Execute()
 		require.NoError(t, resp.Err)
 		dict, err := resp.ArgDict(0)
 		require.NoError(t, err)
@@ -45,11 +45,11 @@ func TestSettingsPerUser(t *testing.T) {
 	}
 
 	require.Empty(t, list(alice))
-	require.NoError(t, alice.Call(common.ProcedureSettingsSave).Args("dock", "left").Do().Err)
-	require.NoError(t, alice.Call(common.ProcedureSettingsSave).Args("dock", "right").Do().Err)
-	require.NoError(t, alice.Call(common.ProcedureSettingsSave).Args("windows", "[]").Do().Err)
+	require.NoError(t, alice.Call(common.ProcedureSettingsSave).Args("dock", "left").Execute().Err)
+	require.NoError(t, alice.Call(common.ProcedureSettingsSave).Args("dock", "right").Execute().Err)
+	require.NoError(t, alice.Call(common.ProcedureSettingsSave).Args("windows", "[]").Execute().Err)
 	require.Equal(t, map[string]string{"dock": "right", "windows": "[]"}, list(alice))
 	require.Empty(t, list(bob))
 
-	require.Error(t, alice.Call(common.ProcedureSettingsSave).Args("dock").Do().Err)
+	require.Error(t, alice.Call(common.ProcedureSettingsSave).Args("dock").Execute().Err)
 }

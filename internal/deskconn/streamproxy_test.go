@@ -2,7 +2,6 @@ package deskconn_test
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"net"
 	"os"
@@ -13,11 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 // listenQUIC serves router over QUIC on a local port with a self-signed certificate,
@@ -28,15 +27,28 @@ func listenQUIC(t *testing.T, router *xconn.Router, authenticator auth.ServerAut
 	dir := t.TempDir()
 	cert, err := common.LoadOrCreateCertificate(filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"))
 	require.NoError(t, err)
-	listener, err := xconn.NewServer(router, authenticator, &xconn.ServerConfig{}).ListenAndServeQUIC("127.0.0.1:0",
-		&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	listener, err := xconn.NewServer(router, authenticator, nil).ListenQUIC(t.Context(), "127.0.0.1:0", &cert)
+
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
+	streams := make(chan *xconn.QUICStream)
 	go func() {
-		for range listener.AcceptSession() { //nolint:revive // only draining
+		defer close(streams)
+		for {
+			stream, _, err := listener.AcceptStream(t.Context())
+			if err != nil {
+				return
+			}
+			select {
+			case streams <- stream:
+			case <-t.Context().Done():
+				_ = stream.Close()
+				return
+			}
 		}
 	}()
-	return "quic://" + listener.Addr().String(), common.CertificateFingerprint(cert), listener.AcceptStream()
+	return "quic://" + listener.Address, common.CertificateFingerprint(cert), streams
+
 }
 
 const streamProxyTestRealm = "io.xconn.test"
@@ -82,7 +94,7 @@ func startStreamProxy(t *testing.T) (cfgDirectory string, clientSessions *userd.
 	machineURL, certHash, streams := listenQUIC(t, router, anyKeyAuthenticator{})
 	common.SafeGo(func() {
 		for stream := range streams {
-			common.SafeGo(func() { xconnd.RelayStream(stream.Conn, relaySock) })
+			common.SafeGo(func() { xconnd.RelayStream(stream, relaySock) })
 		}
 	})
 

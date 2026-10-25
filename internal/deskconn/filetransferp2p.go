@@ -7,15 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pion/webrtc/v4"
-
 	"github.com/xconnio/deskconn/internal/common"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
-// P2PChannelOpener is the subset of a connected P2P session needed merely
-// to open a raw data channel on it. Depending on the interface rather than
-// the concrete type also lets tests drive this code against a bare
-// *webrtc.PeerConnection, with no WAMP handshake required.
+// P2PChannelOpener opens raw channels on a Rust-backed WebRTC session.
 type P2PChannelOpener = common.DataChannelOpener
 
 // ChannelOpener opens data channels to a machine: on a P2P session of its own (see
@@ -59,14 +55,14 @@ func responseErr(resp common.FSResponse) error {
 func p2pRequest(sess ChannelOpener, label string, req common.FSRequest) (*common.FSResponse, error) {
 	channel, err := sess.OpenMessageChannel(label)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s open channel: %w", label, err)
 	}
 	defer channel.Close()
 
 	closed, _ := common.WebrtcBackpressure(channel)
 	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s exchange keys: %w", label, err)
 	}
 
 	respCh := make(chan common.FSResponse, 1)
@@ -85,12 +81,12 @@ func p2pRequest(sess ChannelOpener, label string, req common.FSRequest) (*common
 	})
 
 	if err := common.SendEncryptedJSON(channel, req, sendKey); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s send request: %w", label, err)
 	}
 
 	resp, err := common.RecvPriority(respCh, closed, common.P2PRequestTimeout)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s receive reply: %w", label, err)
 	}
 	if !resp.OK {
 		return nil, responseErr(resp)

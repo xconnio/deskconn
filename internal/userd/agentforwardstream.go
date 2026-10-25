@@ -9,9 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pion/webrtc/v4"
-
 	"github.com/xconnio/deskconn/internal/common"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // agentForwardSessions maps a client's self-reported AuthID to the private

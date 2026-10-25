@@ -11,8 +11,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	wampauth "github.com/xconnio/wampproto-go/auth"
-	xconnauth "github.com/xconnio/xconn-go/auth"
+	auth "github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 type profileCommands struct {
@@ -86,7 +85,7 @@ func dispatchProfileCommand(parsedCmd string, cmds *profileCommands, cfgDirector
 }
 
 func printKeyPair() error {
-	publicKey, privateKey, err := wampauth.GenerateCryptoSignKeyPair()
+	publicKey, privateKey, err := auth.GenerateCryptoSignKeyPair()
 	if err != nil {
 		return err
 	}
@@ -109,7 +108,7 @@ func addProfile(cfgDirectory string, profile common.Profile) error {
 		profile.AuthID = common.CurrentUsername()
 	}
 	if profile.PrivateKey != "" {
-		if _, err := xconnauth.NewCryptoSignAuthenticator(profile.AuthID, profile.PrivateKey, nil); err != nil {
+		if _, err := auth.NewCryptoSignAuthenticator(profile.AuthID, profile.PrivateKey, nil); err != nil {
 			return errors.New("invalid private key: expected the hex private key `desk keygen` prints")
 		}
 	}

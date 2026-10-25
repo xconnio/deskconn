@@ -16,7 +16,7 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 var errFilePathEscapesHome = errors.New("relative path escapes home directory")
@@ -460,8 +460,14 @@ const searchBatchSize = 50
 // Search streams the entries under pathArg whose name contains query, then the cached
 // thumbnails (see thumbnailCache.cached) of those that have one: it never makes them, so a
 // search across a big tree doesn't thumbnail all of it.
-func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []byte, inv *xconn.Invocation,
-	cachedThumbnail func(path string) string) error {
+func (f *FileBrowser) Search(
+	ctx context.Context,
+	pathArg, query string,
+	showHidden bool,
+	sendKey []byte,
+	inv *xconn.Invocation,
+	cachedThumbnail func(path string) string,
+) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home dir: %w", err)
@@ -477,6 +483,9 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 	var mediaPaths []string
 
 	walkErr := filepath.WalkDir(resolvedPath, func(path string, d os.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}
@@ -524,6 +533,9 @@ func (f *FileBrowser) Search(pathArg, query string, showHidden bool, sendKey []b
 	}
 
 	for _, p := range mediaPaths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if thumb := cachedThumbnail(p); thumb != "" {
 			if err := sendSearchThumbnail(inv, sendKey, p, thumb); err != nil {
 				return err
@@ -558,19 +570,19 @@ func sendSearchThumbnail(inv *xconn.Invocation, sendKey []byte, path, thumb stri
 	return inv.SendProgress([]any{encrypted}, nil)
 }
 
-func (d *Deskconn) handleFileSearch(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleFileSearch(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
@@ -579,36 +591,37 @@ func (d *Deskconn) handleFileSearch(_ context.Context, inv *xconn.Invocation) *x
 		ShowHidden bool   `json:"show_hidden"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	if strings.TrimSpace(args.Query) == "" {
-		return xconn.NewInvocationResult()
+		return xconn.NewResult()
 	}
 
-	if err := d.files.Search(args.Path, args.Query, args.ShowHidden, enc.sendKey, inv, d.thumbnails.cached); err != nil {
+	err = d.files.Search(ctx, args.Path, args.Query, args.ShowHidden, enc.sendKey, inv, d.thumbnails.cached)
+	if err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
-	return xconn.NewInvocationResult()
+	return xconn.NewResult()
 }
 
-func (d *Deskconn) handleFileRename(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleFileRename(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
@@ -616,22 +629,22 @@ func (d *Deskconn) handleFileRename(_ context.Context, inv *xconn.Invocation) *x
 		NewPath string `json:"new_path"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	if err := d.files.Rename(args.OldPath, args.NewPath); err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }
 
 // maxThumbnailPaths bounds one file.thumbnails call; the frontend asks in small batches
@@ -641,90 +654,90 @@ const maxThumbnailPaths = 100
 // handleFileThumbnails returns {path: base64 JPEG} for the images, videos and PDFs among
 // paths, from the thumbnail cache, making the missing ones first. Browse leaves them out so
 // a listing never waits on them.
-func (d *Deskconn) handleFileThumbnails(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleFileThumbnails(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
 		Paths []string `json:"paths"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	if len(args.Paths) > maxThumbnailPaths {
-		return xconn.NewInvocationError(common.ErrInvalidArgument,
+		return xconn.NewResultError(common.ErrInvalidArgument,
 			fmt.Sprintf("at most %d paths per call", maxThumbnailPaths))
 	}
 
 	resultBytes, _ := json.Marshal(d.thumbnails.getAll(args.Paths))
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }
 
-func (d *Deskconn) handleFileDelete(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleFileDelete(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	if err := d.files.Delete(args.Path); err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }
 
-func (d *Deskconn) handleFileEdit(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleFileEdit(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
@@ -732,37 +745,37 @@ func (d *Deskconn) handleFileEdit(_ context.Context, inv *xconn.Invocation) *xco
 		Patch string `json:"patch"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	if err := d.files.Edit(args.Path, args.Patch); err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }
 
-func (d *Deskconn) handleFileCopy(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleFileCopy(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
@@ -770,20 +783,20 @@ func (d *Deskconn) handleFileCopy(_ context.Context, inv *xconn.Invocation) *xco
 		Dst string `json:"dst"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	if err := d.files.Copy(args.Src, args.Dst); err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	resultBytes, _ := json.Marshal(map[string]bool{"ok": true})
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }

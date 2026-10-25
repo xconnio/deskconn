@@ -7,8 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/xconnio/wampproto-go/auth"
-	xconnauth "github.com/xconnio/xconn-go/auth"
+	auth "github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 type Organization struct {
@@ -95,9 +94,9 @@ func (t *StandaloneTarget) Authenticator() (auth.ClientAuthenticator, error) {
 		if err != nil {
 			return nil, err
 		}
-		return xconnauth.NewWAMPCRAAuthenticator(t.AuthID, password, map[string]any{}), nil
+		return auth.NewWAMPCRAAuthenticator(t.AuthID, password, map[string]any{}), nil
 	}
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(t.AuthID, t.PrivateKey, map[string]any{})
+	authenticator, err := auth.NewCryptoSignAuthenticator(t.AuthID, t.PrivateKey, map[string]any{})
 	if err != nil {
 		return nil, fmt.Errorf("invalid private key: %w", err)
 	}

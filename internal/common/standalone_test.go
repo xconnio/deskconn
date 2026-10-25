@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 const (
@@ -33,9 +33,9 @@ func startStandalone(t *testing.T, keys []string, passwords map[string]string) (
 
 	local, err := xconn.ConnectInMemory(router, common.StandaloneRealm)
 	require.NoError(t, err)
-	resp := local.Register("io.xconn.test.echo", func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		return xconn.NewInvocationResult(inv.Args()...)
-	}).Do()
+	resp := local.Register("io.xconn.test.echo", func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
+		return xconn.NewResult(inv.Args()...)
+	}).Execute()
 	require.NoError(t, resp.Err)
 
 	dir := t.TempDir()
@@ -44,22 +44,16 @@ func startStandalone(t *testing.T, keys []string, passwords map[string]string) (
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
 	server := xconn.NewServer(router, xconnd.NewStandaloneAuthenticator(keys, passwords), &xconn.ServerConfig{})
 
-	quicListener, err := server.ListenAndServeQUIC("127.0.0.1:0", tlsConfig)
+	quicListener, err := server.ListenQUIC(t.Context(), "127.0.0.1:0", &tlsConfig.Certificates[0])
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = quicListener.Close() })
-	wtListener, err := server.ListenAndServeWebTransport("127.0.0.1:0", tlsConfig, xconnd.WebTransportPath)
+	wtListener, err := server.ListenWebTransport(
+		t.Context(), "127.0.0.1:0", xconnd.WebTransportPath, tlsConfig.Certificates[0],
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = wtListener.Close() })
-	go func() {
-		for range quicListener.AcceptSession() { //nolint:revive // only draining
-		}
-	}()
-	go func() {
-		for range wtListener.AcceptSession() { //nolint:revive // only draining
-		}
-	}()
 
-	return "quic://" + quicListener.Addr().String(), "https://" + wtListener.Addr().String(),
+	return "quic://" + quicListener.Address, "https://" + wtListener.Address,
 		common.CertificateFingerprint(cert)
 }
 
@@ -97,9 +91,9 @@ func TestStandaloneTransports(t *testing.T) {
 		conn, err := connectStandalone(t, &common.StandaloneTarget{URL: url, CertHash: certHash, AuthID: testUser,
 			Password: testPassword})
 		require.NoError(t, err, url)
-		resp := conn.Call("io.xconn.test.echo").Args("hello").Do()
+		resp := conn.Call("io.xconn.test.echo").Args("hello").Execute()
 		require.NoError(t, resp.Err, url)
-		require.Equal(t, "hello", resp.Args()[0])
+		require.Equal(t, "hello", resp.Args[0])
 
 		// Raw streams open alongside the session (the server side has no consumer, so
 		// opening is all that can be checked here).
@@ -143,9 +137,9 @@ func TestStandaloneAuthenticatorPassword(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
 	require.Equal(t, testUser, conn.Details().AuthID())
-	resp := conn.Call("io.xconn.test.echo").Args("hello").Do()
+	resp := conn.Call("io.xconn.test.echo").Args("hello").Execute()
 	require.NoError(t, resp.Err)
-	require.Equal(t, "hello", resp.Args()[0])
+	require.Equal(t, "hello", resp.Args[0])
 
 	_, err = connectStandalone(t, &common.StandaloneTarget{URL: url, CertHash: certHash,
 		AuthID: testUser, Password: "wrong"})

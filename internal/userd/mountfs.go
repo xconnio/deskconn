@@ -11,36 +11,36 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // handleMountFS serves the operations of a `desk file mount` of this machine.
 // Filesystem failures are returned as an errno in a successful result (see
 // common.ProcedureMountFS); only protocol problems become WAMP errors.
-func (d *Deskconn) handleMountFS(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleMountFS(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	resultBytes, err := d.mountHandles.call(inv.Caller(), plaintext)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }
 
 // mountMaxHandles bounds the files a machine keeps open for mounts.

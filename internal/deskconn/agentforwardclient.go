@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // RunAgentForward is the client entry point for `desk shell -A`. It

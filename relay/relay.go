@@ -6,32 +6,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
+
+type relayIdentity interface {
+	Realm() string
+	AuthID() string
+	AuthRole() string
+}
 
 type connBroker struct {
 	sync.RWMutex
-	devices map[string]*xconn.QUICConn
+	devices map[string]*xconn.QUICConnection
 	// userRoles are the roles whose sessions may relay streams to their realm's machine.
 	userRoles map[string]bool
 }
 
 func newConnBroker(userRoles map[string]bool) *connBroker {
-	return &connBroker{devices: make(map[string]*xconn.QUICConn), userRoles: userRoles}
+	return &connBroker{devices: make(map[string]*xconn.QUICConnection), userRoles: userRoles}
 }
 
-func (r *connBroker) register(realm string, conn *xconn.QUICConn) {
+func (r *connBroker) register(realm string, conn *xconn.QUICConnection) {
 	r.Lock()
 	r.devices[realm] = conn
 	r.Unlock()
 }
 
-func (r *connBroker) unregister(realm string, conn *xconn.QUICConn) {
+func (r *connBroker) unregister(realm string, conn *xconn.QUICConnection) {
 	r.Lock()
 	if r.devices[realm] == conn {
 		delete(r.devices, realm)
@@ -39,14 +44,14 @@ func (r *connBroker) unregister(realm string, conn *xconn.QUICConn) {
 	r.Unlock()
 }
 
-func (r *connBroker) lookup(realm string) (*xconn.QUICConn, bool) {
+func (r *connBroker) lookup(realm string) (*xconn.QUICConnection, bool) {
 	r.RLock()
 	conn, ok := r.devices[realm]
 	r.RUnlock()
 	return conn, ok
 }
 
-func (r *connBroker) onDeviceConnect(ctx context.Context, session xconn.BaseSession, conn *xconn.QUICConn) {
+func (r *connBroker) onDeviceConnect(ctx context.Context, session relayIdentity, conn *xconn.QUICConnection) {
 	if !isMachineSession(session) {
 		return
 	}
@@ -65,8 +70,10 @@ type relayRequest struct {
 	Recursive bool   `json:"recursive,omitempty"`
 }
 
-func (r *connBroker) onClientStream(cliStream net.Conn, session xconn.BaseSession) {
+func (r *connBroker) onClientStream(ctx context.Context, cliStream io.ReadWriteCloser, session relayIdentity) {
 	defer cliStream.Close()
+	stop := context.AfterFunc(ctx, func() { _ = cliStream.Close() })
+	defer stop()
 
 	var req relayRequest
 	if err := readRelayMsg(cliStream, &req); err != nil {
@@ -91,7 +98,7 @@ func (r *connBroker) onClientStream(cliStream net.Conn, session xconn.BaseSessio
 		return
 	}
 
-	devStream, err := deviceConn.OpenStream()
+	devStream, err := deviceConn.OpenStream(ctx)
 	if err != nil {
 		_ = writeRelayError(cliStream, fmt.Sprintf("failed to open device stream: %v", err))
 		return
@@ -105,10 +112,13 @@ func (r *connBroker) onClientStream(cliStream net.Conn, session xconn.BaseSessio
 	bridge(cliStream, devStream)
 }
 
-func bridge(a, b net.Conn) {
+func bridge(a, b io.ReadWriteCloser) {
 	done := make(chan struct{}, 2)
 	go func() { _, _ = io.Copy(a, b); done <- struct{}{} }()
 	go func() { _, _ = io.Copy(b, a); done <- struct{}{} }()
+	<-done
+	_ = a.Close()
+	_ = b.Close()
 	<-done
 }
 

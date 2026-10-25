@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/appkit"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 const (
@@ -28,7 +28,7 @@ func TestEncryptedProcedure(t *testing.T) {
 	require.NoError(t, enc.Register(server, keyExchange))
 	require.NoError(t, server.Register(echo, enc.Encrypted(func(_ context.Context, req []byte) (any, error) {
 		return string(req), nil
-	})).Do().Err)
+	})).Execute().Err)
 
 	client, err := xconn.ConnectInMemory(router, appkit.LocalRealm)
 	require.NoError(t, err)
@@ -39,7 +39,7 @@ func TestEncryptedProcedure(t *testing.T) {
 	require.JSONEq(t, `"hello"`, string(out))
 
 	// Without the keys the call fails.
-	require.Error(t, client.Call(echo).Args([]byte("hello")).Do().Err)
+	require.Error(t, client.Call(echo).Args([]byte("hello")).Execute().Err)
 }
 
 func TestSocketURI(t *testing.T) {

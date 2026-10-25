@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // HandleFileStreamChannel is the file-transfer entry point for every raw
@@ -105,13 +105,13 @@ func serveWebRTCList(channel common.MessageChannel, req common.FSRequest, sendKe
 
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 
 	entries, err := common.BuildManifest(resolvedRoot, req.Recursive)
 	if err != nil {
-		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 
@@ -123,13 +123,13 @@ func serveWebRTCInit(channel common.MessageChannel, req common.FSRequest, sendKe
 
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 
 	rootIsDir := common.IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
 	if err := common.MaterializeTargets(req.Entries, resolvedRoot, rootIsDir); err != nil {
-		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 
@@ -176,7 +176,7 @@ func serveWebRTCReadOnce(channel common.MessageChannel, closed, sendReady <-chan
 	sendKey []byte) error {
 	resolvedRoot, basePath, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return nil
 	}
 
@@ -194,14 +194,14 @@ func serveWebRTCReadOnce(channel common.MessageChannel, closed, sendReady <-chan
 
 	f, err := os.Open(absPath) //nolint:gosec
 	if err != nil {
-		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return nil
 	}
 	defer f.Close()
 
 	if req.Offset > 0 {
 		if _, err := f.Seek(req.Offset, io.SeekStart); err != nil {
-			_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+			_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 			return nil
 		}
 	}
@@ -241,7 +241,7 @@ func serveWebRTCWriteOnce(channel common.MessageChannel, closed <-chan struct{},
 	req common.FSRequest, sendKey []byte) error {
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return nil
 	}
 
@@ -254,7 +254,7 @@ func serveWebRTCWriteOnce(channel common.MessageChannel, closed <-chan struct{},
 
 	f, err := os.OpenFile(dest, os.O_WRONLY, 0) //nolint:gosec
 	if err != nil {
-		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.SendEncryptedJSON(channel, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return nil
 	}
 	defer f.Close()

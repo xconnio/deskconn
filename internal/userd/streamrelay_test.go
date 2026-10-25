@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
-	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
 // TestCloseStreamsEndsOpenShell confirms CloseStreams, as userd's shutdown calls it,

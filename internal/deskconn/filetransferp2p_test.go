@@ -2,17 +2,19 @@ package deskconn_test
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
+	"github.com/xconnio/xconn-core/bindings/go"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 const (
@@ -20,85 +22,53 @@ const (
 	waitTick    = 20 * time.Millisecond
 )
 
-// p2pTestConnection adapts a bare offerer *webrtc.PeerConnection to
-// P2PChannelOpener, letting tests drive DownloadFilesP2P/UploadFilesP2P
-// without a real WAMP handshake -- xconnwebrtc.WebRTCSession satisfies
-// P2PChannelOpener the same way in production.
-type p2pTestConnection struct {
-	pc *webrtc.PeerConnection
-}
-
-func (c *p2pTestConnection) OpenChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error) {
-	return c.pc.CreateDataChannel(label, options)
-}
-
-// newP2PTestConnection establishes one real, connected pair of pion
-// PeerConnections over loopback (host ICE candidates only, no STUN/TURN
-// needed) and wires the answerer's incoming data channels to
-// (*Deskconn).HandleAuxDataChannel -- the exact same production entry point
-// cmd/deskconnd/main.go registers via webRtcManager.OnDataChannel, not a
-// lower-level handler reached only in tests. It returns the offerer side as
-// a ChannelOpener; every DownloadFilesP2P/UploadFilesP2P call in these
-// tests reuses this single PeerConnection for its control call and every
-// parallel worker's channel, matching production.
+// File-transfer tests use the same Rust-backed WAMP/WebRTC connection as production.
 func newP2PTestConnection(t *testing.T) deskconn.ChannelOpener {
 	t.Helper()
 	return deskconn.P2PChannels(newP2PTestPeerConnection(t))
 }
 
-// newP2PTestPeerConnection is newP2PTestConnection's offerer, before it's
-// wrapped to open channels directly.
 func newP2PTestPeerConnection(t *testing.T) deskconn.P2PChannelOpener {
 	t.Helper()
-
-	offererPC, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	router, err := xconn.NewRouter(nil)
 	require.NoError(t, err)
-	answererPC, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	t.Cleanup(router.Close)
+	require.NoError(t, router.AddRealm("test", &xconn.RealmConfig{AutoDiscloseCaller: true, Meta: true,
+		Roles: []xconn.RealmRole{{Name: "anonymous", Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix",
+			AllowCall: true, AllowRegister: true, AllowSubscribe: true, AllowPublish: true}}}}}))
+	signaling, err := xconn.ConnectInMemory(router, "test")
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = offererPC.Close()
-		_ = answererPC.Close()
-	})
-
-	// At least one data channel must exist before the offer to bootstrap the
-	// SCTP association; every channel opened afterward (by common.OpenDataChannel)
-	// rides that same association with no renegotiation needed.
-	_, err = offererPC.CreateDataChannel("bootstrap", nil)
-	require.NoError(t, err)
-
-	var d userd.Deskconn
-	answererPC.OnDataChannel(func(dc *webrtc.DataChannel) {
-		if dc.Label() == "bootstrap" {
+	t.Cleanup(func() { _ = signaling.Close() })
+	provider := webrtc.NewWebRTCHandler()
+	var backend userd.Deskconn
+	provider.OnDataChannel(func(_ string, channel *webrtc.DataChannel, first []byte) {
+		if first != nil {
+			backend.HandleFileStreamChannel("test-session", channel, first)
 			return
 		}
 		var once sync.Once
-		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-			once.Do(func() {
-				d.HandleFileStreamChannel("test-session", dc, msg.Data)
-			})
+		channel.OnMessage(func(message webrtc.DataChannelMessage) {
+			once.Do(func() { backend.HandleFileStreamChannel("test-session", channel, message.Data) })
 		})
 	})
-
-	offer, err := offererPC.CreateOffer(nil)
+	require.NoError(t, provider.SetupContext(t.Context(), &webrtc.ProviderConfig{
+		Session: signaling, Router: router, ProcedureHandleOffer: "offer",
+		TopicHandleRemoteCandidates: "to-provider", TopicPublishLocalCandidate: "to-client",
+	}))
+	t.Cleanup(func() { _ = provider.Close() })
+	ctx, cancel := context.WithTimeout(t.Context(), waitTimeout)
+	defer cancel()
+	clientSignal, err := xconn.ConnectInMemory(router, "test")
 	require.NoError(t, err)
-	offerGatherComplete := webrtc.GatheringCompletePromise(offererPC)
-	require.NoError(t, offererPC.SetLocalDescription(offer))
-	<-offerGatherComplete
-
-	require.NoError(t, answererPC.SetRemoteDescription(*offererPC.LocalDescription()))
-	answer, err := answererPC.CreateAnswer(nil)
+	t.Cleanup(func() { _ = clientSignal.Close() })
+	session, err := webrtc.ConnectWAMPContext(ctx, &webrtc.ClientConfig{Session: clientSignal, Realm: "test",
+		ProcedureWebRTCOffer: "offer", TopicAnswererOnCandidate: "to-provider", TopicOffererOnCandidate: "to-client"})
 	require.NoError(t, err)
-	answerGatherComplete := webrtc.GatheringCompletePromise(answererPC)
-	require.NoError(t, answererPC.SetLocalDescription(answer))
-	<-answerGatherComplete
-
-	require.NoError(t, offererPC.SetRemoteDescription(*answererPC.LocalDescription()))
-
-	require.Eventually(t, func() bool {
-		return offererPC.ConnectionState() == webrtc.PeerConnectionStateConnected
-	}, waitTimeout, waitTick, "peer connections never reached the connected state")
-
-	return &p2pTestConnection{pc: offererPC}
+	t.Cleanup(func() { _ = session.Close(); _ = session.Connection().Close() })
+	address, err := session.Connection().SelectedRemoteAddress(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, address, "VPN routing needs the selected ICE peer address")
+	return session
 }
 
 func TestDownloadFilesP2PSingleFile(t *testing.T) {

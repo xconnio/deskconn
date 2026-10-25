@@ -8,9 +8,9 @@ import (
 	"net"
 	"net/url"
 
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 // Standalone URL schemes: quic://host:port, or https://host:port[/path] for WebTransport.

@@ -17,8 +17,8 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/wampproto-go"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/protocol"
 )
 
 // app is one app of the web frontend. userd's own apps (see Deskconn.apps) come with
@@ -208,7 +208,7 @@ func (c *capabilities) sync() error {
 		if _, ok := c.regs[uri]; ok {
 			continue
 		}
-		resp := c.session.Register(uri, handler).Invoke(wampproto.InvokeLast).Do()
+		resp := c.session.Register(uri, handler).Invoke(protocol.InvokeLast).Execute()
 		if resp.Err != nil {
 			return resp.Err
 		}
@@ -276,10 +276,10 @@ func (c *capabilities) list() []any {
 	return result
 }
 
-func (c *capabilities) handleList(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+func (c *capabilities) handleList(_ context.Context, _ *xconn.Invocation) *xconn.Result {
 	c.Lock()
 	defer c.Unlock()
-	return xconn.NewInvocationResult(c.list(), true)
+	return xconn.NewResult(c.list(), true)
 }
 
 // isManager reports whether inv's caller is one of the machine's owners or admins. xconn's
@@ -307,9 +307,9 @@ func (c *capabilities) notify() {
 // handleWatch sends the apps' list as a progressive result right away and again whenever it
 // changes, so remote clients follow it live: TopicCapabilitiesChanged only reaches the local
 // realm. The caller must ask for progressive results. The call ends after watchDuration.
-func (c *capabilities) handleWatch(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (c *capabilities) handleWatch(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 	if inv.SendProgress == nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "call with receive_progress")
+		return xconn.NewResultError(common.ErrInvalidArgument, "call with receive_progress")
 	}
 	timeout := time.NewTimer(watchDuration)
 	defer timeout.Stop()
@@ -318,14 +318,14 @@ func (c *capabilities) handleWatch(ctx context.Context, inv *xconn.Invocation) *
 		apps, changed := c.list(), c.changed
 		c.Unlock()
 		if err := inv.SendProgress([]any{apps}, nil); err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 		select {
 		case <-changed:
 		case <-ctx.Done():
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		case <-timeout.C:
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		}
 	}
 }
@@ -333,17 +333,17 @@ func (c *capabilities) handleWatch(ctx context.Context, inv *xconn.Invocation) *
 // handleSet enables or disables one app: args are the app id and the new enabled state.
 // It returns the apps' list and whether anything changed (false if the app already was).
 // Only the machine's owner and admins may call it (see ProcedureCapabilitiesSet).
-func (c *capabilities) handleSet(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (c *capabilities) handleSet(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	if !isManager(inv) {
-		return xconn.NewInvocationError(common.ErrNotAuthorized, "only the machine's owner and admins may enable apps")
+		return xconn.NewResultError(common.ErrNotAuthorized, "only the machine's owner and admins may enable apps")
 	}
 	id, err := inv.ArgString(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	enabled, err := inv.ArgBool(1)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	c.Lock()
@@ -351,16 +351,16 @@ func (c *capabilities) handleSet(_ context.Context, inv *xconn.Invocation) *xcon
 	apps := c.apps()
 	i := slices.IndexFunc(apps, func(a *app) bool { return a.ID == id })
 	if i < 0 {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "app not found: "+id)
+		return xconn.NewResultError(common.ErrInvalidArgument, "app not found: "+id)
 	}
 	if enabled == c.isEnabled(id) {
-		return xconn.NewInvocationResult(c.list(), false)
+		return xconn.NewResult(c.list(), false)
 	}
 
 	if enabled {
 		for _, required := range apps[i].Requires {
 			if !c.isEnabled(required) {
-				return xconn.NewInvocationError(common.ErrInvalidArgument,
+				return xconn.NewResultError(common.ErrInvalidArgument,
 					fmt.Sprintf("%s requires %s, enable %s first", id, required, required))
 			}
 		}
@@ -375,13 +375,13 @@ func (c *capabilities) handleSet(_ context.Context, inv *xconn.Invocation) *xcon
 		}
 	}
 	if err := c.sync(); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	if err := c.save(); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	c.publish()
-	return xconn.NewInvocationResult(c.list(), true)
+	return xconn.NewResult(c.list(), true)
 }
 
 // save writes the apps' enabled states to capabilities.json. c must be locked.
@@ -397,7 +397,7 @@ func (c *capabilities) save() error {
 // serving. c must be locked.
 func (c *capabilities) publish() {
 	c.notify()
-	if resp := c.session.Publish(common.TopicCapabilitiesChanged).Args(c.list()).Do(); resp.Err != nil {
+	if resp := c.session.Publish(common.TopicCapabilitiesChanged).Args(c.list()).Execute(); resp.Err != nil {
 		log.Printf("capabilities: failed to publish change: %v", resp.Err)
 	}
 }

@@ -11,12 +11,13 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 const (
@@ -166,9 +167,12 @@ func (r *Router) Session() *xconn.Session {
 
 // Serve listens on config's addresses until ctx is done.
 func (r *Router) Serve(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
+
 	server := xconn.NewServer(r.router, authenticator{authenticate: r.config.Authenticate}, &xconn.ServerConfig{
-		KeepAliveInterval: 30 * time.Second,
-		KeepAliveTimeout:  10 * time.Second,
+		KeepAliveInterval: 30 * time.Second, KeepAliveTimeout: 10 * time.Second,
 	})
 
 	if r.config.RawSocketAddress != "" {
@@ -188,23 +192,41 @@ func (r *Router) Serve(ctx context.Context) error {
 				return err
 			}
 		}
-		listener, err := server.ListenAndServeQUIC(r.config.QUICAddress, tlsConfig)
+		listener, err := server.ListenQUIC(ctx, r.config.QUICAddress, &tlsConfig.Certificates[0])
 		if err != nil {
 			return fmt.Errorf("failed to start QUIC listener: %w", err)
 		}
 		defer listener.Close()
 		log.Printf("QUIC listening on %s", r.config.QUICAddress)
 
-		go func() {
-			for conn := range listener.AcceptSession() {
-				go r.relay.onDeviceConnect(conn.Ctx, conn.Session, conn.QUICConn)
+		workers.Go(func() {
+			for {
+				connection, identity, err := listener.AcceptConnection(ctx)
+				if err != nil {
+					return
+				}
+				workers.Go(func() {
+					defer connection.Close()
+					life, cancel := context.WithCancel(ctx)
+					defer cancel()
+					workers.Go(func() { _ = connection.Wait(life); cancel() })
+					r.relay.onDeviceConnect(life, identity, connection)
+					if !isMachineSession(identity) {
+						<-life.Done()
+					}
+				})
 			}
-		}()
-		go func() {
-			for stream := range listener.AcceptStream() {
-				go r.relay.onClientStream(stream.Conn, stream.Session)
+		})
+		workers.Go(func() {
+			for {
+				stream, identity, err := listener.AcceptStream(ctx)
+				if err != nil {
+					return
+				}
+				workers.Go(func() { r.relay.onClientStream(ctx, stream, identity) })
 			}
-		}()
+		})
+
 	}
 
 	if r.config.WebTransportAddress != "" {
@@ -221,23 +243,23 @@ func (r *Router) Serve(ctx context.Context) error {
 				go serveCertHash(r.config.CertHashAddress, base64.StdEncoding.EncodeToString(certHash))
 			}
 		}
-		listener, err := server.ListenAndServeWebTransport(r.config.WebTransportAddress, tlsConfig, "/wamp")
+		listener, err := server.ListenWebTransport(ctx, r.config.WebTransportAddress, "/wamp", tlsConfig.Certificates[0])
 		if err != nil {
 			return fmt.Errorf("failed to start WebTransport listener: %w", err)
 		}
 		defer listener.Close()
 		log.Printf("WebTransport listening on %s", r.config.WebTransportAddress)
 
-		go func() {
-			for range listener.AcceptSession() {
-				// Browser WAMP sessions are fully handled by the router.
+		workers.Go(func() {
+			for {
+				stream, identity, err := listener.AcceptStream(ctx)
+				if err != nil {
+					return
+				}
+				workers.Go(func() { r.relay.onClientStream(ctx, stream, identity) })
 			}
-		}()
-		go func() {
-			for stream := range listener.AcceptStream() {
-				go r.relay.onClientStream(stream.Conn, stream.Session)
-			}
-		}()
+		})
+
 	}
 
 	<-ctx.Done()
@@ -302,22 +324,22 @@ func (r *Router) RemoveMachine(machine Machine) error {
 // registerProcedures registers ProcedureAddRealm and ProcedureRemoveRealm.
 func (r *Router) registerProcedures() error {
 	machineHandler := func(apply func(Machine) error) xconn.InvocationHandler {
-		return func(_ context.Context, invocation *xconn.Invocation) *xconn.InvocationResult {
+		return func(_ context.Context, invocation *xconn.Invocation) *xconn.Result {
 			if len(invocation.Args()) != 2 {
-				return xconn.NewInvocationError(errInvalidArgument, "must be called with two arguments (realm and authid)")
+				return xconn.NewResultError(errInvalidArgument, "must be called with two arguments (realm and authid)")
 			}
 			realm, err := invocation.ArgString(0)
 			if err != nil {
-				return xconn.NewInvocationError(errInvalidArgument, err.Error())
+				return xconn.NewResultError(errInvalidArgument, err.Error())
 			}
 			authid, err := invocation.ArgString(1)
 			if err != nil {
-				return xconn.NewInvocationError(errInvalidArgument, err.Error())
+				return xconn.NewResultError(errInvalidArgument, err.Error())
 			}
 			if err := apply(Machine{AuthID: authid, Realm: realm}); err != nil {
-				return xconn.NewInvocationError(errOperationFailed, err.Error())
+				return xconn.NewResultError(errOperationFailed, err.Error())
 			}
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		}
 	}
 
@@ -325,7 +347,7 @@ func (r *Router) registerProcedures() error {
 		ProcedureAddRealm:    machineHandler(r.AddMachine),
 		ProcedureRemoveRealm: machineHandler(r.RemoveMachine),
 	} {
-		if resp := r.session.Register(procedure, handler).Do(); resp.Err != nil {
+		if resp := r.session.Register(procedure, handler).Execute(); resp.Err != nil {
 			return resp.Err
 		}
 		log.Printf("Registered procedure %s", procedure)
@@ -346,7 +368,7 @@ func (a authenticator) Authenticate(request auth.Request) (auth.Response, error)
 	return a.authenticate(request)
 }
 
-func isMachineSession(session xconn.BaseSession) bool {
+func isMachineSession(session relayIdentity) bool {
 	return strings.HasPrefix(session.AuthRole(), machineAuthRolePrefix)
 }
 

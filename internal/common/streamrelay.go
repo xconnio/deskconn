@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/webrtc/v4"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // MessageChannel is the subset of *webrtc.DataChannel's API every raw

@@ -16,7 +16,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 type fileCommands struct {
@@ -425,7 +425,7 @@ func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload 
 		if err != nil {
 			return err
 		}
-		resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Do()
+		resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Execute()
 		return resp.Err
 	}
 }
@@ -491,7 +491,7 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	defer func() { _ = localSession.Leave() }()
 
 	if !machineHasPersistentSession(localSession, realm) {
-		_ = localSession.Call(common.ProcedureConnect).Args(realm).Do()
+		_ = localSession.Call(common.ProcedureConnect).Args(realm).Execute()
 		return nil
 	}
 
@@ -499,7 +499,7 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	if err != nil {
 		return nil
 	}
-	resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, common.ProcedureFileBrowse, browsePayload).Do()
+	resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, common.ProcedureFileBrowse, browsePayload).Execute()
 	if resp.Err != nil {
 		return nil
 	}
@@ -528,11 +528,11 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 }
 
 func machineHasPersistentSession(localSession *xconn.Session, realm string) bool {
-	resp := localSession.Call(common.ProcedureConnectedMachines).Do()
-	if resp.Err != nil || len(resp.Args()) == 0 {
+	resp := localSession.Call(common.ProcedureConnectedMachines).Execute()
+	if resp.Err != nil || len(resp.Args) == 0 {
 		return false
 	}
-	connected, ok := resp.Args()[0].(map[string]any)
+	connected, ok := resp.Args[0].(map[string]any)
 	if !ok {
 		return false
 	}

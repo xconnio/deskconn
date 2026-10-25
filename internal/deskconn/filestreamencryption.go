@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/pion/webrtc/v4"
-
 	"github.com/xconnio/deskconn/internal/common"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // p2pClientKeyExchange performs the client side of the per-channel key

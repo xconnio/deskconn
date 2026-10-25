@@ -10,7 +10,7 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 func setupDeskconnWithInstance(t *testing.T) *xconn.Session {
@@ -42,7 +42,7 @@ func isolatedHome(t *testing.T) string {
 func TestClaudeSessionListHandlerMissingKeyExchange(t *testing.T) {
 	caller := setupDeskconnWithInstance(t)
 
-	callResp := caller.Call(common.ProcedureClaudeSessionList).Do()
+	callResp := caller.Call(common.ProcedureClaudeSessionList).Execute()
 	require.ErrorContains(t, callResp.Err, "no session keys")
 }
 
@@ -58,7 +58,7 @@ func TestClaudeSessionListHandlerNoMatchingSessionsReturnsEmpty(t *testing.T) {
 func TestClaudeSessionPullHandlerMissingKeyExchange(t *testing.T) {
 	caller := setupDeskconnWithInstance(t)
 
-	callResp := caller.Call(common.ProcedureClaudeSessionPull).Do()
+	callResp := caller.Call(common.ProcedureClaudeSessionPull).Execute()
 	require.ErrorContains(t, callResp.Err, "no session keys")
 }
 

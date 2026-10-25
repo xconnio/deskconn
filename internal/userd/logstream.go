@@ -15,10 +15,10 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // logSender writes one already-built envelope to the peer, synchronously --

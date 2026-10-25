@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // RunLogs is the client entry point for `desk machine logs`. It validates since

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // fakeChannel is a MessageChannel the test drives by hand: deliver plays a

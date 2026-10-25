@@ -7,9 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pion/webrtc/v4"
-
 	"github.com/xconnio/deskconn/internal/common"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // handleQUICPortForwardStream serves one forwarded TCP connection over a

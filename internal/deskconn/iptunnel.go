@@ -10,23 +10,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
+	"github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // pinTargets returns the addresses that must be pinned to the current
 // default route before it's replaced: the WebRTC peer (so the tunnel
 // doesn't route into itself) and the cloud relay (so the machine's own
 // control connection survives the switch).
-func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []string {
+func pinTargets(ctx context.Context, session *webrtc.WebRTCSession) []string {
 	var ips []string
 
-	if pair, err := session.Connection().SCTP().Transport().ICETransport().GetSelectedCandidatePair(); err == nil &&
-		pair != nil && pair.Remote != nil {
-		ips = append(ips, pair.Remote.Address)
+	if address, err := session.Connection().SelectedRemoteAddress(ctx); err == nil && address != "" {
+		ips = append(ips, address)
 	}
 
 	if host, _, err := net.SplitHostPort(common.CloudQUICAddress()); err == nil {
@@ -59,7 +57,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 // and this machine's traffic has been routed through it -- callers printing
 // something like "tunnel up" should wait for this rather than assume
 // success as soon as the call is made.
-func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, helper *common.VPNHelperClient,
+func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, helper *common.VPNHelperClient,
 	onReady func()) error {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNClientTUNName)
 	if err != nil {

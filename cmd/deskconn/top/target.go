@@ -13,7 +13,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // topTarget is a machine desk top acts on: one of the account's, or a profile's.
@@ -81,11 +81,11 @@ func (m *Model) fetchConnected() tea.Cmd {
 			return topConnectedMsg{}
 		}
 		defer func() { _ = session.Leave() }()
-		resp := session.Call(common.ProcedureConnectedMachines).DoContext(ctx)
-		if resp.Err != nil || len(resp.Args()) == 0 {
+		resp := session.Call(common.ProcedureConnectedMachines).ExecuteContext(ctx)
+		if resp.Err != nil || len(resp.Args) == 0 {
 			return topConnectedMsg{daemonUp: true}
 		}
-		connected, _ := resp.Args()[0].(map[string]any)
+		connected, _ := resp.Args[0].(map[string]any)
 		return topConnectedMsg{connected: connected, daemonUp: true}
 	}
 }
@@ -204,7 +204,7 @@ func (s *topSessions) viaDaemon(realm string) *xconn.Session {
 // proxy calls procedure on realm's machine through the daemon, having it connect to the
 // machine first if it hasn't yet: calls at once would each have it connect, the last
 // connection replacing the others under the calls on them.
-func (s *topSessions) proxy(daemon *xconn.Session, realm, procedure string, args ...any) (xconn.CallResponse, error) {
+func (s *topSessions) proxy(daemon *xconn.Session, realm, procedure string, args ...any) (*xconn.Result, error) {
 	s.mu.Lock()
 	proxying := s.proxying[realm]
 	if proxying == nil {
@@ -219,11 +219,11 @@ func (s *topSessions) proxy(daemon *xconn.Session, realm, procedure string, args
 	ctx, cancel := context.WithTimeout(context.Background(), topConnectTimeout)
 	defer cancel()
 	if !ready {
-		if err := daemon.Call(common.ProcedureConnect).Args(realm).DoContext(ctx).Err; err != nil {
-			return xconn.CallResponse{}, err
+		if err := daemon.Call(common.ProcedureConnect).Args(realm).ExecuteContext(ctx).Err; err != nil {
+			return nil, err
 		}
 	}
-	resp := daemon.Call(procedure).Args(args...).DoContext(ctx)
+	resp := daemon.Call(procedure).Args(args...).ExecuteContext(ctx)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -341,7 +341,7 @@ func (s *topSessions) Ping(realm string) error {
 	return s.call(realm, func(session *topSession) error {
 		ctx, cancel := context.WithTimeout(context.Background(), topConnectTimeout)
 		defer cancel()
-		return session.conn.Call(common.ProcedurePing).DoContext(ctx).Err
+		return session.conn.Call(common.ProcedurePing).ExecuteContext(ctx).Err
 	})
 }
 

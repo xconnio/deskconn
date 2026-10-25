@@ -2,7 +2,6 @@ package userd_test
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -17,8 +16,8 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 // listenQUIC serves router over QUIC on a local port with a self-signed certificate,
@@ -29,15 +28,28 @@ func listenQUIC(t *testing.T, router *xconn.Router, authenticator auth.ServerAut
 	dir := t.TempDir()
 	cert, err := common.LoadOrCreateCertificate(filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"))
 	require.NoError(t, err)
-	listener, err := xconn.NewServer(router, authenticator, &xconn.ServerConfig{}).ListenAndServeQUIC("127.0.0.1:0",
-		&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	listener, err := xconn.NewServer(router, authenticator, nil).ListenQUIC(t.Context(), "127.0.0.1:0", &cert)
+
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
+	streams := make(chan *xconn.QUICStream)
 	go func() {
-		for range listener.AcceptSession() { //nolint:revive // only draining
+		defer close(streams)
+		for {
+			stream, _, err := listener.AcceptStream(t.Context())
+			if err != nil {
+				return
+			}
+			select {
+			case streams <- stream:
+			case <-t.Context().Done():
+				_ = stream.Close()
+				return
+			}
 		}
 	}()
-	return "quic://" + listener.Addr().String(), common.CertificateFingerprint(cert), listener.AcceptStream()
+	return "quic://" + listener.Address, common.CertificateFingerprint(cert), streams
+
 }
 
 const proxyTestRealm = "io.xconn.test"

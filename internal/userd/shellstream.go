@@ -10,9 +10,9 @@ import (
 	"time"
 
 	pty "github.com/aymanbagabas/go-pty"
-	"github.com/pion/webrtc/v4"
 
 	"github.com/xconnio/deskconn/internal/common"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // newShellStreamID generates a random ID for a new shell connection. No

@@ -14,14 +14,11 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.12.1
 	github.com/muesli/cancelreader v0.2.2
 	github.com/olekukonko/tablewriter v1.1.3
-	github.com/pion/webrtc/v4 v4.1.6
 	github.com/sergi/go-diff v1.4.0
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/sirupsen/logrus v1.9.3
+	github.com/xconnio/xconn-core/bindings/go v0.0.0
 	github.com/stretchr/testify v1.12.1
-	github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318
-	github.com/xconnio/xconn-go v0.1.1-0.20261023141601-683389304fa4
-	github.com/xconnio/xconn-webrtc-go v0.0.0-20261027085904-3f71f52c0f0d
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
@@ -113,3 +110,5 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
+
+replace github.com/xconnio/xconn-core/bindings/go => ../xconn-core/bindings/go

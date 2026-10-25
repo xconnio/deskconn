@@ -130,14 +130,14 @@ func (c *thumbnailCache) getAll(paths []string) map[string]string {
 	return thumbs
 }
 
-// cached returns path's thumbnail as base64 JPEG if one is cached, never making it.
+// cached returns an existing thumbnail without generating one during search.
 func (c *thumbnailCache) cached(path string) string {
 	path, info, generate := c.lookup(path)
 	if generate == nil {
 		return ""
 	}
-	thumb, _ := c.read(c.file(path), info)
-	return thumb
+	thumbnail, _ := c.read(c.file(path), info)
+	return thumbnail
 }
 
 // get returns path's thumbnail as base64 JPEG, or "" if it has none, making it if it isn't

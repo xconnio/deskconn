@@ -9,7 +9,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 const (
@@ -95,47 +95,47 @@ func (s *settings) put(user, key, value string) error {
 }
 
 // settingsCaller is whose settings inv is about, or the error to reply with.
-func settingsCaller(inv *xconn.Invocation) (string, *xconn.InvocationResult) {
+func settingsCaller(inv *xconn.Invocation) (string, *xconn.Result) {
 	user := inv.CallerAuthID()
 	if user == "" {
-		return "", xconn.NewInvocationError(common.ErrNotAuthorized, "settings are per user: caller has no authid")
+		return "", xconn.NewResultError(common.ErrNotAuthorized, "settings are per user: caller has no authid")
 	}
 	return user, nil
 }
 
 // handleList returns all the caller's settings, a dict of key to value.
-func (s *settings) handleList(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (s *settings) handleList(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	user, errResult := settingsCaller(inv)
 	if errResult != nil {
 		return errResult
 	}
 	values, err := s.values(user)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	return xconn.NewInvocationResult(values)
+	return xconn.NewResult(values)
 }
 
 // handleSave stores the caller's setting its first argument names as its second, a string.
-func (s *settings) handleSave(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (s *settings) handleSave(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	user, errResult := settingsCaller(inv)
 	if errResult != nil {
 		return errResult
 	}
 	key, err := inv.ArgString(0)
 	if err != nil || key == "" {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "want a setting's key and its value")
+		return xconn.NewResultError(common.ErrInvalidArgument, "want a setting's key and its value")
 	}
 	value, err := inv.ArgString(1)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "want a setting's key and its value")
+		return xconn.NewResultError(common.ErrInvalidArgument, "want a setting's key and its value")
 	}
 	if len(value) > maxSettingSize {
-		return xconn.NewInvocationError(common.ErrInvalidArgument,
+		return xconn.NewResultError(common.ErrInvalidArgument,
 			fmt.Sprintf("%s is %d bytes, over %d", key, len(value), maxSettingSize))
 	}
 	if err := s.put(user, key, value); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	return xconn.NewInvocationResult()
+	return xconn.NewResult()
 }

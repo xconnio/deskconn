@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 func TestAppEncryption(t *testing.T) {
@@ -26,12 +26,12 @@ func TestAppEncryption(t *testing.T) {
 	require.NoError(t, enc.Register(app, keyExchange))
 	require.NoError(t, app.Register(echo, enc.Encrypted(func(_ context.Context, req []byte) (any, error) {
 		return string(req), nil
-	})).Do().Err)
+	})).Execute().Err)
 	require.NoError(t, app.Register(fail, enc.Encrypted(func(_ context.Context, _ []byte) (any, error) {
 		return nil, &xconn.Error{URI: common.ErrInvalidArgument, Args: []any{"bad"}}
-	})).Do().Err)
+	})).Execute().Err)
 
-	require.ErrorContains(t, client.Call(echo).Do().Err, "call key exchange first")
+	require.ErrorContains(t, client.Call(echo).Execute().Err, "call key exchange first")
 
 	keys, err := common.ClientKeyExchangeWith(client, keyExchange)
 	require.NoError(t, err)

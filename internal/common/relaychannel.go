@@ -4,7 +4,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/pion/webrtc/v4"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // RelayChannel implements MessageChannel over a local connection carrying

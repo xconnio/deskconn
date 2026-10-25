@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // fileChunkSize is the read/write buffer size used by streaming
@@ -61,17 +61,17 @@ func resolvePath(remotePath string) (string, error) {
 // resolveAndStatPath resolves remotePath and stats it, returning a
 // WAMP-shaped error any invocation handler can return directly. The errors
 // leave out the path, since the call's path was sent encrypted.
-func resolveAndStatPath(remotePath string) (string, os.FileInfo, *xconn.InvocationResult) {
+func resolveAndStatPath(remotePath string) (string, os.FileInfo, *xconn.Result) {
 	resolvedRemotePath, err := resolvePath(remotePath)
 	if err != nil {
-		return "", nil, xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return "", nil, xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	info, err := os.Lstat(resolvedRemotePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil, xconn.NewInvocationError(common.ErrInvalidArgument, "no such file or directory")
+			return "", nil, xconn.NewResultError(common.ErrInvalidArgument, "no such file or directory")
 		}
-		return "", nil, xconn.NewInvocationError(common.ErrOperationFailed, withoutPath(err).Error())
+		return "", nil, xconn.NewResultError(common.ErrOperationFailed, withoutPath(err).Error())
 	}
 	return resolvedRemotePath, info, nil
 }

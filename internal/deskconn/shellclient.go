@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/muesli/cancelreader"
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // ModeRouted/ModeDirect are the "routed"/"direct" --mode flag values every raw-stream

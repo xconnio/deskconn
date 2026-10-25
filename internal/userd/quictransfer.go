@@ -51,7 +51,7 @@ func (d *Deskconn) DispatchQUICOp(op common.FSOp, stream net.Conn) {
 	// FSResponse, so that's where a client learns file transfers are disabled.
 	if err := d.capabilities.check(filesAppID); err != nil {
 		if req.Op == common.FSOpList || req.Op == common.FSOpInit {
-			_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+			_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		}
 		return
 	}
@@ -117,12 +117,12 @@ func quicServeSession(stream net.Conn, req common.FSRequest, sendKey, receiveKey
 func quicServeList(stream net.Conn, req common.FSRequest, sendKey []byte) {
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 	entries, err := common.BuildManifest(resolvedRoot, req.Recursive)
 	if err != nil {
-		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 	_ = common.WriteEncryptedMsg(stream, common.FSResponse{OK: true, Entries: entries}, sendKey)
@@ -135,7 +135,7 @@ func quicServeList(stream net.Conn, req common.FSRequest, sendKey []byte) {
 func quicServeReadOnce(stream net.Conn, req common.FSRequest, sendKey []byte) error {
 	resolvedRoot, basePath, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 	}
 
 	// See serveWebRTCReadOnce for why a single-file root resolves to resolvedRoot directly
@@ -147,7 +147,7 @@ func quicServeReadOnce(stream net.Conn, req common.FSRequest, sendKey []byte) er
 
 	f, err := os.Open(absPath) //nolint:gosec
 	if err != nil {
-		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 	}
 	defer f.Close()
 
@@ -162,12 +162,12 @@ func quicServeReadOnce(stream net.Conn, req common.FSRequest, sendKey []byte) er
 func quicServeInit(stream net.Conn, req common.FSRequest, sendKey []byte) {
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 	rootIsDir := common.IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
 	if err := common.MaterializeTargets(req.Entries, resolvedRoot, rootIsDir); err != nil {
-		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 	_ = common.WriteEncryptedMsg(stream, common.FSResponse{OK: true}, sendKey)
@@ -178,7 +178,7 @@ func quicServeInit(stream net.Conn, req common.FSRequest, sendKey []byte) {
 func quicServeWriteOnce(stream net.Conn, req common.FSRequest, sendKey, receiveKey []byte) error {
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 	}
 	rootIsDir := common.IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
 	// See serveWebRTCWriteOnce for why passing req.RelPath as sourceRoot is safe.
@@ -186,7 +186,7 @@ func quicServeWriteOnce(stream net.Conn, req common.FSRequest, sendKey, receiveK
 
 	f, err := os.OpenFile(dest, os.O_WRONLY, 0) //nolint:gosec
 	if err != nil {
-		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 	}
 	defer f.Close()
 

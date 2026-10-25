@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/xconn-go"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // readManifest returns the Remote Control example's YAML files.
@@ -38,17 +38,17 @@ func setupManager(t *testing.T) (*xconn.Session, *xconn.Session) {
 	return callee, caller
 }
 
-func registerManifest(caller *xconn.Session, files map[string]string) *xconn.CallResponse {
+func registerManifest(caller *xconn.Session, files map[string]string) *xconn.Result {
 	payload, _ := json.Marshal(files)
-	resp := caller.Call(common.ProcedureManifestRegister).Args(payload).Do()
-	return &resp
+	resp := caller.Call(common.ProcedureManifestRegister).Args(payload).Execute()
+	return resp
 }
 
 // decode converts a call's first result to out, through JSON.
-func decode(t *testing.T, resp xconn.CallResponse, out any) {
+func decode(t *testing.T, resp *xconn.Result, out any) {
 	t.Helper()
 	require.NoError(t, resp.Err)
-	data, err := json.Marshal(resp.Args()[0])
+	data, err := json.Marshal(resp.Args[0])
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, out))
 }
@@ -63,7 +63,7 @@ type listedApp struct {
 func findApp(t *testing.T, caller *xconn.Session, id string) *listedApp {
 	t.Helper()
 	var apps []listedApp
-	decode(t, caller.Call(common.ProcedureCapabilitiesList).Do(), &apps)
+	decode(t, caller.Call(common.ProcedureCapabilitiesList).Execute(), &apps)
 	for _, a := range apps {
 		if a.ID == id {
 			return &a
@@ -97,7 +97,7 @@ func TestManifestApp(t *testing.T) {
 			} `json:"layout"`
 		} `json:"screens"`
 	}
-	decode(t, caller.Call(common.ProcedureManifestGet).Args(id).Do(), &resolved)
+	decode(t, caller.Call(common.ProcedureManifestGet).Args(id).Execute(), &resolved)
 	children := resolved.Screens["home"].Layout.Children
 	require.Len(t, children, 2)
 
@@ -108,9 +108,9 @@ func TestManifestApp(t *testing.T) {
 	require.NotContains(t, mute, "block")
 
 	// Disabled apps can't be fetched.
-	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args(id, false).Do().Err)
-	require.ErrorContains(t, caller.Call(common.ProcedureManifestGet).Args(id).Do().Err, "disabled")
-	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args(id, true).Do().Err)
+	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args(id, false).Execute().Err)
+	require.ErrorContains(t, caller.Call(common.ProcedureManifestGet).Args(id).Execute().Err, "disabled")
+	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args(id, true).Execute().Err)
 
 	// Re-registering replaces the app.
 	require.NoError(t, registerManifest(caller, readManifest(t)).Err)
@@ -118,11 +118,11 @@ func TestManifestApp(t *testing.T) {
 	// The app survives a restart.
 	callee2, caller2 := setupManager(t)
 	require.NoError(t, userd.NewDeskconn(false, cfgDirectory).Register(callee2))
-	require.NoError(t, caller2.Call(common.ProcedureManifestGet).Args(id).Do().Err)
+	require.NoError(t, caller2.Call(common.ProcedureManifestGet).Args(id).Execute().Err)
 
-	require.NoError(t, caller.Call(common.ProcedureManifestUnregister).Args(id).Do().Err)
+	require.NoError(t, caller.Call(common.ProcedureManifestUnregister).Args(id).Execute().Err)
 	require.Nil(t, findApp(t, caller, id))
-	require.ErrorContains(t, caller.Call(common.ProcedureManifestGet).Args(id).Do().Err, "not found")
+	require.ErrorContains(t, caller.Call(common.ProcedureManifestGet).Args(id).Execute().Err, "not found")
 	require.NoDirExists(t, filepath.Join(cfgDirectory, "manifests", id))
 }
 
@@ -230,14 +230,14 @@ func TestCapabilitiesWatch(t *testing.T) {
 
 	updates := make(chan []listedApp, 10)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan xconn.CallResponse, 1)
+	done := make(chan *xconn.Result, 1)
 	go func() {
-		done <- caller.Call(common.ProcedureCapabilitiesWatch).ProgressReceiver(func(r *xconn.ProgressResult) {
-			data, _ := json.Marshal(r.Args()[0])
+		done <- caller.Call(common.ProcedureCapabilitiesWatch).ProgressReceiver(func(r *xconn.Result) {
+			data, _ := json.Marshal(r.Args[0])
 			var apps []listedApp
 			_ = json.Unmarshal(data, &apps)
 			updates <- apps
-		}).DoContext(ctx)
+		}).ExecuteContext(ctx)
 	}()
 	next := func() []listedApp {
 		t.Helper()
@@ -263,7 +263,7 @@ func TestCapabilitiesWatch(t *testing.T) {
 	require.NoError(t, registerManifest(caller, readManifest(t)).Err)
 	require.True(t, has(next(), "remote-control").Enabled)
 
-	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args("remote-control", false).Do().Err)
+	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args("remote-control", false).Execute().Err)
 	require.False(t, has(next(), "remote-control").Enabled)
 
 	cancel()
@@ -285,6 +285,6 @@ func TestManifestAppNeedsManager(t *testing.T) {
 	member, err := connectAs(router, common.LocalRealm, "bob", "user:member")
 	require.NoError(t, err)
 	require.ErrorContains(t, registerManifest(member, readManifest(t)).Err, common.ErrNotAuthorized)
-	require.ErrorContains(t, member.Call(common.ProcedureManifestUnregister).Args("remote-control").Do().Err,
+	require.ErrorContains(t, member.Call(common.ProcedureManifestUnregister).Args("remote-control").Execute().Err,
 		common.ErrNotAuthorized)
 }
