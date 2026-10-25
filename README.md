@@ -245,7 +245,7 @@ handler := enc.Encrypted(func(ctx context.Context, req []byte) (any, error) {
     // req is the decrypted JSON request; the result is sent back as encrypted JSON.
     return map[string]string{"hello": "world"}, nil
 })
-resp := session.Register("io.xconn.media.hello", handler).Do()
+resp := session.Register("io.xconn.media.hello", handler).Execute()
 ```
 
 A client finds the app's key exchange in the apps list, then calls it before the app's procedures:
@@ -293,3 +293,10 @@ All credentials and configuration are stored under `~/.deskconn/`:
 ## License
 
 See [LICENSE](LICENSE).
+
+## Native XConn build
+
+This development branch uses the Rust-backed XConn Go binding. Building requires
+cgo and the native SDK; see [the local build instructions](docs/native-xconn.md).
+Native release packaging and Windows support remain prerequisites for publishing
+this migration.
