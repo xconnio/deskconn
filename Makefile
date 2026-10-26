@@ -2,20 +2,21 @@
 CLOUD_QUIC_ADDRESS ?=
 LDFLAGS := $(if $(CLOUD_QUIC_ADDRESS),-X github.com/xconnio/deskconn/internal/common.cloudQUICAddress=$(CLOUD_QUIC_ADDRESS))
 
-# WAMP and network transports are linked from the native XConn SDK.
-XCONN_DIR ?= ../xconn-core
-XCONN_SDK_DIR ?= $(XCONN_DIR)/target/native
-export PKG_CONFIG_PATH := $(if $(PKG_CONFIG_PATH),$(PKG_CONFIG_PATH):)$(abspath $(XCONN_SDK_DIR))/lib/pkgconfig
+# The SDK installer configures pkg-config; an explicit SDK directory is optional.
+ifdef XCONN_SDK_DIR
+export PKG_CONFIG_PATH := $(abspath $(XCONN_SDK_DIR))/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_CONFIG_PATH))
+endif
 export CGO_ENABLED := 1
 
 .PHONY: native-check native-sdk
 native-check:
-	@pkg-config --exists xconn || (echo "Run make native-sdk or install the XConn native SDK; see docs/native-xconn.md"; exit 1)
+	@pkg-config --exists xconn || (echo "Run make native-sdk once; see docs/native-xconn.md"; exit 1)
 
-# Build once, and rerun after changing Rust transport or protocol code.
 native-sdk:
-	cargo build --locked --release --manifest-path "$(XCONN_DIR)/Cargo.toml" -p xconn-ffi
-	python3 "$(XCONN_DIR)/scripts/package-native.py" --stage-only "$(XCONN_SDK_DIR)"
+	@set -e; script=$$(mktemp); \
+	trap 'rm -f "$$script"' EXIT; \
+	curl -fLsS https://raw.githubusercontent.com/xconnio/xconn-core/main/scripts/install-xconn-sdk.sh -o "$$script"; \
+	sh "$$script"
 
 # 'desk' is reserved by Windows for Display Settings (desk.cpl) and can't be safely
 # overridden (see install.ps1), so there's no 'desk' built on Windows - use the
@@ -52,7 +53,7 @@ release-check:
 build: native-check
 	go build -ldflags "$(LDFLAGS)" -o $(DESKCONN_BIN) github.com/xconnio/deskconn/cmd/deskconn
 ifneq ($(OS),Windows_NT)
-	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/desk github.com/xconnio/deskconn/cmd/deskconn
+	cp $(DESKCONN_BIN) $(BIN_DIR)/desk
 endif
 
 run-userd:
@@ -72,11 +73,10 @@ endif
 
 # Fully static Linux executable; needs the host's static libc libraries.
 .PHONY: native-sdk-static build-static
-native-sdk-static:
-	@test "$$(uname -s)" = Linux || (echo "Static builds currently support Linux only"; exit 1)
-	cargo build --locked --profile native --manifest-path "$(XCONN_DIR)/Cargo.toml" -p xconn-ffi
-	python3 "$(XCONN_DIR)/scripts/package-native.py" --stage-only --static --profile native "$(XCONN_SDK_DIR)"
+native-sdk-static: native-sdk
 
-build-static: native-sdk-static
+build-static: native-check
+	@test "$$(uname -s)" = Linux || (echo "Fully static builds support Linux only"; exit 1)
+	@pkg-config --exists xconn-static || (echo "Run make native-sdk to install the static SDK"; exit 1)
 	go build -a -tags xconn_static,netgo,osusergo -ldflags "$(LDFLAGS) -linkmode external -extldflags '-static -Wl,--gc-sections'" -o $(DESKCONN_BIN) github.com/xconnio/deskconn/cmd/deskconn
-	go build -a -tags xconn_static,netgo,osusergo -ldflags "$(LDFLAGS) -linkmode external -extldflags '-static -Wl,--gc-sections'" -o $(BIN_DIR)/desk github.com/xconnio/deskconn/cmd/deskconn
+	cp $(DESKCONN_BIN) $(BIN_DIR)/desk

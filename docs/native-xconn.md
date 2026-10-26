@@ -1,4 +1,4 @@
-# Rust-backed XConn development build
+# Building with XConn Core
 
 DeskConn uses `github.com/xconnio/xconn-core/bindings/go` for WAMP, QUIC,
 WebTransport and WebRTC. The former `xconn-go`, `wampproto-go`,
@@ -7,16 +7,13 @@ File search streams encrypted progressive RPC results through the shared Rust br
 File-cat and file search use encrypted progressive RPC results.
 File uploads and downloads use the existing encrypted transfer channels.
 
-This local integration uses a sibling checkout at `../xconn-core` through the
-`go.mod` replacement. Replace that development dependency with a published module version before release.
+The app uses the published Core Go module. A sibling Core checkout and Rust
+are not required.
 
 ## Build and test on Linux or macOS
 
-Install Go, a C compiler and pkg-config, and build the native SDK once from the
-XConn checkout. Rust is needed to build the SDK; consumers of a packaged SDK do
-not need Rust.
-
-From the DeskConn checkout:
+Install Go, a C compiler and pkg-config. Install the released native SDK once,
+then use the normal build commands:
 
 ```sh
 make native-sdk
@@ -24,18 +21,15 @@ make build
 make test
 ```
 
-Rerun `make native-sdk` after changing Rust code. Make automatically finds the
-staged SDK and enables cgo. `XCONN_DIR` defaults to `../xconn-core`;
-`XCONN_SDK_DIR` defaults to that checkout's `target/native`. Override either
-variable on the make command line when using another checkout or SDK directory.
-Existing `PKG_CONFIG_PATH` entries take precedence over the local SDK.
-The Go module replacement still points to `../xconn-core/bindings/go`; update it
-separately if moving the binding checkout.
+The installer downloads and verifies the static SDK and configures standard
+pkg-config discovery. It may request sudo for installation. `make build` links
+XConn into the executable, so no separate XConn shared library is needed at
+runtime. System libraries and certificate stores remain requirements.
 
-For direct Go commands, set `CGO_ENABLED=1` and point `PKG_CONFIG_PATH` to the
-SDK's `lib/pkgconfig` directory. Keep the SDK installed at the location used
-during linking, or configure the platform loader to find its shared library.
-The default build links the shared native library.
+An app build does not reinstall the SDK. After switching SDK versions, force a
+relink with `go build -a` or use `make build-static`. For an SDK extracted to a
+custom location, pass `XCONN_SDK_DIR=/path/to/sdk` to Make. Direct Go commands can
+use `PKG_CONFIG_PATH=/path/to/sdk/lib/pkgconfig` and `CGO_ENABLED=1`.
 
 ## Standalone Linux executable
 
@@ -44,7 +38,7 @@ make build-static
 strip bin/deskconn bin/desk
 ```
 
-This builds the Rust SDK and statically links both `bin/deskconn` and `bin/desk`.
+This uses the installed SDK and produces `bin/deskconn`, with `bin/desk` as a copy.
 No `libxconn_ffi.so` or OpenSSL shared library is needed to run them. Install the
 host C toolchain, pkg-config, and static development libraries for libc. TLS uses
 rustls/ring, so OpenSSL development packages are no longer needed.
@@ -62,8 +56,8 @@ not promise a hermetic executable on every Linux distribution.
 ## Release work still required
 
 The existing CI and GoReleaser setup targets the former standalone Go build.
-Before publishing this migration, make those jobs install a pinned native SDK,
-bundle the matching shared library, and use a published Go module version.
+Before publishing this migration, make those jobs install the released static SDK.
+The Go module dependency now resolves from its published release.
 The current native SDK supports Linux and macOS; the old Windows release target
 needs native SDK/binding support before it can be restored. Do not use the
 existing release configuration to distribute this development integration.
