@@ -20,12 +20,13 @@ import (
 )
 
 type fileCommands struct {
-	ls   *kingpin.CmdClause
-	mv   *kingpin.CmdClause
-	cp   *kingpin.CmdClause
-	rm   *kingpin.CmdClause
-	cat  *kingpin.CmdClause
-	edit *kingpin.CmdClause
+	ls    *kingpin.CmdClause
+	mv    *kingpin.CmdClause
+	cp    *kingpin.CmdClause
+	rm    *kingpin.CmdClause
+	cat   *kingpin.CmdClause
+	edit  *kingpin.CmdClause
+	mount *kingpin.CmdClause
 
 	lsTarget *string
 	lsMode   *string
@@ -48,6 +49,12 @@ type fileCommands struct {
 
 	editTarget *string
 	editMode   *string
+
+	mountTarget   *string
+	mountPoint    *string
+	mountReadOnly *bool
+	mountDebug    *bool
+	mountMode     *string
 }
 
 func registerFileCommands(app *kingpin.Application, cfgDirectory string) *fileCommands {
@@ -93,6 +100,14 @@ func registerFileCommands(app *kingpin.Application, cfgDirectory string) *fileCo
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cmds.editMode = modeFlag(cmds.edit, modeHelp)
 
+	cmds.mount = fileCmd.Command("mount", "Mount a directory of a machine as a local filesystem (FUSE)")
+	cmds.mountTarget = cmds.mount.Arg("target", "Remote directory as machine:path (e.g. m1:/home/user, m1: for home)").
+		Required().HintAction(remotePathCompletions(cfgDirectory)).String()
+	cmds.mountPoint = cmds.mount.Arg("mountpoint", "Local directory to mount it on").Required().ExistingDir()
+	cmds.mountReadOnly = cmds.mount.Flag("read-only", "Mount read-only").Bool()
+	cmds.mountDebug = cmds.mount.Flag("debug", "Log every FUSE request").Bool()
+	cmds.mountMode = modeFlag(cmds.mount, modeHelp)
+
 	return cmds
 }
 
@@ -110,6 +125,9 @@ func dispatchFileCommand(parsedCmd string, cmds *fileCommands, cfgDirectory stri
 		printErr(catFile(cfgDirectory, *cmds.catTarget, *cmds.catMode))
 	case cmds.edit.FullCommand():
 		printErr(editFile(cfgDirectory, *cmds.editTarget, *cmds.editMode))
+	case cmds.mount.FullCommand():
+		printErr(mountFiles(cfgDirectory, *cmds.mountTarget, *cmds.mountPoint, *cmds.mountMode,
+			*cmds.mountReadOnly, *cmds.mountDebug))
 	default:
 		return false
 	}

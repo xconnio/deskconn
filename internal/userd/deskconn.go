@@ -20,6 +20,7 @@ type Deskconn struct {
 	keys                 *keyManager
 	agentForwardSessions *agentForwardSessions
 	files                *FileBrowser
+	mountHandles         *mountHandles
 	thumbnails           *thumbnailCache
 	processes            *ProcessMonitor
 	appRegistry          *AppRegistry
@@ -44,6 +45,7 @@ func NewDeskconn(desktopEnvironment bool, cfgDirectory string) *Deskconn {
 		keys:                 newKeyManager(),
 		agentForwardSessions: newAgentForwardSessions(),
 		files:                NewFileBrowser(),
+		mountHandles:         newMountHandles(),
 		thumbnails:           newThumbnailCache(cfgDirectory),
 		processes:            NewProcessMonitor(),
 		appRegistry:          NewAppRegistry(),
@@ -105,6 +107,7 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 		return
 	}
 	d.keys.delete(sessionID)
+	d.mountHandles.closeSession(sessionID)
 	d.handleAppUnregister(sessionID)
 }
 

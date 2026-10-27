@@ -58,6 +58,7 @@ func (d *Deskconn) apps() []*app {
 			common.ProcedureFileSearch:     d.handleFileSearch,
 			common.ProcedureFileThumbnails: d.handleFileThumbnails,
 			common.ProcedureFileCat:        d.handleFileCat,
+			common.ProcedureMountFS:        d.handleMountFS,
 		}},
 		{ID: terminalAppID, Name: "Terminal", Procedures: map[string]xconn.InvocationHandler{
 			common.ProcedureShellIsBusy: d.handleShellIsBusy,
