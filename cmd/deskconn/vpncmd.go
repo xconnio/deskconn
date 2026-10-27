@@ -8,9 +8,10 @@ import (
 )
 
 type vpnCommands struct {
-	connect *kingpin.CmdClause
-	serve   *kingpin.CmdClause
-	stop    *kingpin.CmdClause
+	connect    *kingpin.CmdClause
+	disconnect *kingpin.CmdClause
+	serve      *kingpin.CmdClause
+	stop       *kingpin.CmdClause
 
 	connectMachine *string
 }
@@ -22,11 +23,13 @@ func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnComm
 	}
 	connectCmd := vpnCmd.Command("connect", "Connect to a machine and tunnel all traffic through it")
 	connectMachine := machineArg(connectCmd, "ID, name or alias of machine", cfgDirectory)
+	disconnectCmd := vpnCmd.Command("disconnect", "Stop tunneling traffic through the connected machine")
 	serveCmd := vpnCmd.Command("serve", "Let other machines route their traffic through this machine")
 	stopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
 
 	return &vpnCommands{
 		connect:        connectCmd,
+		disconnect:     disconnectCmd,
 		serve:          serveCmd,
 		stop:           stopCmd,
 		connectMachine: connectMachine,
@@ -44,6 +47,8 @@ func dispatchVPNCommand(parsedCmd string, cmds *vpnCommands, cfgDirectory string
 		ctx, cancel := context.WithCancel(context.Background())
 		runVPNConnect(ctx, cfgDirectory, realm, *cmds.connectMachine)
 		cancel()
+	case cmds.disconnect.FullCommand():
+		runVPNDisconnect(context.Background(), cfgDirectory)
 	case cmds.serve.FullCommand():
 		ctx, cancel := context.WithCancel(context.Background())
 		runVPNServe(ctx, cfgDirectory)

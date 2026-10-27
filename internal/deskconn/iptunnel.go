@@ -73,8 +73,9 @@ func usesResolvedStub() bool {
 // neither the CLI nor deskconn-userd needs any capability grant of its own.
 //
 // onReady, if non-nil, is called once the remote end confirms the tunnel
-// is actually up -- callers printing something like "tunnel up" should
-// wait for this rather than assume success as soon as the call is made.
+// and this machine's traffic has been routed through it -- callers printing
+// something like "tunnel up" should wait for this rather than assume
+// success as soon as the call is made.
 func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, helper *common.VPNHelperClient,
 	onReady func()) error {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNClientTUNName)
@@ -163,10 +164,6 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 		return ctx.Err()
 	}
 
-	if onReady != nil {
-		onReady()
-	}
-
 	// Pin the addresses that must keep working after the default route is replaced -- see
 	// pinTargets.
 	pinPeers := pinTargets(ctx, session)
@@ -212,6 +209,10 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	}
 
 	common.SafeGo(func() { common.PumpTUNToChannel(tun, channel, closedCh) })
+
+	if onReady != nil {
+		onReady()
+	}
 
 	select {
 	case <-closedCh:

@@ -28,3 +28,7 @@ func runVPNServe(_ context.Context, _ string) {
 func runVPNStop(_ context.Context, _ string) {
 	fmt.Fprintln(os.Stderr, "desk: vpn is not supported on this platform")
 }
+
+func runVPNDisconnect(_ context.Context, _ string) {
+	fmt.Fprintln(os.Stderr, "desk: vpn is not supported on this platform")
+}
