@@ -11,6 +11,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-ole/go-ole v1.3.0
+	github.com/hanwen/go-fuse/v2 v2.12.1
 	github.com/muesli/cancelreader v0.2.2
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/pion/webrtc/v4 v4.1.6
@@ -20,7 +21,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318
 	github.com/xconnio/xconn-go v0.1.1-0.20261023141601-683389304fa4
-	github.com/xconnio/xconn-webrtc-go v0.0.0-20260813103409-68c1489ee71c
+	github.com/xconnio/xconn-webrtc-go v0.0.0-20261027085904-3f71f52c0f0d
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0

@@ -170,3 +170,16 @@ func (c *ClientSessions) RetireQUIC(realm string) {
 	c.Unlock()
 	quic.retire()
 }
+
+// NewMountFS returns a mount server's request handler, as one caller session, and a
+// func reporting how many files it has open.
+func NewMountFS() (func(payload []byte) ([]byte, error), func() int) {
+	h := newMountHandles()
+	call := func(payload []byte) ([]byte, error) { return h.call(1, payload) }
+	open := func() int {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(h.files)
+	}
+	return call, open
+}
