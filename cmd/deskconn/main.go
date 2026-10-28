@@ -29,6 +29,7 @@ func main() {
 	// Checked once the command is known: the root helper (desk serve --mode root) doesn't
 	// need it, and runs under systemd-run, possibly without a HOME.
 	cfgDirectory, cfgErr := common.CfgDirectory()
+	deskconn.SetCloud(accountServiceCloud())
 
 	app := kingpin.New("desk", "Control your machines remotely.")
 	configureHelp(app)

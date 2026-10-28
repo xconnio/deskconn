@@ -18,6 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
 	"github.com/xconnio/deskconn/relay"
 	"github.com/xconnio/wampproto-go/serializers"
@@ -188,7 +189,7 @@ func runUserd(flags userdFlags, standalone bool) {
 	common.SafeGo(func() {
 		defer close(xconnDone)
 		if !standalone {
-			cloudConfig, err := newCloudConfig(cfgDirectory)
+			cloudConfig, err := deskconn.DaemonCloudConfig(cfgDirectory)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -252,26 +253,6 @@ func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
 		config.WebTransportAddress = wtAddr
 	}
 	return config, nil
-}
-
-// newCloudConfig is how xconn attaches this machine to the deskconn cloud.
-func newCloudConfig(cfgDirectory string) (*xconnd.CloudConfig, error) {
-	credentialsFile, err := common.CredentialsFilePath()
-	if err != nil {
-		return nil, err
-	}
-	return &xconnd.CloudConfig{
-		Address:               common.CloudQUICAddress(),
-		TLSConfig:             common.CloudQUICTLSConfig(),
-		Realm:                 common.CloudRealm,
-		ProcedureListKeys:     common.ProcedureDesktopKeyList,
-		TopicKeyAddedFormat:   common.TopicDesktopKeyAddedFormat,
-		TopicKeyRemovedFormat: common.TopicDesktopKeyRemovedFormat,
-		TopicDetachFormat:     common.TopicDeskconnDesktopDetachFormat,
-		CredentialsFile:       credentialsFile,
-		PrincipalsFile:        filepath.Join(cfgDirectory, "principals.json"),
-		ICEServers:            common.ICEServers(),
-	}, nil
 }
 
 // standaloneAuth gathers who may always connect in standalone mode, the --config users and the
