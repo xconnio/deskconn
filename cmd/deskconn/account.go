@@ -77,7 +77,7 @@ func runLogin(cfgDirectory, username string) error {
 
 // runLogout signs out and tells the local daemon.
 func runLogout(cfgDirectory string) error {
-	if err := logout(cfgDirectory); err != nil {
+	if err := deskconn.Logout(cfgDirectory); err != nil {
 		return err
 	}
 	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
@@ -111,27 +111,7 @@ func login(flagUsername string) error {
 		return err
 	}
 
-	quicSess, err := deskconn.ConnectCloudCRA(context.Background(), username, password)
-	if err != nil {
-		return err
-	}
-	common.SafeGo(func() {
-		<-quicSess.Done()
-		_ = quicSess.Connection().Close()
-	})
-	defer quicSess.Connection().Close()
-
-	callResp := quicSess.Call(deskconn.ProcedureAccountLogin).Args(username).Do()
-	if callResp.Err != nil {
-		return fmt.Errorf("failed to login: %w", callResp.Err)
-	}
-
-	otp, err := readOTP()
-	if err != nil {
-		return err
-	}
-
-	machines, err := deskconn.Login(quicSess.Session, username, otp)
+	machines, err := deskconn.Login(context.Background(), username, password)
 	if err != nil {
 		return err
 	}
@@ -141,27 +121,4 @@ func login(flagUsername string) error {
 	}
 
 	return nil
-}
-
-func logout(cfgDirectory string) error {
-	cloudSession, err := deskconn.ConnectCloudRealm(cfgDirectory)
-	if err != nil {
-		if strings.Contains(err.Error(), deskconn.ErrAuthenticationFailed) ||
-			errors.Is(err, common.ErrKeyExpired) {
-			return deskconn.RemoveCredentialsFiles(cfgDirectory)
-		}
-		return err
-	}
-
-	pubKey, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519.pub"))
-	if err != nil {
-		return err
-	}
-	pubKeyString := strings.Split(string(pubKey), " ")[0]
-	callResp := cloudSession.Call(deskconn.ProcedurePrincipalDelete).Arg(pubKeyString).Do()
-	if callResp.Err != nil {
-		return callResp.Err
-	}
-
-	return deskconn.RemoveCredentialsFiles(cfgDirectory)
 }

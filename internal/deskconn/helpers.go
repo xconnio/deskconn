@@ -2,12 +2,12 @@ package deskconn
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/wampproto-go/auth"
@@ -16,18 +16,15 @@ import (
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-const (
-	ProcedurePrincipalDelete    = "io.xconn.deskconn.account.principal.delete"
-	ProcedureAccountGet         = "io.xconn.deskconn.account.get"
-	ProcedureAccountLogin       = "io.xconn.deskconn.account.login"
-	ProcedureAccountLoginVerify = "io.xconn.deskconn.account.login.verify"
+const ErrAuthenticationFailed = "wamp.error.authentication_failed"
 
-	ProcedureListDesktop = "io.xconn.deskconn.desktop.list"
-
-	ErrAuthenticationFailed = "wamp.error.authentication_failed"
-)
-
-func Login(session *xconn.Session, username, otp string) ([]common.Machine, error) {
+// Login signs username in to the cloud with a new key, keeps the key in cfgDirectory and
+// caches their machines, which it returns.
+func Login(ctx context.Context, username, password string) ([]common.Machine, error) {
+	c, err := currentCloud()
+	if err != nil {
+		return nil, err
+	}
 	cfgDirectory, err := common.CfgDirectory()
 	if err != nil {
 		return nil, err
@@ -41,38 +38,27 @@ func Login(session *xconn.Session, username, otp string) ([]common.Machine, erro
 		return nil, fmt.Errorf("failed to generate keypair: %w", err)
 	}
 
-	callResp := session.Call(ProcedureAccountLoginVerify).Args(username, otp, pub).Do()
-	if callResp.Err != nil {
-		return nil, fmt.Errorf("failed to verify otp: %w", callResp.Err)
+	expiresAt, err := c.Login(ctx, username, password, pub)
+	if err != nil {
+		return nil, fmt.Errorf("failed to login: %w", err)
 	}
 
-	principal, err := callResp.ArgDict(0)
-	if err != nil {
-		return nil, fmt.Errorf("unexpected response from login verify: %w", err)
-	}
-	expiresAtStr, err := principal.String("expires_at")
-	if err != nil {
-		return nil, fmt.Errorf("missing expires_at in login verify response: %w", err)
-	}
-
-	cloudSession, err := ConnectCloudCryptosign(username, priv)
+	cloudSession, err := ConnectCloudCryptosign(ctx, username, priv)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = cloudSession.Leave() }()
 
-	accountGetResp := cloudSession.Call(ProcedureAccountGet).Do()
-	if accountGetResp.Err != nil {
-		return nil, fmt.Errorf("failed to get account: %w", accountGetResp.Err)
-	}
-	account, err := accountGetResp.ArgDict(0)
+	name, err := c.Name(cloudSession)
 	if err != nil {
-		return nil, fmt.Errorf("unexpected response from account get: %w", err)
+		return nil, fmt.Errorf("failed to get account: %w", err)
 	}
-	name, err := account.String("name")
-	if err != nil {
-		return nil, fmt.Errorf("missing name in account get response: %w", err)
+
+	privLine := priv + " " + username
+	if !expiresAt.IsZero() {
+		privLine += " " + expiresAt.Format(time.RFC3339Nano)
 	}
-	if err = os.WriteFile(privPath, []byte(priv+" "+username+" "+expiresAtStr+"\n"), 0600); err != nil {
+	if err = os.WriteFile(privPath, []byte(privLine+"\n"), 0600); err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -80,7 +66,7 @@ func Login(session *xconn.Session, username, otp string) ([]common.Machine, erro
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	machines, err := fetchMachines(cloudSession)
+	machines, err := c.Machines(cloudSession)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch machines: %w", err)
 	}
@@ -92,22 +78,50 @@ func Login(session *xconn.Session, username, otp string) ([]common.Machine, erro
 	return machines, nil
 }
 
+// Logout revokes the login's key on the cloud and removes it. With the key already
+// rejected or expired, it only removes it.
+func Logout(cfgDirectory string) error {
+	c, err := currentCloud()
+	if err != nil {
+		return err
+	}
+	cloudSession, err := ConnectCloudRealm(cfgDirectory)
+	if err != nil {
+		if strings.Contains(err.Error(), ErrAuthenticationFailed) ||
+			errors.Is(err, common.ErrKeyExpired) {
+			return RemoveCredentialsFiles(cfgDirectory)
+		}
+		return err
+	}
+	defer func() { _ = cloudSession.Leave() }()
+
+	pubKey, err := os.ReadFile(filepath.Join(cfgDirectory, "id_ed25519.pub"))
+	if err != nil {
+		return err
+	}
+	if err := c.Logout(cloudSession, strings.Split(string(pubKey), " ")[0]); err != nil {
+		return err
+	}
+
+	return RemoveCredentialsFiles(cfgDirectory)
+}
+
 func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
 	authid, privKey, err := common.ReadCredentials(cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
 
-	return ConnectCloudCryptosign(authid, privKey)
+	return ConnectCloudCryptosign(context.Background(), authid, privKey)
 }
 
-func ConnectCloudCryptosign(authid, privKey string) (*xconn.Session, error) {
+func ConnectCloudCryptosign(ctx context.Context, authid, privKey string) (*xconn.Session, error) {
 	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
 
-	quicSess, err := xconn.ConnectQUIC(context.Background(), common.CloudQUICAddress(), common.Realm,
+	quicSess, err := xconn.ConnectQUIC(ctx, common.CloudQUICAddress(), common.Realm,
 		&xconn.QUICDialerConfig{
 			Authenticator: authenticator,
 			TLSConfig:     common.CloudQUICTLSConfig(),
@@ -205,7 +219,12 @@ func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
 	return webrtcSess.Session, nil
 }
 
+// FetchMachinesFromCloud lists the machines of the signed in user.
 func FetchMachinesFromCloud(cfgDirectory string) ([]common.Machine, error) {
+	c, err := currentCloud()
+	if err != nil {
+		return []common.Machine{}, err
+	}
 	cloudSession, err := ConnectCloudRealm(cfgDirectory)
 	if err != nil {
 		if strings.Contains(err.Error(), ErrAuthenticationFailed) {
@@ -214,27 +233,9 @@ func FetchMachinesFromCloud(cfgDirectory string) ([]common.Machine, error) {
 		}
 		return []common.Machine{}, err
 	}
+	defer func() { _ = cloudSession.Leave() }()
 
-	return fetchMachines(cloudSession)
-}
-
-// fetchMachines lists the machines on the account authenticated on session.
-func fetchMachines(session *xconn.Session) ([]common.Machine, error) {
-	callResp := session.Call(ProcedureListDesktop).Do()
-	if callResp.Err != nil {
-		return []common.Machine{}, callResp.Err
-	}
-
-	var machines []common.Machine
-	jsonData, err := json.Marshal(callResp.Args())
-	if err != nil {
-		return []common.Machine{}, err
-	}
-	if err := json.Unmarshal(jsonData, &machines); err != nil {
-		return []common.Machine{}, err
-	}
-
-	return machines, nil
+	return c.Machines(cloudSession)
 }
 
 // CacheMachines replaces the machines in config.yml, keeping its other sections.

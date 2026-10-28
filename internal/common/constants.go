@@ -112,15 +112,7 @@ const (
 )
 
 const (
-	Realm                            = "io.xconn.deskconn"
-	ProcedureDeskconnAttachDesktop   = "io.xconn.deskconn.desktop.attach"
-	ProcedureDeskconnDetachDesktop   = "io.xconn.deskconn.desktop.detach"
-	TopicDeskconnDesktopDetachFormat = "io.xconn.deskconn.desktop.%s.detach"
-
-	// The cloud's API for the keys authorized to connect to a desktop (see xconn.CloudConfig).
-	ProcedureDesktopKeyList      = "io.xconn.deskconn.desktop.access.key.list"
-	TopicDesktopKeyAddedFormat   = "io.xconn.deskconn.desktop.%s.key.add"
-	TopicDesktopKeyRemovedFormat = "io.xconn.deskconn.desktop.%s.key.remove"
+	Realm = "io.xconn.deskconn"
 )
 
 const ProcedureFileCat = "io.xconn.deskconn.file.cat"

@@ -12,17 +12,13 @@ import (
 	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
+// Attach adds this machine to username's machines as desktopName and keeps the key its
+// daemon serves it with.
 func Attach(username, password, desktopName string) error {
-	quicSess, err := ConnectCloudCRA(context.Background(), username, password)
+	c, err := currentCloud()
 	if err != nil {
 		return err
 	}
-	common.SafeGo(func() {
-		<-quicSess.Done()
-		_ = quicSess.Connection().Close()
-	})
-	defer quicSess.Connection().Close()
-	session := quicSess.Session
 
 	machineIDStr, err := xconnd.MachineID()
 	if err != nil {
@@ -34,28 +30,21 @@ func Attach(username, password, desktopName string) error {
 		return fmt.Errorf("failed to generate cryptosign keypair: %w", err)
 	}
 
-	callResp := session.Call(common.ProcedureDeskconnAttachDesktop).Args(machineIDStr, publicKey, desktopName).Do()
-	if callResp.Err != nil {
-		return fmt.Errorf("failed to attach desktop: %w", callResp.Err)
-	}
-
-	respDict, err := callResp.ArgDict(0)
+	realm, err := c.Attach(context.Background(), username, password, machineIDStr, publicKey, desktopName)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to attach desktop: %w", err)
 	}
 
-	id, err := respDict.String("realm")
-	if err != nil {
-		return err
-	}
-
-	return writeCredentialsFile(id, machineIDStr, publicKey, privateKey)
+	return writeCredentialsFile(realm, machineIDStr, publicKey, privateKey)
 }
 
 func Detach(session *xconn.Session, authID string) error {
-	callResp := session.Call(common.ProcedureDeskconnDetachDesktop).Args(authID).Do()
-	if callResp.Err != nil {
-		return fmt.Errorf("failed to detach desktop: %w", callResp.Err)
+	c, err := currentCloud()
+	if err != nil {
+		return err
+	}
+	if err := c.Detach(session, authID); err != nil {
+		return fmt.Errorf("failed to detach desktop: %w", err)
 	}
 
 	return nil
