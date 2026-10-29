@@ -98,12 +98,12 @@ type StandaloneUsers struct {
 // file's users, which must have been checked already (no two with a name or key). It fails
 // if the database has a user or key of theirs too, which it would be unclear which to use.
 func OpenStandaloneUsers(path string, config []StandaloneUser) (*StandaloneUsers, error) {
-	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: openTimeout})
+	db, err := openDB(path)
 	if err != nil {
 		if errors.Is(err, berrors.ErrTimeout) {
 			return nil, fmt.Errorf("open %s: another desk serve is using it", path)
 		}
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
 		for _, bucket := range [][]byte{usersBucket, keysBucket} {
