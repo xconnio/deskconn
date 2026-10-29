@@ -1,0 +1,15 @@
+schema_version: "1"
+
+app:
+  id: remote-control
+  name: Remote Control
+  description: Lock your computer and control audio
+  icon: https://example.com/icons/remote-control.png
+
+api:
+  key_exchange: io.xconn.remotecontrol.key.exchange
+
+entry_screen: home
+
+screens:
+  - screens/home.yaml
