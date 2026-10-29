@@ -8,27 +8,52 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/xconnio/deskconn/internal/common"
 )
 
-// runNetCmd runs a privileged network configuration command (ip/iptables)
+// runNetCmd runs a privileged network configuration command (ip/iptables/nft)
 // with a fixed argv -- never through a shell -- and folds its output into
 // the error so failures are diagnosable from logs alone.
 func runNetCmd(name string, args ...string) error {
-	out, err := exec.Command(name, args...).CombinedOutput() //nolint:gosec
+	return runNetCmdInput("", name, args...)
+}
+
+// runNetCmdInput is runNetCmd with input fed to the command's stdin.
+func runNetCmdInput(input, name string, args ...string) error {
+	cmd := exec.Command(name, args...) //nolint:gosec
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
+// ipFamily returns the "ip" flag and host-route prefix length for ip.
+func ipFamily(ip string) (flag, hostBits string, err error) {
+	parsed := net.ParseIP(ip)
+	switch {
+	case parsed == nil:
+		return "", "", fmt.Errorf("invalid ip address %q", ip)
+	case parsed.To4() != nil:
+		return "-4", "/32", nil
+	default:
+		return "-6", "/128", nil
+	}
+}
+
 // AddHostRoute pins ip to gateway/iface (the machine's normal route, from
 // GetDefaultRoute) so it keeps working after the default route is replaced.
 // Used to make sure the WebRTC transport itself never gets routed into the
-// tunnel it's carrying. A pre-existing identical route is not an error.
+// tunnel it's carrying. ip may be IPv4 or IPv6. A pre-existing identical
+// route is not an error.
 func AddHostRoute(ip, gateway, iface string) error {
-	args := []string{"route", "add", ip + "/32"}
+	flag, bits, err := ipFamily(ip)
+	if err != nil {
+		return err
+	}
+	args := []string{flag, "route", "add", ip + bits}
 	if gateway != "" {
 		args = append(args, "via", gateway)
 	}
@@ -42,108 +67,93 @@ func AddHostRoute(ip, gateway, iface string) error {
 
 // DelHostRoute removes a route previously added by AddHostRoute.
 func DelHostRoute(ip string) error {
-	return runNetCmd("ip", "route", "del", ip+"/32")
-}
-
-// ReplaceDefaultRoute points the default route for ipVersion at iface (a
-// TUN device, so no gateway is needed) and returns the route it replaced,
-// if any, for RestoreDefaultRoute to put back.
-func ReplaceDefaultRoute(ipVersion int, iface string) (*common.DefaultRoute, error) {
-	prev, err := common.GetDefaultRoute(ipVersion)
+	flag, bits, err := ipFamily(ip)
 	if err != nil {
-		prev = nil // nothing to restore later; proceed anyway
+		return err
 	}
+	return runNetCmd("ip", flag, "route", "del", ip+bits)
+}
 
-	flag := "-4"
+// defaultHalves splits each family's whole address space in two. Routing both halves over a
+// device takes over from the default route the way OpenVPN's def1 and WireGuard do, without
+// touching the default route itself: being more specific, they win whatever its metric is,
+// so nothing goes wrong with several default routes (e.g. NetworkManager's ethernet and wifi
+// ones, at different metrics) or with whichever network manager owns it, and removing them is
+// all it takes to undo.
+func defaultHalves(ipVersion int) []string {
 	if ipVersion == 6 {
-		flag = "-6"
+		return []string{"::/1", "8000::/1"}
 	}
-	if err := runNetCmd("ip", flag, "route", "replace", "default", "dev", iface); err != nil {
-		return nil, err
-	}
-
-	return prev, nil
+	return []string{"0.0.0.0/1", "128.0.0.0/1"}
 }
 
-// RestoreDefaultRoute restores the default route captured by
-// ReplaceDefaultRoute. A nil prev means there was no default route before,
-// so the tunnel's default route is simply removed.
-func RestoreDefaultRoute(ipVersion int, prev *common.DefaultRoute) error {
-	flag := "-4"
+func familyFlag(ipVersion int) string {
 	if ipVersion == 6 {
-		flag = "-6"
+		return "-6"
 	}
-
-	if prev == nil || prev.Iface == "" {
-		return runNetCmd("ip", flag, "route", "del", "default")
-	}
-
-	args := []string{flag, "route", "replace", "default"}
-	if prev.Gateway != "" {
-		args = append(args, "via", prev.Gateway)
-	}
-	args = append(args, "dev", prev.Iface)
-	return runNetCmd("ip", args...)
+	return "-4"
 }
 
-// BlockIPv6Default replaces any IPv6 default route with an unreachable
-// route, so a v4-only tunnel can't be bypassed by v6 traffic. hadDefault
-// reports whether there was an existing default route to restore later.
-func BlockIPv6Default() (hadDefault bool, prev *common.DefaultRoute, err error) {
-	prev, gerr := common.GetDefaultRoute(6)
-	hadDefault = gerr == nil
-
-	if err := runNetCmd("ip", "-6", "route", "replace", "unreachable", "default", "metric", "1"); err != nil {
-		return hadDefault, prev, err
-	}
-	return hadDefault, prev, nil
-}
-
-// RestoreIPv6Default undoes BlockIPv6Default.
-func RestoreIPv6Default(hadDefault bool, prev *common.DefaultRoute) error {
-	if !hadDefault {
-		return runNetCmd("ip", "-6", "route", "del", "unreachable", "default", "metric", "1")
-	}
-	return RestoreDefaultRoute(6, prev)
-}
-
-// SetLinkDNS has systemd-resolved send every lookup to servers over iface:
-// "~." makes iface the routing domain for all names, so no other link's
-// resolvers are asked (except for more specific domains, e.g. a LAN search
-// domain). Every server must be an IP address. Settings are per-link, so
-// systemd-resolved also drops them by itself once iface is gone.
-func SetLinkDNS(iface string, servers []string) error {
-	if len(servers) == 0 {
-		return fmt.Errorf("no dns servers given")
-	}
-	for _, s := range servers {
-		if net.ParseIP(s) == nil {
-			return fmt.Errorf("invalid dns server %q", s)
+// ReplaceDefaultRoute routes all of ipVersion's traffic over iface (a TUN device, so no
+// gateway is needed) -- see defaultHalves.
+func ReplaceDefaultRoute(ipVersion int, iface string) error {
+	flag, halves := familyFlag(ipVersion), defaultHalves(ipVersion)
+	for i, dst := range halves {
+		if err := runNetCmd("ip", flag, "route", "replace", dst, "dev", iface); err != nil {
+			for _, added := range halves[:i] {
+				_ = runNetCmd("ip", flag, "route", "del", added, "dev", iface)
+			}
+			return err
 		}
 	}
-
-	if err := runNetCmd("resolvectl", append([]string{"dns", iface}, servers...)...); err != nil {
-		return err
-	}
-	if err := runNetCmd("resolvectl", "domain", iface, "~."); err != nil {
-		_ = RevertLinkDNS(iface)
-		return err
-	}
-	if err := runNetCmd("resolvectl", "default-route", iface, "yes"); err != nil {
-		_ = RevertLinkDNS(iface)
-		return err
-	}
-	// Answers cached from before would otherwise keep pointing lookups at servers picked for
-	// the old network.
-	_ = runNetCmd("resolvectl", "flush-caches")
 	return nil
 }
 
-// RevertLinkDNS undoes SetLinkDNS.
-func RevertLinkDNS(iface string) error {
-	err := runNetCmd("resolvectl", "revert", iface)
-	_ = runNetCmd("resolvectl", "flush-caches")
-	return err
+// RestoreDefaultRoute undoes ReplaceDefaultRoute(ipVersion, iface). Routes already gone with
+// iface itself are not an error.
+func RestoreDefaultRoute(ipVersion int, iface string) error {
+	flag := familyFlag(ipVersion)
+	var firstErr error
+	for _, dst := range defaultHalves(ipVersion) {
+		err := runNetCmd("ip", flag, "route", "del", dst, "dev", iface)
+		if err != nil && !isNoSuchRoute(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// BlockIPv6Default makes all IPv6 destinations without a more specific route unreachable, so
+// a v4-only tunnel can't be bypassed by v6 traffic -- see defaultHalves for why this leaves
+// the default route itself alone.
+func BlockIPv6Default() error {
+	halves := defaultHalves(6)
+	for i, dst := range halves {
+		if err := runNetCmd("ip", "-6", "route", "replace", "unreachable", dst); err != nil {
+			for _, added := range halves[:i] {
+				_ = runNetCmd("ip", "-6", "route", "del", "unreachable", added)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// RestoreIPv6Default undoes BlockIPv6Default.
+func RestoreIPv6Default() error {
+	var firstErr error
+	for _, dst := range defaultHalves(6) {
+		err := runNetCmd("ip", "-6", "route", "del", "unreachable", dst)
+		if err != nil && !isNoSuchRoute(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// isNoSuchRoute reports whether err is "ip route del" failing for a route that isn't there.
+func isNoSuchRoute(err error) bool {
+	return strings.Contains(err.Error(), "No such process") || strings.Contains(err.Error(), "Cannot find device")
 }
 
 // SetSysctl writes value to the /proc/sys node for key (e.g.
@@ -162,41 +172,4 @@ func SetSysctl(key, value string) (previous string, err error) {
 		return previous, fmt.Errorf("write %s: %w", path, err)
 	}
 	return previous, nil
-}
-
-// AddMasquerade adds an iptables MASQUERADE rule so traffic from subnet
-// leaving via oif gets the host's own address.
-func AddMasquerade(subnet, oif string) error {
-	return runNetCmd("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", subnet, "-o", oif, "-j", "MASQUERADE")
-}
-
-// DelMasquerade removes a rule added by AddMasquerade.
-func DelMasquerade(subnet, oif string) error {
-	return runNetCmd("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", subnet, "-o", oif, "-j", "MASQUERADE")
-}
-
-// AddForwardAccept allows forwarding from inIface to outIface. Rules are
-// inserted at the head of FORWARD (-I, not -A) so they take effect ahead of
-// any earlier DROP/REJECT rule a distro or another tool (e.g. Docker) may
-// already have installed further down the chain.
-func AddForwardAccept(inIface, outIface string) error {
-	return runNetCmd("iptables", "-I", "FORWARD", "-i", inIface, "-o", outIface, "-j", "ACCEPT")
-}
-
-// DelForwardAccept removes a rule added by AddForwardAccept.
-func DelForwardAccept(inIface, outIface string) error {
-	return runNetCmd("iptables", "-D", "FORWARD", "-i", inIface, "-o", outIface, "-j", "ACCEPT")
-}
-
-// AddForwardEstablished allows return traffic for connections the tunnel
-// initiated.
-func AddForwardEstablished(inIface, outIface string) error {
-	return runNetCmd("iptables", "-I", "FORWARD", "-i", inIface, "-o", outIface,
-		"-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT")
-}
-
-// DelForwardEstablished removes a rule added by AddForwardEstablished.
-func DelForwardEstablished(inIface, outIface string) error {
-	return runNetCmd("iptables", "-D", "FORWARD", "-i", inIface, "-o", outIface,
-		"-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT")
 }

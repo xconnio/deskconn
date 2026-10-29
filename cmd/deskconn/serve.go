@@ -41,6 +41,8 @@ type userdFlags struct {
 type rootdFlags struct {
 	socketPath  *string
 	idleTimeout *time.Duration
+	detach      *bool
+	pidFile     *string
 }
 
 type serveCommands struct {
@@ -104,6 +106,9 @@ func registerServeCommands(app *kingpin.Application) *serveCommands {
 			"serves (--mode root)").String(),
 		idleTimeout: runCmd.Flag("idle-timeout", "Exit the root helper if no client connects within this long "+
 			"(--mode root)").Default("30s").Duration(),
+		// Set by deskconn.LaunchVPNHelper where there's no systemd to run the root helper.
+		detach:  runCmd.Flag("detach", "Run the root helper in the background (--mode root)").Hidden().Bool(),
+		pidFile: runCmd.Flag("pid-file", "Record the root helper's pid here (--mode root)").Hidden().String(),
 	}
 
 	return &serveCommands{

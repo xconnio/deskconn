@@ -55,23 +55,8 @@ type VPNReplaceDefaultRouteArgs struct {
 	Iface     string `json:"iface"`
 }
 
-type VPNReplaceDefaultRouteData struct {
-	Prev *DefaultRoute `json:"prev,omitempty"`
-}
-
 type VPNRestoreDefaultRouteArgs struct {
-	IPVersion int           `json:"ip_version"`
-	Prev      *DefaultRoute `json:"prev,omitempty"`
-}
-
-type VPNBlockIPv6DefaultData struct {
-	HadDefault bool          `json:"had_default"`
-	Prev       *DefaultRoute `json:"prev,omitempty"`
-}
-
-type VPNRestoreIPv6DefaultArgs struct {
-	HadDefault bool          `json:"had_default"`
-	Prev       *DefaultRoute `json:"prev,omitempty"`
+	IPVersion int `json:"ip_version"`
 }
 
 type VPNSetSysctlArgs struct {

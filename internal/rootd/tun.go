@@ -3,6 +3,7 @@
 package rootd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -15,6 +16,13 @@ import (
 // Read/Write.
 func OpenTUN(name string) (tun *os.File, ifaceName string, err error) {
 	fd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_NONBLOCK, 0)
+	if errors.Is(err, unix.ENOENT) {
+		// Distros that build tun as a module don't all load it at boot (nor create the
+		// device node for it); loading it creates the node.
+		if merr := runNetCmd("modprobe", "tun"); merr == nil {
+			fd, err = unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_NONBLOCK, 0)
+		}
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("open /dev/net/tun: %w", err)
 	}
