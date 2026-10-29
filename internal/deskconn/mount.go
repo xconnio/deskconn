@@ -4,6 +4,7 @@ package deskconn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -32,6 +33,16 @@ const mountCacheTimeout = time.Second
 // mountRelistWindow is how long after listing a directory a lookup in it that
 // misses the cache lists it again rather than looking up just that entry.
 const mountRelistWindow = 10 * time.Second
+
+// mountCallTimeout is how long a request may take. The router drops messages
+// for a peer that's too far behind, so a reply may never come; without a limit,
+// whatever was waiting for it (an ls, a cp) would hang, unkillable.
+const mountCallTimeout = time.Minute
+
+type mountCallResult struct {
+	result []byte
+	err    error
+}
 
 type mountListed struct {
 	at    time.Time
@@ -157,7 +168,8 @@ func MountServer(call MountCaller, remoteRoot, mountpoint, fsName string, opts M
 		listing: make(map[string]*mountListing),
 		inos:    make(map[[2]uint64]uint64),
 		// 1 is the root's.
-		nextIno: 1,
+		nextIno:   1,
+		transfers: make(chan struct{}, mountInFlight),
 	}
 
 	resp, errno := mfs.do(context.Background(), &common.MountRequest{
@@ -174,8 +186,8 @@ func MountServer(call MountCaller, remoteRoot, mountpoint, fsName string, opts M
 	mountOpts := fuse.MountOptions{
 		FsName:       fsName,
 		Name:         "deskconn",
-		MaxWrite:     common.MountMaxIO,
-		MaxReadAhead: common.MountMaxIO,
+		MaxWrite:     mountBlockSize,
+		MaxReadAhead: mountBlockSize,
 		Debug:        opts.Debug,
 	}
 	if opts.ReadOnly {
@@ -264,6 +276,36 @@ type mountFS struct {
 	inoMu   sync.Mutex
 	inos    map[[2]uint64]uint64
 	nextIno uint64
+
+	// transfers holds a slot for each request carrying file data in flight.
+	transfers chan struct{}
+}
+
+// acquire waits for a slot for a request carrying file data; release frees it.
+func (m *mountFS) acquire(ctx context.Context) syscall.Errno {
+	select {
+	case m.transfers <- struct{}{}:
+		return 0
+	case <-ctx.Done():
+		return syscall.EINTR
+	}
+}
+
+func (m *mountFS) release() {
+	<-m.transfers
+}
+
+// transfer sends a request carrying file data: a read or write of at most
+// mountBlockSize, at most mountInFlight of them at once.
+func (m *mountFS) transfer(ctx context.Context, req *common.MountRequest) (*common.MountResponse, syscall.Errno) {
+	if errno := m.acquire(ctx); errno != 0 {
+		return nil, errno
+	}
+	defer m.release()
+	if req.Op == common.MountOpWrite {
+		return m.mutate(ctx, req)
+	}
+	return m.do(ctx, req)
 }
 
 func (m *mountFS) do(ctx context.Context, req *common.MountRequest) (*common.MountResponse, syscall.Errno) {
@@ -271,9 +313,8 @@ func (m *mountFS) do(ctx context.Context, req *common.MountRequest) (*common.Mou
 	if err != nil {
 		return nil, syscall.EINVAL
 	}
-	result, err := m.call(ctx, payload)
+	result, err := m.callAbandoning(ctx, payload)
 	if err != nil {
-		// The router reports a cancelled call as its own error, not ctx's.
 		if ctx.Err() != nil {
 			return nil, syscall.EINTR
 		}
@@ -291,6 +332,28 @@ func (m *mountFS) do(ctx context.Context, req *common.MountRequest) (*common.Mou
 	}
 	resp.Data = data
 	return &resp, 0
+}
+
+// callAbandoning sends payload, giving up on the reply once ctx is done or
+// mountCallTimeout has passed. It abandons the call rather than cancel it: a
+// router answers the cancel of a call it has just finished with an error that
+// xconn-go's session can't place, which stops it reading anything more.
+func (m *mountFS) callAbandoning(ctx context.Context, payload []byte) ([]byte, error) {
+	done := make(chan mountCallResult, 1)
+	common.SafeGo(func() {
+		result, err := m.call(context.WithoutCancel(ctx), payload)
+		done <- mountCallResult{result: result, err: err}
+	})
+	timer := time.NewTimer(mountCallTimeout)
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		return r.result, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, errors.New("no reply")
+	}
 }
 
 // forget drops p's cached attributes.
@@ -462,18 +525,22 @@ func (n *mountNode) removeFile(f *mountFile) {
 	delete(n.files, f)
 }
 
-// flushWrites waits for the writes of n's open files, so the machine's attributes
-// and contents include them, dropping n's cached attributes if there were any.
-func (n *mountNode) flushWrites() {
+func (n *mountNode) openFiles() []*mountFile {
 	n.mu.Lock()
+	defer n.mu.Unlock()
 	files := make([]*mountFile, 0, len(n.files))
 	for f := range n.files {
 		files = append(files, f)
 	}
-	n.mu.Unlock()
+	return files
+}
 
+// flushWrites waits for the writes n's open files have acknowledged, so the
+// machine's contents include them, dropping n's cached attributes if there were
+// any.
+func (n *mountNode) flushWrites() {
 	flushed := false
-	for _, f := range files {
+	for _, f := range n.openFiles() {
 		if pending, _ := f.flush(); pending {
 			flushed = true
 		}
@@ -523,14 +590,34 @@ func (n *mountNode) newChild(ctx context.Context, attr *common.MountAttr, out *f
 	return n.NewInode(ctx, &mountNode{mfs: n.mfs}, stable)
 }
 
+// withWrites is attr with the writes n's open files have acknowledged, rather
+// than waiting for them to reach the machine (which a file being copied in
+// would make an ls wait out).
+func (n *mountNode) withWrites(attr *common.MountAttr) *common.MountAttr {
+	for _, f := range n.openFiles() {
+		if size := f.writtenSize(); size > attr.Size {
+			withSize := *attr
+			withSize.Size = size
+			attr = &withSize
+		}
+	}
+	return attr
+}
+
+// truncated tells n's open files it was truncated (or extended) to size.
+func (n *mountNode) truncated(size int64) {
+	for _, f := range n.openFiles() {
+		f.truncated(size)
+	}
+}
+
 func (n *mountNode) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	n.flushWrites()
 	// The mount's root may be a symlink to a directory on the machine.
 	attr, errno := n.mfs.stat(ctx, n.remotePath(), n.IsRoot())
 	if errno != 0 {
 		return errno
 	}
-	n.mfs.fillAttr(attr, &out.Attr)
+	n.mfs.fillAttr(n.withWrites(attr), &out.Attr)
 	return 0
 }
 
@@ -559,19 +646,22 @@ func (n *mountNode) Setattr(ctx context.Context, _ fs.FileHandle, in *fuse.SetAt
 	if errno != 0 {
 		return errno
 	}
+	if req.NewSize != nil {
+		n.truncated(*req.NewSize)
+	}
 	n.mfs.fillAttr(resp.Attr, &out.Attr)
 	return 0
 }
 
 func (n *mountNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	if child := n.GetChild(name); child != nil {
-		if childNode, ok := child.Operations().(*mountNode); ok {
-			childNode.flushWrites()
-		}
-	}
 	attr, errno := n.mfs.stat(ctx, n.childPath(name), false)
 	if errno != 0 {
 		return nil, errno
+	}
+	if child := n.GetChild(name); child != nil {
+		if childNode, ok := child.Operations().(*mountNode); ok {
+			attr = childNode.withWrites(attr)
+		}
 	}
 	return n.newChild(ctx, attr, out), 0
 }
@@ -626,6 +716,9 @@ func (n *mountNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint
 	if errno != 0 {
 		return nil, 0, errno
 	}
+	if flags&syscall.O_TRUNC != 0 {
+		n.truncated(0)
+	}
 	n.addFile(f)
 	return f, 0, 0
 }
@@ -663,8 +756,8 @@ func (n *mountNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte,
 		return fuse.ReadResultData(data), 0
 	}
 
-	resp, errno := n.mfs.do(ctx, &common.MountRequest{
-		Op: common.MountOpRead, Path: n.remotePath(), Offset: off, Length: min(len(dest), common.MountMaxIO),
+	resp, errno := n.mfs.transfer(ctx, &common.MountRequest{
+		Op: common.MountOpRead, Path: n.remotePath(), Offset: off, Length: min(len(dest), mountBlockSize),
 	})
 	if errno != 0 {
 		return nil, errno
@@ -674,10 +767,10 @@ func (n *mountNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte,
 
 func (n *mountNode) Write(ctx context.Context, fh fs.FileHandle, data []byte, off int64) (uint32, syscall.Errno) {
 	if f, ok := fh.(*mountFile); ok {
-		return f.write(data, off)
+		return f.write(ctx, data, off)
 	}
 
-	resp, errno := n.mfs.mutate(ctx, &common.MountRequest{
+	resp, errno := n.mfs.transfer(ctx, &common.MountRequest{
 		Op: common.MountOpWrite, Path: n.remotePath(), Offset: off, Data: data,
 	})
 	if errno != 0 {
