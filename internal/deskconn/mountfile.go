@@ -5,6 +5,7 @@ package deskconn
 import (
 	"bytes"
 	"context"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -12,18 +13,23 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 )
 
-// The kernel reads a FUSE file sequentially in pieces of at most 256 KiB, and
-// writes it in pieces of at most 1 MiB, each only once the last one is done. Over
-// a link with a long round trip (routed mode goes through the cloud router) that
-// would wait out one round trip per piece. So mountFile fetches a file being read
-// sequentially in mountBlockSize blocks, keeping the next mountReadAhead of them
-// in flight, and acknowledges writes before the machine does, keeping up to
-// mountWriteBehind of them in flight; their errors are reported by the next
-// write, flush (close) or fsync, as NFS does.
+// The kernel reads and writes a FUSE file in pieces, each only once the last one
+// is done. Over a link with a long round trip (routed mode goes through the cloud
+// router) that would wait out one round trip per piece. So mountFile fetches a
+// file being read sequentially in mountBlockSize blocks, keeping the next
+// mountReadAhead of them in flight, and acknowledges writes before the machine
+// does; their errors are reported by the next write, flush (close) or fsync, as
+// NFS does.
+//
+// Everything else the mount sends (and in default mode, everything the daemon
+// sends the machine) waits behind the file data in flight on the connection, so
+// it goes in small pieces, at most mountInFlight of them at once across the
+// mount (see mountFS.transfer): a transfer is slower than it could be, but an ls
+// meanwhile isn't. WebRTC, besides, slows to a crawl on messages of a megabyte.
 const (
-	mountBlockSize   = common.MountMaxIO
-	mountReadAhead   = 4
-	mountWriteBehind = 4
+	mountBlockSize = 64 * 1024
+	mountInFlight  = 8
+	mountReadAhead = mountInFlight
 )
 
 type mountBlock struct {
@@ -57,6 +63,9 @@ type mountFile struct {
 	writing []*mountWrite
 	// werr is the first write that failed after it was acknowledged.
 	werr syscall.Errno
+	// written is the size f's acknowledged writes have made the file, which the
+	// machine's may still be short of.
+	written int64
 }
 
 func newMountFile(mfs *mountFS, handle uint64, size int64) *mountFile {
@@ -74,19 +83,24 @@ func newMountFile(mfs *mountFS, handle uint64, size int64) *mountFile {
 }
 
 // write sends data to the machine at off, returning before it's written.
-func (f *mountFile) write(data []byte, off int64) (uint32, syscall.Errno) {
+func (f *mountFile) write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
 	w := &mountWrite{off: off, end: off + int64(len(data))}
 
+	if errno := f.mfs.acquire(ctx); errno != 0 {
+		return 0, errno
+	}
 	f.wmu.Lock()
 	// Writes to the same bytes must reach the machine in order.
-	for f.werr == 0 && (len(f.writing) >= mountWriteBehind || f.overlapsLocked(w)) {
+	for f.werr == 0 && f.overlapsLocked(w) {
 		f.wdone.Wait()
 	}
 	if f.werr != 0 {
 		f.wmu.Unlock()
+		f.mfs.release()
 		return 0, f.werr
 	}
 	f.writing = append(f.writing, w)
+	f.written = max(f.written, w.end)
 	f.wmu.Unlock()
 	f.invalidate(w.end)
 
@@ -96,6 +110,7 @@ func (f *mountFile) write(data []byte, off int64) (uint32, syscall.Errno) {
 		_, errno := f.mfs.mutate(f.ctx, &common.MountRequest{
 			Op: common.MountOpWrite, Handle: f.handle, Offset: off, Data: data,
 		})
+		f.mfs.release()
 		f.invalidate(w.end)
 		f.wmu.Lock()
 		if errno != 0 && f.werr == 0 {
@@ -122,16 +137,36 @@ func (f *mountFile) overlapsLocked(w *mountWrite) bool {
 	return false
 }
 
-// flush waits for f's writes to reach the machine, returning whether any were
-// pending and the first that failed.
+// flush waits for the writes f has acknowledged so far to reach the machine (not
+// for those made meanwhile, which a busy writer would never stop making),
+// returning whether any were pending and the first that failed.
 func (f *mountFile) flush() (bool, syscall.Errno) {
 	f.wmu.Lock()
 	defer f.wmu.Unlock()
-	pending := len(f.writing) > 0
-	for len(f.writing) > 0 {
+	pending := slices.Clone(f.writing)
+	for slices.ContainsFunc(f.writing, func(w *mountWrite) bool { return slices.Contains(pending, w) }) {
 		f.wdone.Wait()
 	}
-	return pending, f.werr
+	return len(pending) > 0, f.werr
+}
+
+// writtenSize is the size f's acknowledged writes have made the file, 0 if it
+// wasn't written.
+func (f *mountFile) writtenSize() int64 {
+	f.wmu.Lock()
+	defer f.wmu.Unlock()
+	return f.written
+}
+
+// truncated is told the file was truncated (or extended) to size.
+func (f *mountFile) truncated(size int64) {
+	f.wmu.Lock()
+	f.written = min(f.written, size)
+	f.wmu.Unlock()
+	f.mu.Lock()
+	clear(f.blocks)
+	f.size = size
+	f.mu.Unlock()
 }
 
 func (f *mountFile) fsync(ctx context.Context) syscall.Errno {
@@ -237,7 +272,7 @@ func (f *mountFile) fetchLocked(i int64) {
 	f.blocks[i] = b
 	common.SafeGo(func() {
 		defer close(b.done)
-		resp, errno := f.mfs.do(f.ctx, &common.MountRequest{
+		resp, errno := f.mfs.transfer(f.ctx, &common.MountRequest{
 			Op: common.MountOpRead, Handle: f.handle, Offset: i * mountBlockSize, Length: mountBlockSize,
 		})
 		b.fetched = time.Now()
@@ -250,8 +285,8 @@ func (f *mountFile) fetchLocked(i int64) {
 }
 
 func (f *mountFile) readDirect(ctx context.Context, dest []byte, off int64) ([]byte, syscall.Errno) {
-	resp, errno := f.mfs.do(ctx, &common.MountRequest{
-		Op: common.MountOpRead, Handle: f.handle, Offset: off, Length: min(len(dest), common.MountMaxIO),
+	resp, errno := f.mfs.transfer(ctx, &common.MountRequest{
+		Op: common.MountOpRead, Handle: f.handle, Offset: off, Length: min(len(dest), mountBlockSize),
 	})
 	if errno != 0 {
 		return nil, errno

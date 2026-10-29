@@ -346,6 +346,106 @@ func TestMountWriteBehind(t *testing.T) {
 	})
 }
 
+// TestMountDoesntWaitOutTransfers checks that a file being copied in or read
+// over a slow link holds up nothing else the mount does for longer than the
+// little file data it keeps in flight takes.
+func TestMountDoesntWaitOutTransfers(t *testing.T) {
+	var inFlight, maxInFlight atomic.Int32
+	slowData := func(req *common.MountRequest, machine func() ([]byte, error)) ([]byte, error) {
+		if req.Op != common.MountOpWrite && req.Op != common.MountOpRead {
+			return machine()
+		}
+		n := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for m := maxInFlight.Load(); n > m && !maxInFlight.CompareAndSwap(m, n); m = maxInFlight.Load() {
+		}
+		time.Sleep(20 * time.Millisecond)
+		return machine()
+	}
+	home, mnt, _ := mountHomeVia(t, deskconn.MountOptions{}, slowData)
+
+	t.Run("an ls doesn't wait for a file being written to finish", func(t *testing.T) {
+		f, err := os.Create(filepath.Join(mnt, "copying.bin"))
+		require.NoError(t, err)
+		stop := make(chan struct{})
+		written := make(chan error, 1)
+		go func() {
+			chunk := make([]byte, 128<<10)
+			for {
+				select {
+				case <-stop:
+					written <- f.Close()
+					return
+				default:
+				}
+				if _, err := f.Write(chunk); err != nil {
+					written <- err
+					return
+				}
+			}
+		}()
+		time.Sleep(200 * time.Millisecond)
+
+		for range 3 {
+			time.Sleep(1100 * time.Millisecond) // past the kernel's attribute cache
+			start := time.Now()
+			entries, err := os.ReadDir(mnt)
+			require.NoError(t, err)
+			require.NotEmpty(t, entries)
+			info, err := os.Stat(filepath.Join(mnt, "copying.bin"))
+			require.NoError(t, err)
+			require.Positive(t, info.Size())
+			require.Less(t, time.Since(start), time.Second, "while the file is still being written")
+		}
+		close(stop)
+		require.NoError(t, <-written)
+
+		info, err := os.Stat(filepath.Join(home, "copying.bin"))
+		require.NoError(t, err)
+		mounted, err := os.Stat(filepath.Join(mnt, "copying.bin"))
+		require.NoError(t, err)
+		require.Equal(t, info.Size(), mounted.Size())
+	})
+
+	t.Run("a read sees the writes before it", func(t *testing.T) {
+		f, err := os.Create(filepath.Join(mnt, "readback.bin"))
+		require.NoError(t, err)
+		defer f.Close()
+		want := make([]byte, 1<<20)
+		_, _ = rand.Read(want)
+		_, err = f.Write(want)
+		require.NoError(t, err)
+		got, err := os.ReadFile(filepath.Join(mnt, "readback.bin"))
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(want, got))
+	})
+
+	t.Run("a truncate while open is reported", func(t *testing.T) {
+		f, err := os.Create(filepath.Join(mnt, "shrink.bin"))
+		require.NoError(t, err)
+		defer f.Close()
+		_, err = f.Write(make([]byte, 1<<20))
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(10))
+		info, err := os.Stat(filepath.Join(mnt, "shrink.bin"))
+		require.NoError(t, err)
+		require.Equal(t, int64(10), info.Size())
+	})
+
+	t.Run("file data in flight is bounded", func(t *testing.T) {
+		data := make([]byte, 4<<20)
+		_, _ = rand.Read(data)
+		require.NoError(t, os.WriteFile(filepath.Join(home, "big.bin"), data, 0o644))
+		maxInFlight.Store(0)
+		got, err := os.ReadFile(filepath.Join(mnt, "big.bin"))
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(data, got))
+		require.NoError(t, os.WriteFile(filepath.Join(mnt, "big-copy.bin"), data, 0o644))
+		require.LessOrEqual(t, maxInFlight.Load(), int32(8))
+		require.Greater(t, maxInFlight.Load(), int32(1), "but more than one at a time")
+	})
+}
+
 func TestMountRelistsInsteadOfStatingEachEntry(t *testing.T) {
 	var stats, listings atomic.Int32
 	count := func(req *common.MountRequest, machine func() ([]byte, error)) ([]byte, error) {
