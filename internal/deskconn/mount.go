@@ -282,13 +282,8 @@ type mountFS struct {
 }
 
 // acquire waits for a slot for a request carrying file data; release frees it.
-func (m *mountFS) acquire(ctx context.Context) syscall.Errno {
-	select {
-	case m.transfers <- struct{}{}:
-		return 0
-	case <-ctx.Done():
-		return syscall.EINTR
-	}
+func (m *mountFS) acquire() {
+	m.transfers <- struct{}{}
 }
 
 func (m *mountFS) release() {
@@ -298,9 +293,7 @@ func (m *mountFS) release() {
 // transfer sends a request carrying file data: a read or write of at most
 // mountBlockSize, at most mountInFlight of them at once.
 func (m *mountFS) transfer(ctx context.Context, req *common.MountRequest) (*common.MountResponse, syscall.Errno) {
-	if errno := m.acquire(ctx); errno != 0 {
-		return nil, errno
-	}
+	m.acquire()
 	defer m.release()
 	if req.Op == common.MountOpWrite {
 		return m.mutate(ctx, req)
@@ -315,9 +308,6 @@ func (m *mountFS) do(ctx context.Context, req *common.MountRequest) (*common.Mou
 	}
 	result, err := m.callAbandoning(ctx, payload)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, syscall.EINTR
-		}
 		log.Printf("mount: %s %s: %v", req.Op, req.Path, err)
 		return nil, syscall.EIO
 	}
@@ -334,10 +324,16 @@ func (m *mountFS) do(ctx context.Context, req *common.MountRequest) (*common.Mou
 	return &resp, 0
 }
 
-// callAbandoning sends payload, giving up on the reply once ctx is done or
-// mountCallTimeout has passed. It abandons the call rather than cancel it: a
-// router answers the cancel of a call it has just finished with an error that
-// xconn-go's session can't place, which stops it reading anything more.
+// callAbandoning sends payload, giving up on the reply once mountCallTimeout
+// has passed. It abandons the call rather than cancel it: a router answers the
+// cancel of a call it has just finished with an error that xconn-go's session
+// can't place, which stops it reading anything more.
+//
+// Nor does it give up when ctx is done, which for a request from the kernel
+// means the process making it got a signal. Programs don't expect a file
+// system call to fail with EINTR on one they handle (git, whose progress
+// display runs on SIGALRM, gives up on the file), and the kernel stops waiting
+// by itself on one that kills the process.
 func (m *mountFS) callAbandoning(ctx context.Context, payload []byte) ([]byte, error) {
 	done := make(chan mountCallResult, 1)
 	common.SafeGo(func() {
@@ -349,8 +345,6 @@ func (m *mountFS) callAbandoning(ctx context.Context, payload []byte) ([]byte, e
 	select {
 	case r := <-done:
 		return r.result, r.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	case <-timer.C:
 		return nil, errors.New("no reply")
 	}
@@ -434,12 +428,8 @@ func (m *mountFS) list(ctx context.Context, dir string) ([]common.MountDirEntry,
 	m.mu.Lock()
 	if inFlight, ok := m.listing[dir]; ok {
 		m.mu.Unlock()
-		select {
-		case <-inFlight.done:
-			return inFlight.entries, inFlight.errno
-		case <-ctx.Done():
-			return nil, syscall.EINTR
-		}
+		<-inFlight.done
+		return inFlight.entries, inFlight.errno
 	}
 	l := &mountListing{done: make(chan struct{})}
 	m.listing[dir] = l
@@ -767,7 +757,7 @@ func (n *mountNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte,
 
 func (n *mountNode) Write(ctx context.Context, fh fs.FileHandle, data []byte, off int64) (uint32, syscall.Errno) {
 	if f, ok := fh.(*mountFile); ok {
-		return f.write(ctx, data, off)
+		return f.write(data, off)
 	}
 
 	resp, errno := n.mfs.transfer(ctx, &common.MountRequest{
