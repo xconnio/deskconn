@@ -446,6 +446,41 @@ func TestMountDoesntWaitOutTransfers(t *testing.T) {
 	})
 }
 
+// TestMountSignalledProcess checks that a process getting signals while it
+// waits on the machine, as git does from its progress display, gets its
+// answer, not EINTR.
+func TestMountSignalledProcess(t *testing.T) {
+	perl, err := exec.LookPath("perl")
+	if err != nil {
+		t.Skip("perl not available")
+	}
+	slow := func(req *common.MountRequest, machine func() ([]byte, error)) ([]byte, error) {
+		time.Sleep(300 * time.Millisecond)
+		return machine()
+	}
+	home, mnt, _ := mountHomeVia(t, deskconn.MountOptions{}, slow)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "objects", "ab"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "objects", "ab", "cd"), []byte("object"), 0o644))
+
+	// Perl, unlike Go and Python, doesn't retry a call failing with EINTR.
+	script := `
+		use Time::HiRes qw(ualarm);
+		$SIG{ALRM} = sub {};
+		ualarm(20000, 20000);
+		opendir(my $d, "$ARGV[0]/objects/ab") or die "opendir: $!\n";
+		my @names = grep { !/^\./ } readdir($d);
+		open(my $f, "<", "$ARGV[0]/objects/ab/cd") or die "open: $!\n";
+		print scalar(@names), " ", scalar(<$f>);
+	`
+	// Failing with EINTR, a call the kernel restarts may be interrupted again
+	// for ever.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, perl, "-e", script, mnt).CombinedOutput()
+	require.NoError(t, err, string(out))
+	require.Equal(t, "1 object", string(out))
+}
+
 func TestMountRelistsInsteadOfStatingEachEntry(t *testing.T) {
 	var stats, listings atomic.Int32
 	count := func(req *common.MountRequest, machine func() ([]byte, error)) ([]byte, error) {

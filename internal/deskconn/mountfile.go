@@ -83,12 +83,10 @@ func newMountFile(mfs *mountFS, handle uint64, size int64) *mountFile {
 }
 
 // write sends data to the machine at off, returning before it's written.
-func (f *mountFile) write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
+func (f *mountFile) write(data []byte, off int64) (uint32, syscall.Errno) {
 	w := &mountWrite{off: off, end: off + int64(len(data))}
 
-	if errno := f.mfs.acquire(ctx); errno != 0 {
-		return 0, errno
-	}
+	f.mfs.acquire()
 	f.wmu.Lock()
 	// Writes to the same bytes must reach the machine in order.
 	for f.werr == 0 && f.overlapsLocked(w) {
@@ -223,11 +221,7 @@ func (f *mountFile) read(ctx context.Context, dest []byte, off int64) ([]byte, s
 
 	n := 0
 	for i, b := range blocks {
-		select {
-		case <-b.done:
-		case <-ctx.Done():
-			return nil, syscall.EINTR
-		}
+		<-b.done
 		if b.errno != 0 {
 			f.mu.Lock()
 			if f.blocks[first+int64(i)] == b {
@@ -272,6 +266,10 @@ func (f *mountFile) fetchLocked(i int64) {
 	f.blocks[i] = b
 	common.SafeGo(func() {
 		defer close(b.done)
+		if f.ctx.Err() != nil {
+			b.errno = syscall.EBADF // released before it was fetched
+			return
+		}
 		resp, errno := f.mfs.transfer(f.ctx, &common.MountRequest{
 			Op: common.MountOpRead, Handle: f.handle, Offset: i * mountBlockSize, Length: mountBlockSize,
 		})
