@@ -157,40 +157,26 @@ func (c *VPNHelperClient) DelHostRoute(ip string) error {
 }
 
 // ReplaceDefaultRoute mirrors the package-level ReplaceDefaultRoute.
-func (c *VPNHelperClient) ReplaceDefaultRoute(ipVersion int, iface string) (*DefaultRoute, error) {
-	resp, _, err := c.call(VPNOpReplaceDefaultRoute, VPNReplaceDefaultRouteArgs{IPVersion: ipVersion, Iface: iface})
-	if err != nil {
-		return nil, err
-	}
-	var data VPNReplaceDefaultRouteData
-	if err := json.Unmarshal(resp.Data, &data); err != nil {
-		return nil, fmt.Errorf("replace_default_route: malformed response: %w", err)
-	}
-	return data.Prev, nil
+func (c *VPNHelperClient) ReplaceDefaultRoute(ipVersion int, iface string) error {
+	_, _, err := c.call(VPNOpReplaceDefaultRoute, VPNReplaceDefaultRouteArgs{IPVersion: ipVersion, Iface: iface})
+	return err
 }
 
-// RestoreDefaultRoute mirrors the package-level RestoreDefaultRoute.
-func (c *VPNHelperClient) RestoreDefaultRoute(ipVersion int, prev *DefaultRoute) error {
-	_, _, err := c.call(VPNOpRestoreDefaultRoute, VPNRestoreDefaultRouteArgs{IPVersion: ipVersion, Prev: prev})
+// RestoreDefaultRoute undoes the last ReplaceDefaultRoute for ipVersion.
+func (c *VPNHelperClient) RestoreDefaultRoute(ipVersion int) error {
+	_, _, err := c.call(VPNOpRestoreDefaultRoute, VPNRestoreDefaultRouteArgs{IPVersion: ipVersion})
 	return err
 }
 
 // BlockIPv6Default mirrors the package-level BlockIPv6Default.
-func (c *VPNHelperClient) BlockIPv6Default() (hadDefault bool, prev *DefaultRoute, err error) {
-	resp, _, err := c.call(VPNOpBlockIPv6Default, nil)
-	if err != nil {
-		return false, nil, err
-	}
-	var data VPNBlockIPv6DefaultData
-	if err := json.Unmarshal(resp.Data, &data); err != nil {
-		return false, nil, fmt.Errorf("block_ipv6_default: malformed response: %w", err)
-	}
-	return data.HadDefault, data.Prev, nil
+func (c *VPNHelperClient) BlockIPv6Default() error {
+	_, _, err := c.call(VPNOpBlockIPv6Default, nil)
+	return err
 }
 
 // RestoreIPv6Default mirrors the package-level RestoreIPv6Default.
-func (c *VPNHelperClient) RestoreIPv6Default(hadDefault bool, prev *DefaultRoute) error {
-	_, _, err := c.call(VPNOpRestoreIPv6Default, VPNRestoreIPv6DefaultArgs{HadDefault: hadDefault, Prev: prev})
+func (c *VPNHelperClient) RestoreIPv6Default() error {
+	_, _, err := c.call(VPNOpRestoreIPv6Default, nil)
 	return err
 }
 

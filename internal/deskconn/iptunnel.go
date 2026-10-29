@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -18,7 +17,7 @@ import (
 	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
 )
 
-// pinTargets returns the IPv4 addresses that must be pinned to the current
+// pinTargets returns the addresses that must be pinned to the current
 // default route before it's replaced: the WebRTC peer (so the tunnel
 // doesn't route into itself) and the cloud relay (so the machine's own
 // control connection survives the switch).
@@ -32,7 +31,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 
 	if host, _, err := net.SplitHostPort(common.CloudQUICAddress()); err == nil {
 		resolveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		addrs, rerr := net.DefaultResolver.LookupIP(resolveCtx, "ip4", host)
+		addrs, rerr := net.DefaultResolver.LookupIP(resolveCtx, "ip", host)
 		cancel()
 		if rerr != nil {
 			log.Debugf("iptunnel: could not resolve cloud relay %s to pin its route: %v", host, rerr)
@@ -43,22 +42,6 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 	}
 
 	return ips
-}
-
-// usesResolvedStub reports whether this machine's resolv.conf sends lookups
-// to systemd-resolved, i.e. whether per-link settings made with resolvectl
-// actually take effect.
-func usesResolvedStub() bool {
-	data, err := os.ReadFile("/etc/resolv.conf")
-	if err != nil {
-		return false
-	}
-	for _, server := range common.ParseResolvConfNameservers(data) {
-		if server == "127.0.0.53" || server == "127.0.0.54" {
-			return true
-		}
-	}
-	return false
 }
 
 // ConnectVPNClient opens a VPN data channel on session, sets up this
@@ -165,28 +148,34 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	}
 
 	// Pin the addresses that must keep working after the default route is replaced -- see
-	// pinTargets.
-	pinPeers := pinTargets(ctx, session)
-	if rt, rerr := common.GetDefaultRoute(4); rerr == nil {
-		for _, peerIP := range pinPeers {
-			if aerr := helper.AddHostRoute(peerIP, rt.Gateway, rt.Iface); aerr == nil {
-				ip := peerIP
-				teardown = append(teardown, func() { _ = helper.DelHostRoute(ip) })
-			} else {
-				log.Debugf("iptunnel: could not pin route to %s, tunnel may loop or drop: %v", peerIP, aerr)
-			}
+	// pinTargets. Each goes via its own family's default route: the WebRTC peer may well be
+	// reached over IPv6, which is blocked below.
+	for _, peerIP := range pinTargets(ctx, session) {
+		ipVersion := 4
+		if parsed := net.ParseIP(peerIP); parsed != nil && parsed.To4() == nil {
+			ipVersion = 6
+		}
+		rt, rerr := common.GetDefaultRoute(ipVersion)
+		if rerr != nil {
+			log.Debugf("iptunnel: no ipv%d default route to pin %s to: %v", ipVersion, peerIP, rerr)
+			continue
+		}
+		if aerr := helper.AddHostRoute(peerIP, rt.Gateway, rt.Iface); aerr == nil {
+			ip := peerIP
+			teardown = append(teardown, func() { _ = helper.DelHostRoute(ip) })
+		} else {
+			log.Debugf("iptunnel: could not pin route to %s, tunnel may loop or drop: %v", peerIP, aerr)
 		}
 	}
 
-	prevDefault, err := helper.ReplaceDefaultRoute(4, ifaceName)
-	if err != nil {
+	if err := helper.ReplaceDefaultRoute(4, ifaceName); err != nil {
 		return fmt.Errorf("failed to change default route: %w", err)
 	}
-	teardown = append(teardown, func() { _ = helper.RestoreDefaultRoute(4, prevDefault) })
+	teardown = append(teardown, func() { _ = helper.RestoreDefaultRoute(4) })
 
 	// Best-effort: this is only closing an IPv6 leak, not the tunnel itself.
-	if hadV6, prevV6, verr := helper.BlockIPv6Default(); verr == nil {
-		teardown = append(teardown, func() { _ = helper.RestoreIPv6Default(hadV6, prevV6) })
+	if verr := helper.BlockIPv6Default(); verr == nil {
+		teardown = append(teardown, func() { _ = helper.RestoreIPv6Default() })
 	} else {
 		log.Debugf("iptunnel: could not block ipv6 default route, ipv6 traffic may bypass the tunnel: %v", verr)
 	}
@@ -199,10 +188,6 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	}
 	if derr := helper.SetLinkDNS(ifaceName, dnsServers); derr == nil {
 		teardown = append(teardown, func() { _ = helper.RevertLinkDNS(ifaceName) })
-		if !usesResolvedStub() {
-			log.Warnln("iptunnel: /etc/resolv.conf doesn't point at systemd-resolved, " +
-				"so dns lookups may not go through the tunnel")
-		}
 	} else {
 		log.Warnf("iptunnel: could not route dns through the tunnel, lookups will use this "+
 			"network's resolvers: %v", derr)
