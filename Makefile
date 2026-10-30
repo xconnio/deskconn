@@ -13,12 +13,24 @@ export CGO_ENABLED := 0
 # 'deskconn' binary itself there.
 ifeq ($(OS),Windows_NT)
 DESKCONN_BIN := bin/deskconn.exe
+GO := go
 else
 DESKCONN_BIN := bin/deskconn
+# Falls back to where check-go.sh installs Go, for the recipes that run right after it does,
+# before PATH has it. Expanded when a recipe runs, so after check-go.
+GO = $(shell command -v go || echo /usr/local/go/bin/go)
 endif
 
-test:
-	go test -count=1 ./... -v
+.PHONY: check-go
+ifeq ($(OS),Windows_NT)
+check-go:
+else
+check-go:
+	@sh check-go.sh
+endif
+
+test: check-go
+	$(GO) test -count=1 ./... -v
 
 .PHONY: lint format
 
@@ -36,19 +48,18 @@ release-check:
 	goreleaser check
 
 # One binary: the CLI, and with "serve --mode user|standalone|root" the user daemon or the
-# root helper. desk is built as a copy (rather than symlinked) so this works under whichever
-# shell make ends up using, including cmd.exe on Windows.
-build:
-	go build -ldflags "$(LDFLAGS)" -o $(DESKCONN_BIN) github.com/xconnio/deskconn/cmd/deskconn
+# root helper. Outside Windows, desk is a symlink to it, like the installed layout.
+build: check-go
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(DESKCONN_BIN) github.com/xconnio/deskconn/cmd/deskconn
 ifneq ($(OS),Windows_NT)
-	go build -ldflags "$(LDFLAGS)" -o bin/desk github.com/xconnio/deskconn/cmd/deskconn
+	ln -sf deskconn bin/desk
 endif
 
-run-userd:
-	go run github.com/xconnio/deskconn/cmd/deskconn serve --mode user
+run-userd: check-go
+	$(GO) run github.com/xconnio/deskconn/cmd/deskconn serve --mode user
 
-run-desk:
-	go run github.com/xconnio/deskconn/cmd/deskconn
+run-desk: check-go
+	$(GO) run github.com/xconnio/deskconn/cmd/deskconn
 
 .PHONY: install
 ifeq ($(OS),Windows_NT)

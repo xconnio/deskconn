@@ -5,7 +5,7 @@ package userd_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"testing"
 	"time"
 
@@ -22,9 +22,10 @@ func writeFile(t *testing.T, path string, content []byte, modTime time.Time) {
 }
 
 // encodedProjectDir mirrors Claude Code's own directory-name encoding for the project at path
-// (relative to homeDir): the full absolute path, with every "/" replaced by "-".
+// (relative to homeDir): the full absolute path, with every character but letters and digits
+// replaced by "-" (macOS temp dirs contain "_", so "/" alone isn't enough).
 func encodedProjectDir(homeDir, path string) string {
-	return strings.ReplaceAll(filepath.Join(homeDir, path), string(filepath.Separator), "-")
+	return regexp.MustCompile(`[^a-zA-Z0-9]`).ReplaceAllString(filepath.Join(homeDir, path), "-")
 }
 
 func TestDiscoverClaudeSessionsFindsMatchingProjectSortedNewestFirst(t *testing.T) {
