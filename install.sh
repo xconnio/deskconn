@@ -9,6 +9,9 @@ case "$(uname -s)" in
     Linux)
         OS="linux"
         ;;
+    Darwin)
+        OS="darwin"
+        ;;
     *)
         echo "Unsupported OS: $(uname -s). For Windows, use install.ps1 instead."
         exit 1
@@ -70,15 +73,18 @@ mkdir -p "$BASH_COMP_DIR" "$ZSH_COMP_DIR"
 rm -f "$BASH_COMP_DIR/deskconn" "$ZSH_COMP_DIR/_deskconn"
 
 "$BIN_DIR/desk" --completion-script-bash > "$BASH_COMP_DIR/desk"
-# ':' is in COMP_WORDBREAKS by default, which splits "device:path" at the colon.
-sed -i '/_desk_bash_autocomplete() {/a\    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}' "$BASH_COMP_DIR/desk"
 
+# ':' is in COMP_WORDBREAKS by default, which splits "device:path" at the colon.
 # Make path completions behave like "cd": show only the last path segment
 # in the menu, and don't add a trailing space after directories/"device:".
+# (awk rather than "sed -i", whose syntax differs between GNU and macOS sed.)
 AWK_SCRIPT="$(mktemp)"
 cat > "$AWK_SCRIPT" << 'AWKEOF'
 {
     print
+    if ($0 == "_desk_bash_autocomplete() {") {
+        print "    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}"
+    }
     if ($0 == "    COMPREPLY=( $(compgen -W \"${opts}\" -- ${cur}) )") {
         print "    compopt -o filenames 2>/dev/null || true"
         print "    if [ \"${#COMPREPLY[@]}\" -eq 1 ] && [[ \"${COMPREPLY[0]}\" == */ || \"${COMPREPLY[0]}\" == *: ]]; then"
@@ -111,9 +117,14 @@ case ":$PATH:" in
         [ -f "$HOME/.bashrc" ]        && add_to_path "$HOME/.bashrc"
         [ -f "$HOME/.bash_profile" ]  && add_to_path "$HOME/.bash_profile"
         [ -f "$HOME/.zshrc" ]         && add_to_path "$HOME/.zshrc"
-        # Fall back to .profile if none of the above exist
+        # Fall back to .profile if none of the above exist (.zshrc on macOS, where zsh is
+        # the default shell and doesn't read .profile)
         if [ ! -f "$HOME/.bashrc" ] && [ ! -f "$HOME/.bash_profile" ] && [ ! -f "$HOME/.zshrc" ]; then
-            add_to_path "$HOME/.profile"
+            if [ "$OS" = "darwin" ]; then
+                add_to_path "$HOME/.zshrc"
+            else
+                add_to_path "$HOME/.profile"
+            fi
         fi
         echo "Run this to apply immediately:  export PATH=\"\$HOME/.local/bin:\$PATH\""
         ;;
@@ -195,4 +206,73 @@ EOL
     echo "Systemd service deskconn-userd installed and started!"
 }
 
-install_service_linux
+# The user daemon runs as a per-user launchd agent in the GUI session - the macOS
+# equivalent of "systemctl --user" on Linux and the logon scheduled task on Windows.
+install_service_darwin() {
+    local label="com.deskconn.deskconn-userd"
+    local domain="gui/$(id -u)"
+    local plist_file="$HOME/Library/LaunchAgents/$label.plist"
+    local log_dir="$HOME/Library/Logs/deskconn"
+
+    echo "Setting up launchd agent $label..."
+    mkdir -p "$(dirname "$plist_file")" "$log_dir"
+
+    cat > "$plist_file" <<EOL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$EXEC_DIR/deskconn</string>
+        <string>serve</string>
+        <string>--mode</string>
+        <string>user</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TERM</key>
+        <string>xterm-256color</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>$log_dir/deskconn-userd.log</string>
+    <key>StandardErrorPath</key>
+    <string>$log_dir/deskconn-userd.log</string>
+</dict>
+</plist>
+EOL
+
+    # Unload a running agent first so the rewritten plist (and the new binary) are what
+    # gets loaded; bootout returns before the agent is fully gone, and bootstrapping it
+    # again before then fails.
+    if launchctl print "$domain/$label" >/dev/null 2>&1; then
+        echo "Agent $label exists. Restarting..."
+        launchctl bootout "$domain/$label" 2>/dev/null || true
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            launchctl print "$domain/$label" >/dev/null 2>&1 || break
+            sleep 0.5
+        done
+    else
+        echo "Enabling and starting $label..."
+    fi
+    launchctl enable "$domain/$label"
+    launchctl bootstrap "$domain" "$plist_file"
+    echo "launchd agent $label installed and started - deskconn-userd will run in your session at login!"
+}
+
+case "$OS" in
+    linux)
+        install_service_linux
+        ;;
+    darwin)
+        install_service_darwin
+        ;;
+esac

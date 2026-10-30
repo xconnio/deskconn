@@ -5,7 +5,6 @@ package userd_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,12 +12,6 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
-
-// claudeProjectDir mirrors the directory-name encoding DiscoverClaudeSessions expects under
-// ~/.claude/projects/: the full absolute path (homeDir+path), with every "/" replaced by "-".
-func claudeProjectDir(homeDir, path string) string {
-	return strings.ReplaceAll(filepath.Join(homeDir, path), "/", "-")
-}
 
 // seedClaudeSession writes a Claude session file (with a summary line, like Claude Code's own
 // session picker relies on) under homeDir for the project at path.
@@ -31,7 +24,7 @@ func seedClaudeSession(t *testing.T, homeDir, path string) {
 // tests can seed more than one session for the same project.
 func seedClaudeSessionWithID(t *testing.T, homeDir, path, sessionID string) {
 	t.Helper()
-	projectDir := filepath.Join(homeDir, ".claude", "projects", claudeProjectDir(homeDir, path))
+	projectDir := filepath.Join(homeDir, ".claude", "projects", encodedProjectDir(homeDir, path))
 	require.NoError(t, os.MkdirAll(projectDir, 0755))
 	content := `{"type":"summary","summary":"Fix the login bug","leafUuid":"x"}` + "\n" + `{"hello":"world"}`
 	require.NoError(t, os.WriteFile(filepath.Join(projectDir, sessionID+".jsonl"), []byte(content), 0600))
@@ -73,7 +66,7 @@ func TestClaudeSessionPullHandlerReturnsBundle(t *testing.T) {
 	require.Equal(t, 1, count)
 
 	_, err = os.Stat(filepath.Join(restoreHome, ".claude", "projects",
-		claudeProjectDir(restoreHome, path), "abc.jsonl"))
+		encodedProjectDir(restoreHome, path), "abc.jsonl"))
 	require.NoError(t, err)
 }
 
@@ -95,10 +88,10 @@ func TestClaudeSessionPullHandlerFiltersBySessionIDPrefix(t *testing.T) {
 	require.Equal(t, 1, count)
 
 	_, err = os.Stat(filepath.Join(restoreHome, ".claude", "projects",
-		claudeProjectDir(restoreHome, path), "abc123.jsonl"))
+		encodedProjectDir(restoreHome, path), "abc123.jsonl"))
 	require.NoError(t, err)
 	_, err = os.Stat(filepath.Join(restoreHome, ".claude", "projects",
-		claudeProjectDir(restoreHome, path), "def456.jsonl"))
+		encodedProjectDir(restoreHome, path), "def456.jsonl"))
 	require.True(t, os.IsNotExist(err))
 }
 
