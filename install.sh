@@ -139,6 +139,26 @@ Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
     fi
 
     echo "Setting up systemd user services..."
+
+    if [ ! -d /run/systemd/system ]; then
+        echo "systemd is not running here, skipping service setup."
+        echo "Start the daemon manually with:  $EXEC_DIR/deskconn serve --mode user"
+        return
+    fi
+
+    # Shells without a login session (root in a container, "su" without "-l", ...)
+    # have no user bus. Enable lingering so this user's systemd instance runs
+    # (and starts at boot without a login), then point systemctl at it.
+    if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+        echo "No user session found, enabling lingering for $(id -un)..."
+        loginctl enable-linger "$(id -un)"
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+        for _ in $(seq 1 20); do
+            [ -S "$XDG_RUNTIME_DIR/bus" ] && break
+            sleep 0.5
+        done
+    fi
+
     mkdir -p "$systemd_user_dir"
 
     # deskconn-userd runs its connectivity (cloud, LAN, remote-client auth, QUIC/WebRTC streams)
