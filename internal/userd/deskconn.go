@@ -28,6 +28,7 @@ type Deskconn struct {
 	vpn                  *vpnServer
 	capabilities         *capabilities
 	relayConns           relayConns
+	settings             *settings
 	// standaloneUsers are who may connect in standalone mode, or nil in user mode.
 	standaloneUsers *StandaloneUsers
 }
@@ -51,6 +52,7 @@ func NewDeskconn(desktopEnvironment bool, cfgDirectory string) *Deskconn {
 		appRegistry:          NewAppRegistry(),
 		desktop:              desktopEnvironment,
 		vpn:                  newVPNServer(),
+		settings:             newSettings(cfgDirectory),
 	}
 	d.shellSession.agentForward = d.agentForwardSessions
 	d.capabilities = newCapabilities(d.apps(), cfgDirectory)
@@ -70,6 +72,8 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		common.ProcedureManifestUnregister: d.capabilities.handleManifestUnregister,
 		common.ProcedureManifestGet:        d.capabilities.handleManifestGet,
 		common.ProcedureAppsRegister:       d.handleAppsRegister,
+		common.ProcedureSettingsList:       d.settings.handleList,
+		common.ProcedureSettingsSave:       d.settings.handleSave,
 		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult()
 		},

@@ -133,6 +133,13 @@ const (
 	TopicCapabilitiesChanged = "io.xconn.deskconn.capabilities.on_change"
 )
 
+// Each user's settings on the machine, as their frontend keeps them: list returns the
+// caller's as a dict of key to string value, save takes a key and its string value.
+const (
+	ProcedureSettingsList = "io.xconn.deskconn.settings.list"
+	ProcedureSettingsSave = "io.xconn.deskconn.settings.save"
+)
+
 // The users of a standalone machine, whom its admins (the config file's users with role admin)
 // may list, add and remove. Under ProcedureAdminPrefix, with plain arguments so any WAMP client
 // can call them, and only in standalone mode: list takes nothing, add a user's username,
