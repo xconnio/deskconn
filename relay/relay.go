@@ -1,13 +1,12 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/xconn-core/bindings/go"
 )
@@ -18,39 +17,6 @@ type relayIdentity interface {
 	AuthRole() string
 }
 
-type connBroker struct {
-	broker    *xconn.StreamBroker
-	userRoles map[string]bool
-}
-
-func newConnBroker(ctx context.Context, userRoles map[string]bool) (*connBroker, error) {
-	broker, err := xconn.NewStreamBroker(ctx, func(source *xconn.SessionDetails, key string,
-		target *xconn.SessionDetails) bool {
-		return source.Realm() == key && target.Realm() == key &&
-			userRoles[source.AuthRole()] && isMachineSession(target)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &connBroker{broker: broker, userRoles: userRoles}, nil
-}
-
-func (r *connBroker) onDeviceConnect(ctx context.Context, session *xconn.SessionDetails,
-	conn *xconn.QUICConnection) {
-	if !isMachineSession(session) {
-		return
-	}
-	registration, err := r.broker.RegisterQUIC(ctx, session.Realm(), session, conn)
-	if err != nil {
-		log.Errorf("failed to register device: %v", err)
-		return
-	}
-	defer registration.Close()
-	log.Infof("device registered: realm=%s authid=%s", session.Realm(), session.AuthID())
-	<-ctx.Done()
-	log.Infof("device unregistered: realm=%s", session.Realm())
-}
-
 type relayRequest struct {
 	Realm     string `json:"realm"`
 	Op        string `json:"op"`
@@ -58,40 +24,42 @@ type relayRequest struct {
 	Recursive bool   `json:"recursive,omitempty"`
 }
 
-func (r *connBroker) onClientStream(ctx context.Context, cliStream *xconn.QUICStream, session *xconn.SessionDetails) {
-	defer cliStream.Close()
-	stop := context.AfterFunc(ctx, func() { _ = cliStream.Close() })
-	defer stop()
-
-	var req relayRequest
-	if err := readRelayMsg(cliStream, &req); err != nil {
-		return
+func streamRouting(userRoles []xconn.RealmRole) xconn.StreamRouting {
+	roles := make(map[string]bool, len(userRoles))
+	for _, role := range userRoles {
+		roles[role.Name] = true
 	}
-
-	if req.Realm == "" {
-		_ = writeRelayError(cliStream, "missing realm in request")
-		return
+	return xconn.StreamRouting{
+		Destination: func(identity *xconn.SessionDetails) string {
+			if isMachineSession(identity) {
+				return identity.Realm()
+			}
+			return ""
+		},
+		Authorize: func(source *xconn.SessionDetails, key string, target *xconn.SessionDetails) bool {
+			return source.Realm() == key && target.Realm() == key && roles[source.AuthRole()] && isMachineSession(target)
+		},
+		Route: func(_ context.Context, source *xconn.SessionDetails, stream *xconn.QUICStream) (xconn.StreamRoute, error) {
+			var request relayRequest
+			if err := readRelayMsg(stream, &request); err != nil {
+				return xconn.StreamRoute{}, err
+			}
+			if request.Realm == "" {
+				_ = writeRelayError(stream, "missing realm in request")
+				return xconn.StreamRoute{}, errors.New("missing realm")
+			}
+			if request.Realm != source.Realm() || !roles[source.AuthRole()] {
+				_ = writeRelayError(stream, "not authorized for realm")
+				return xconn.StreamRoute{}, errors.New("not authorized for realm")
+			}
+			var prefix, failure bytes.Buffer
+			if err := writeRelayMsg(&prefix, request); err != nil {
+				return xconn.StreamRoute{}, err
+			}
+			_ = writeRelayError(&failure, "device not connected")
+			return xconn.StreamRoute{Destination: request.Realm, Prefix: prefix.Bytes(), Failure: failure.Bytes()}, nil
+		},
 	}
-
-	// Only relay to the realm the stream's connection authenticated to, and only for
-	// user sessions: Config.Authenticate decided they may join that realm.
-	if req.Realm != session.Realm() || !r.userRoles[session.AuthRole()] {
-		_ = writeRelayError(cliStream, "not authorized for realm")
-		return
-	}
-
-	devStream, err := r.broker.Open(ctx, session, req.Realm)
-	if err != nil {
-		_ = writeRelayError(cliStream, fmt.Sprintf("failed to open device stream: %v", err))
-		return
-	}
-	defer devStream.Close()
-
-	if err := writeRelayMsg(devStream, req); err != nil {
-		return
-	}
-
-	_, _ = xconn.ForwardStreams(ctx, cliStream, devStream)
 }
 
 func writeRelayMsg(w io.Writer, v any) error {

@@ -70,8 +70,7 @@ live in the XConn repository.
 
 ## Shared connectivity prototype
 
-The `feat/shared-connectivity` branch additionally uses the new attachment and
-stream-broker APIs. Those are not in the published `v0.1.4` binding/SDK yet.
+The `feat/shared-connectivity` branch additionally uses managed router stream routing. Those are not in the published `v0.1.4` binding/SDK yet.
 Its dependency pins intentionally remain unchanged until that release exists;
 this prototype must not land independently of the new SDK and Go module.
 

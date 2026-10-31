@@ -307,7 +307,7 @@ func cloudCycle(
 		go func() { defer relayWorkers.Done(); run() }()
 		return true
 	}
-	closeRelays := func() error {
+	closeRelays := func() {
 		relayMu.Lock()
 		relaysClosed = true
 		relayMu.Unlock()
@@ -315,7 +315,6 @@ func cloudCycle(
 		_ = provider.Close()
 		_ = connection.Close()
 		relayWorkers.Wait()
-		return nil
 	}
 	if app.StreamSocket != "" {
 		startRelay(func() {
@@ -343,16 +342,7 @@ func cloudCycle(
 			}
 		})
 	}
-	attachment, err := api.NewAttachment(ctx, api.AttachmentConfig{
-		Sessions: []*api.Session{device, cloud}, Bridges: []*api.Bridge{bridge}, Shutdown: closeRelays,
-	})
-	if err != nil {
-		_ = closeRelays()
-		return false, err
-	}
-	defer attachment.Close()
-	attachmentDone := make(chan error, 1)
-	go func() { attachmentDone <- attachment.Wait(context.WithoutCancel(ctx)) }()
+	defer closeRelays()
 	stopInitialization()
 	for {
 		select {
@@ -362,11 +352,10 @@ func cloudCycle(
 			return false, nil
 		case <-overflow:
 			return false, fmt.Errorf("cloud authorization event queue overflow")
-		case err := <-attachmentDone:
-			if err != nil {
-				return false, &cloudDisconnected{err.Error()}
-			}
-			return false, &cloudDisconnected{"upstream attachment disconnected"}
+		case <-device.Done():
+			return false, &cloudDisconnected{"device session disconnected"}
+		case <-cloud.Done():
+			return false, &cloudDisconnected{"cloud session disconnected"}
 		case update := <-events:
 			switch update.kind {
 			case cloudEventDetach:

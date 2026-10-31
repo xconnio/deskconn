@@ -138,6 +138,10 @@ func New(ctx context.Context, config Config) (*Router, error) {
 		return nil, err
 	}
 
+	if err := router.RouteStreams(ctx, streamRouting(config.UserRoles)); err != nil {
+		return nil, err
+	}
+
 	if config.Machines != nil {
 		machines, err := config.Machines(ctx)
 		if err != nil {
@@ -179,21 +183,8 @@ func (r *Router) Session() *xconn.Session {
 // Serve listens on config's addresses until ctx is done.
 func (r *Router) Serve(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
-	userRoles := make(map[string]bool, len(r.config.UserRoles))
-	for _, role := range r.config.UserRoles {
-		userRoles[role.Name] = true
-	}
-	broker, err := newConnBroker(ctx, userRoles)
-	if err != nil {
-		cancel()
-		return err
-	}
 	var workers sync.WaitGroup
-	defer func() {
-		cancel()
-		workers.Wait()
-		_ = broker.broker.Close()
-	}()
+	defer func() { cancel(); workers.Wait() }()
 
 	server := xconn.NewServer(r.router, authenticator{authenticate: r.config.Authenticate}, &xconn.ServerConfig{
 		KeepAliveInterval: 30 * time.Second, KeepAliveTimeout: 10 * time.Second,
@@ -222,35 +213,6 @@ func (r *Router) Serve(ctx context.Context) error {
 		}
 		defer listener.Close()
 		log.Printf("QUIC listening on %s", r.config.QUICAddress)
-
-		workers.Go(func() {
-			for {
-				connection, identity, err := listener.AcceptConnection(ctx)
-				if err != nil {
-					return
-				}
-				workers.Go(func() {
-					defer connection.Close()
-					life, cancel := context.WithCancel(ctx)
-					defer cancel()
-					workers.Go(func() { _ = connection.Wait(life); cancel() })
-					broker.onDeviceConnect(life, identity, connection)
-					if !isMachineSession(identity) {
-						<-life.Done()
-					}
-				})
-			}
-		})
-		workers.Go(func() {
-			for {
-				stream, identity, err := listener.AcceptStream(ctx)
-				if err != nil {
-					return
-				}
-				workers.Go(func() { broker.onClientStream(ctx, stream, identity) })
-			}
-		})
-
 	}
 
 	if r.config.WebTransportAddress != "" {
@@ -275,17 +237,6 @@ func (r *Router) Serve(ctx context.Context) error {
 		}
 		defer listener.Close()
 		log.Printf("WebTransport listening on %s", r.config.WebTransportAddress)
-
-		workers.Go(func() {
-			for {
-				stream, identity, err := listener.AcceptStream(ctx)
-				if err != nil {
-					return
-				}
-				workers.Go(func() { broker.onClientStream(ctx, stream, identity) })
-			}
-		})
-
 	}
 
 	<-ctx.Done()
