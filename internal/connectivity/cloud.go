@@ -293,6 +293,7 @@ func cloudCycle(
 	}); err != nil {
 		return false, err
 	}
+	relayContext, stopRelays := context.WithCancel(ctx)
 	var relayMu sync.Mutex
 	var relayWorkers sync.WaitGroup
 	relaysClosed := false
@@ -306,23 +307,24 @@ func cloudCycle(
 		go func() { defer relayWorkers.Done(); run() }()
 		return true
 	}
-	defer func() {
+	closeRelays := func() error {
 		relayMu.Lock()
 		relaysClosed = true
 		relayMu.Unlock()
-		cancel()
+		stopRelays()
 		_ = provider.Close()
 		_ = connection.Close()
 		relayWorkers.Wait()
-	}()
+		return nil
+	}
 	if app.StreamSocket != "" {
 		startRelay(func() {
 			for {
-				channel, err := provider.AcceptChannel(ctx)
+				channel, err := provider.AcceptChannel(relayContext)
 				if err != nil {
 					return
 				}
-				if !startRelay(func() { relayDataChannel(ctx, channel, app.StreamSocket) }) {
+				if !startRelay(func() { relayDataChannel(relayContext, channel, app.StreamSocket) }) {
 					_ = channel.Close()
 					return
 				}
@@ -330,17 +332,27 @@ func cloudCycle(
 		})
 		startRelay(func() {
 			for {
-				stream, err := connection.AcceptStream(ctx)
+				stream, err := connection.AcceptStream(relayContext)
 				if err != nil {
 					return
 				}
-				if !startRelay(func() { relayStream(ctx, stream, app.StreamSocket) }) {
+				if !startRelay(func() { relayStream(relayContext, stream, app.StreamSocket) }) {
 					_ = stream.Close()
 					return
 				}
 			}
 		})
 	}
+	attachment, err := api.NewAttachment(ctx, api.AttachmentConfig{
+		Sessions: []*api.Session{device, cloud}, Bridges: []*api.Bridge{bridge}, Shutdown: closeRelays,
+	})
+	if err != nil {
+		_ = closeRelays()
+		return false, err
+	}
+	defer attachment.Close()
+	attachmentDone := make(chan error, 1)
+	go func() { attachmentDone <- attachment.Wait(context.WithoutCancel(ctx)) }()
 	stopInitialization()
 	for {
 		select {
@@ -350,10 +362,11 @@ func cloudCycle(
 			return false, nil
 		case <-overflow:
 			return false, fmt.Errorf("cloud authorization event queue overflow")
-		case <-device.Done():
-			return false, &cloudDisconnected{"device session disconnected"}
-		case <-cloud.Done():
-			return false, &cloudDisconnected{"cloud session disconnected"}
+		case err := <-attachmentDone:
+			if err != nil {
+				return false, &cloudDisconnected{err.Error()}
+			}
+			return false, &cloudDisconnected{"upstream attachment disconnected"}
 		case update := <-events:
 			switch update.kind {
 			case cloudEventDetach:

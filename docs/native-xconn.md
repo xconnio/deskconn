@@ -68,6 +68,28 @@ transfers, standalone QUIC/WebTransport authentication, persistent stream proxie
 and Rust-backed WebRTC channels. Independent original-Go interoperability tests
 live in the XConn repository.
 
+## Shared connectivity prototype
+
+The `feat/shared-connectivity` branch additionally uses the new attachment and
+stream-broker APIs. Those are not in the published `v0.1.4` binding/SDK yet.
+Its dependency pins intentionally remain unchanged until that release exists;
+this prototype must not land independently of the new SDK and Go module.
+
+For local development, build and stage the SDK from XConn's
+`feat/service-attachment` branch, then use an external Go workspace containing
+this module and XConn's `bindings/go` module. For example, from DeskConn:
+
+```sh
+workspace=$(mktemp -d)
+export GOWORK="$workspace/go.work"
+go work init "$PWD" ../xconn-core/bindings/go
+make test XCONN_SDK_DIR=/path/to/staged/sdk
+```
+
+The workspace lives outside both repositories; no source `replace` directive or
+local SDK path is committed. Once the new SDK and Go binding publish, update the
+dependency and installer pins and remove the workspace override.
+
 ## Static binary size measurements
 
 Measured on Ubuntu 26.04, x86-64, with Go 1.26, retaining every transport.

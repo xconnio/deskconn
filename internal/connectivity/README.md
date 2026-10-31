@@ -36,7 +36,10 @@ roots may alternatively be supplied through `RootCertificates`. `MachineID`
 overrides host discovery, `RetryInterval` changes the initial reconnect delay,
 and `OnError` receives reconnect failures. Otherwise failures use Go's logger.
 Initialization has a 15-second bound; reconnect delay grows to 30 seconds and
-resets after an established session ends.
+resets after an established session ends. After initialization, a Rust-backed
+`Attachment` owns the device/control sessions and their upstream bridge together.
+Its shutdown callback stops direct providers, the shared connection and relay
+workers. Initialization rollback and authorization synchronization stay here.
 
 The direct WebRTC provider uses the synchronized principal store. Added keys
 can establish new direct sessions; removed keys cannot. Existing authenticated
