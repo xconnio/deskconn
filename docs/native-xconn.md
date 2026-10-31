@@ -7,8 +7,8 @@ File search streams encrypted progressive RPC results through the shared Rust br
 File-cat and file search use encrypted progressive RPC results.
 File uploads and downloads use the existing encrypted transfer channels.
 
-The app uses the published Core Go module. A sibling Core checkout and Rust
-are not required.
+The app uses the published Core Go module and Native SDK `v0.1.4`. A sibling
+Core checkout and Rust are not required.
 
 ## Build and test on Linux or macOS
 
@@ -58,8 +58,9 @@ not promise a hermetic executable on every Linux distribution.
 The existing CI and GoReleaser setup targets the former standalone Go build.
 Before publishing this migration, make those jobs install the released static SDK.
 The Go module dependency now resolves from its published release.
-The current native SDK supports Linux and macOS; the old Windows release target
-needs native SDK/binding support before it can be restored. Do not use the
+The native SDK supports Linux, macOS ARM64 and Windows amd64. Windows builds
+require MinGW-w64 GCC and manual SDK extraction; the shell installer supports
+Linux and macOS. The release jobs still need per-platform SDK setup. Do not use the
 existing release configuration to distribute this development integration.
 
 The migration is exercised by the DeskConn race suite, including encrypted file

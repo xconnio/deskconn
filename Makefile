@@ -15,7 +15,7 @@ native-check:
 native-sdk:
 	@set -e; script=$$(mktemp); \
 	trap 'rm -f "$$script"' EXIT; \
-	curl -fLsS https://raw.githubusercontent.com/xconnio/xconn-core/main/scripts/install-xconn-sdk.sh -o "$$script"; \
+	curl -fLsS https://raw.githubusercontent.com/xconnio/xconn/v0.1.4/scripts/install-xconn-sdk.sh -o "$$script"; \
 	sh "$$script"
 
 # 'desk' is reserved by Windows for Display Settings (desk.cpl) and can't be safely
