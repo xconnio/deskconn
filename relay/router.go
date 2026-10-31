@@ -111,7 +111,6 @@ type Router struct {
 	config  Config
 	router  *xconn.Router
 	session *xconn.Session
-	relay   *connBroker
 }
 
 // New sets up the realms, including those of config.Machines, ready to Serve.
@@ -131,11 +130,7 @@ func New(ctx context.Context, config Config) (*Router, error) {
 		return nil, err
 	}
 
-	userRoles := make(map[string]bool, len(config.UserRoles))
-	for _, role := range config.UserRoles {
-		userRoles[role.Name] = true
-	}
-	r := &Router{config: config, router: router, relay: newConnBroker(userRoles)}
+	r := &Router{config: config, router: router}
 
 	if config.Machines != nil {
 		machines, err := config.Machines(ctx)
@@ -168,8 +163,21 @@ func (r *Router) Session() *xconn.Session {
 // Serve listens on config's addresses until ctx is done.
 func (r *Router) Serve(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
+	userRoles := make(map[string]bool, len(r.config.UserRoles))
+	for _, role := range r.config.UserRoles {
+		userRoles[role.Name] = true
+	}
+	broker, err := newConnBroker(ctx, userRoles)
+	if err != nil {
+		cancel()
+		return err
+	}
 	var workers sync.WaitGroup
-	defer func() { cancel(); workers.Wait() }()
+	defer func() {
+		cancel()
+		workers.Wait()
+		_ = broker.broker.Close()
+	}()
 
 	server := xconn.NewServer(r.router, authenticator{authenticate: r.config.Authenticate}, &xconn.ServerConfig{
 		KeepAliveInterval: 30 * time.Second, KeepAliveTimeout: 10 * time.Second,
@@ -210,7 +218,7 @@ func (r *Router) Serve(ctx context.Context) error {
 					life, cancel := context.WithCancel(ctx)
 					defer cancel()
 					workers.Go(func() { _ = connection.Wait(life); cancel() })
-					r.relay.onDeviceConnect(life, identity, connection)
+					broker.onDeviceConnect(life, identity, connection)
 					if !isMachineSession(identity) {
 						<-life.Done()
 					}
@@ -223,7 +231,7 @@ func (r *Router) Serve(ctx context.Context) error {
 				if err != nil {
 					return
 				}
-				workers.Go(func() { r.relay.onClientStream(ctx, stream, identity) })
+				workers.Go(func() { broker.onClientStream(ctx, stream, identity) })
 			}
 		})
 
@@ -256,7 +264,7 @@ func (r *Router) Serve(ctx context.Context) error {
 				if err != nil {
 					return
 				}
-				workers.Go(func() { r.relay.onClientStream(ctx, stream, identity) })
+				workers.Go(func() { broker.onClientStream(ctx, stream, identity) })
 			}
 		})
 
