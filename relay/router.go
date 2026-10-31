@@ -123,14 +123,20 @@ func New(ctx context.Context, config Config) (*Router, error) {
 	if err != nil {
 		return nil, err
 	}
+	r := &Router{config: config, router: router}
+	ready := false
+	defer func() {
+		if !ready {
+			r.Close()
+		}
+	}()
+
 	if err := router.AddRealm(CloudRealm, &xconn.RealmConfig{AutoDiscloseCaller: true, Roles: config.Roles}); err != nil {
 		return nil, err
 	}
 	if err := router.EnableMetaAPI(CloudRealm); err != nil {
 		return nil, err
 	}
-
-	r := &Router{config: config, router: router}
 
 	if config.Machines != nil {
 		machines, err := config.Machines(ctx)
@@ -151,7 +157,17 @@ func New(ctx context.Context, config Config) (*Router, error) {
 	if err := r.registerProcedures(); err != nil {
 		return nil, err
 	}
+	ready = true
 	return r, nil
+}
+
+// Close releases the router and its internal session. Cancel Serve's context
+// and wait for it to return before closing the router.
+func (r *Router) Close() {
+	if r.session != nil {
+		_ = r.session.Close()
+	}
+	r.router.Close()
 }
 
 // Session is the router's own session on the cloud realm, e.g. for Config.Authenticate to
@@ -248,7 +264,9 @@ func (r *Router) Serve(ctx context.Context) error {
 			if r.config.CertHashAddress != "" {
 				// Browsers trust a self-signed certificate through serverCertificateHashes,
 				// without installing a CA.
-				go serveCertHash(r.config.CertHashAddress, base64.StdEncoding.EncodeToString(certHash))
+				workers.Go(func() {
+					serveCertHash(ctx, r.config.CertHashAddress, base64.StdEncoding.EncodeToString(certHash))
+				})
 			}
 		}
 		listener, err := server.ListenWebTransport(ctx, r.config.WebTransportAddress, "/wamp", tlsConfig.Certificates[0])
@@ -380,7 +398,7 @@ func isMachineSession(session relayIdentity) bool {
 	return strings.HasPrefix(session.AuthRole(), machineAuthRolePrefix)
 }
 
-func serveCertHash(address, hashBase64 string) {
+func serveCertHash(ctx context.Context, address, hashBase64 string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/wt-cert-hash", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -392,7 +410,9 @@ func serveCertHash(address, hashBase64 string) {
 	})
 	log.Infof("WebTransport cert hash available at http://%s/wt-cert-hash", address)
 	server := &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	if err := server.ListenAndServe(); err != nil {
+	stop := context.AfterFunc(ctx, func() { _ = server.Close() })
+	defer stop()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Errorf("cert hash server: %v", err)
 	}
 }

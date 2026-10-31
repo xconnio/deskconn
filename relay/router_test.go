@@ -2,8 +2,11 @@ package relay_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
@@ -150,4 +153,55 @@ func TestCustomCallbacks(t *testing.T) {
 func TestAuthenticateRequired(t *testing.T) {
 	_, err := relay.New(context.Background(), relay.Config{})
 	require.ErrorContains(t, err, "Authenticate is required")
+}
+
+func TestCertificateEndpointClosesWithServingContext(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	httpAddress := httpListener.Addr().String()
+	require.NoError(t, httpListener.Close())
+	udpListener, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	udpAddress := udpListener.LocalAddr().String()
+	require.NoError(t, udpListener.Close())
+	router, err := relay.New(ctx, relay.Config{
+		Authenticate:        func(auth.Request) (auth.Response, error) { return auth.NewResponse("test", "trusted", 0) },
+		WebTransportAddress: udpAddress, CertHashAddress: httpAddress,
+	})
+	require.NoError(t, err)
+	defer router.Close()
+	serving, stop := context.WithCancel(ctx)
+	defer stop()
+	finished := make(chan error, 1)
+	go func() { finished <- router.Serve(serving) }()
+	client := &http.Client{Timeout: time.Second}
+	require.Eventually(t, func() bool {
+		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+httpAddress+"/wt-cert-hash", nil)
+		if requestErr != nil {
+			return false
+		}
+		response, requestErr := client.Do(request)
+		if requestErr != nil {
+			return false
+		}
+		defer response.Body.Close()
+		var value struct{ Hash string }
+		if json.NewDecoder(response.Body).Decode(&value) != nil {
+			return false
+		}
+		hash, decodeErr := base64.StdEncoding.DecodeString(value.Hash)
+		return decodeErr == nil && len(hash) == 32
+	}, 3*time.Second, 10*time.Millisecond)
+	stop()
+	select {
+	case err = <-finished:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("Hub did not join its certificate endpoint")
+	}
+	listener, err := net.Listen("tcp", httpAddress)
+	require.NoError(t, err, "certificate listener survived shutdown")
+	require.NoError(t, listener.Close())
 }
