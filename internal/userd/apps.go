@@ -78,7 +78,9 @@ func buildApps(procs []ProcessInfo, registry map[string]desktopEntry) []AppInfo 
 		execBase := filepath.Base(p.Exe)
 
 		var b *AppInfo
-		if entry, ok := registry[strings.ToLower(execBase)]; execBase != "" && execBase != "." && ok {
+		if entry, ok := bundleEntry(p.Exe, registry); ok {
+			b = getBucket(entry.ID, entry.Name, entry.IconName)
+		} else if entry, ok := registry[strings.ToLower(execBase)]; execBase != "" && execBase != "." && ok {
 			b = getBucket(entry.ID, entry.Name, entry.IconName)
 		} else if entry, ok := registry[strings.ToLower(p.Name)]; ok {
 			b = getBucket(entry.ID, entry.Name, entry.IconName)
@@ -104,4 +106,18 @@ func buildApps(procs []ProcessInfo, registry map[string]desktopEntry) []AppInfo 
 	})
 
 	return apps
+}
+
+func bundleEntry(exe string, registry map[string]desktopEntry) (desktopEntry, bool) {
+	const marker = ".app/"
+	for end := 0; ; {
+		i := strings.Index(exe[end:], marker)
+		if i < 0 {
+			return desktopEntry{}, false
+		}
+		end += i + len(marker)
+		if entry, ok := registry[exe[:end]]; ok {
+			return entry, true
+		}
+	}
 }

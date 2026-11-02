@@ -31,28 +31,28 @@ func scanDesktopFiles() map[string]desktopEntry {
 			continue
 		}
 		for _, e := range entries {
-			if !e.IsDir() || !strings.HasSuffix(e.Name(), ".app") {
+			if !strings.HasSuffix(e.Name(), ".app") {
+				continue
+			}
+			bundle := filepath.Join(dir, e.Name())
+			if info, err := os.Stat(bundle); err != nil || !info.IsDir() {
 				continue
 			}
 			name := strings.TrimSuffix(e.Name(), ".app")
-			// A bundle's executables live in Contents/MacOS; the main one is
-			// (CFBundleExecutable) almost always the only one there.
-			binaries, err := os.ReadDir(filepath.Join(dir, e.Name(), "Contents", "MacOS"))
-			if err != nil {
-				continue
-			}
-			for _, b := range binaries {
-				if b.IsDir() {
-					continue
-				}
-				key := strings.ToLower(b.Name())
-				if _, exists := result[key]; !exists {
-					// IconName stays empty: .icns icons aren't something ResolveIconName serves.
-					result[key] = desktopEntry{ID: name, Name: name, ExecBase: b.Name()}
-				}
+			entry := desktopEntry{ID: name, Name: name}
+			addBundle(result, bundle, entry)
+			if resolved, err := filepath.EvalSymlinks(bundle); err == nil && resolved != bundle {
+				addBundle(result, resolved, entry)
 			}
 		}
 	}
 
 	return result
+}
+
+func addBundle(result map[string]desktopEntry, bundle string, entry desktopEntry) {
+	key := bundle + "/"
+	if _, exists := result[key]; !exists {
+		result[key] = entry
+	}
 }
