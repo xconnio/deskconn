@@ -5,6 +5,7 @@ package userd
 import (
 	"errors"
 	"os"
+	"time"
 
 	pty "github.com/aymanbagabas/go-pty"
 )
@@ -40,6 +41,9 @@ func foregroundPGIDDiffers(_ pty.Pty, _ int) (bool, error) {
 // their output on Windows as a result; there's no ConPTY API to prevent it.
 func disablePTYEcho(pty.Pty) {}
 
+// ptyDrainDelay is how long a ConPTY stays open after its process exits.
+const ptyDrainDelay = 500 * time.Millisecond
+
 // closePtyOnProcessExit closes ptmx once the child has exited. Unlike a Unix
 // pty, ConPTY does not signal EOF on its output pipe when the attached
 // process exits on its own -- a ConPTY, like a real console host, is
@@ -51,6 +55,10 @@ func disablePTYEcho(pty.Pty) {}
 // ps.closePty rather than ptmx.Close() directly since startOutputReader's
 // own cleanup closes the same ptmx too -- double-closing a ConPTY handle is
 // undefined behavior, unlike on *nix.
+//
+// The process exiting doesn't mean its last output has reached the pipe, as ConPTY renders it
+// asynchronously, and closing drops whatever hasn't, so give the reader ptyDrainDelay to get it.
 func closePtyOnProcessExit(ps *ptySession, ptmx pty.Pty) {
+	time.Sleep(ptyDrainDelay)
 	ps.closePty(ptmx)
 }

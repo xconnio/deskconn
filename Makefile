@@ -37,11 +37,14 @@ release-check:
 
 # One binary: the CLI, and with "serve --mode user|standalone|root" the user daemon or the
 # root helper. desk is built as a copy (rather than symlinked) so this works under whichever
-# shell make ends up using, including cmd.exe on Windows.
+# shell make ends up using, including cmd.exe on Windows. On Windows, it also fetches the Wintun
+# driver "deskconn vpn connect" needs next to the binary, as installs have it.
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(DESKCONN_BIN) github.com/xconnio/deskconn/cmd/deskconn
 ifneq ($(OS),Windows_NT)
 	go build -ldflags "$(LDFLAGS)" -o bin/desk github.com/xconnio/deskconn/cmd/deskconn
+else
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-wintun.ps1 -Dest bin
 endif
 
 run-userd:

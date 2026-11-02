@@ -1,12 +1,17 @@
 package main
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestMigrateExecStart(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("migrates systemd units, which Windows doesn't have")
+	}
+
 	const execDir = "/home/u/.local/lib/exec"
 
 	for _, old := range []string{"deskconn-userd", "deskconnd"} {

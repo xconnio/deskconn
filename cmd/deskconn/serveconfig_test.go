@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -26,16 +27,23 @@ const (
 
 	testKeyA = "31f195e2b9f3b05d48fc4e4f7dde83bd97582f42d53e6174f66140a039594830"
 	testKeyB = "65160c38f1c3fa1d0e9cb1c0d8a7bc2f3b2a4fd4bd1bd2f6e2b9cfb1c3a4d5e6"
+
+	// goosWindows is runtime.GOOS's value on Windows, shared by tests that skip or branch on it.
+	goosWindows = "windows"
 )
 
 func TestLoadServeConfig(t *testing.T) {
+	tlsKey := "/etc/deskconn/key.pem"
+	if runtime.GOOS == goosWindows {
+		tlsKey = `C:\deskconn\key.pem`
+	}
 	path := writeServeConfig(t, `
 mode: standalone
 listen:
   quic: 127.0.0.1:28080
   webtransport: 127.0.0.1:28081
   tls-cert: cert.pem
-  tls-key: /etc/deskconn/key.pem
+  tls-key: `+tlsKey+`
 users:
   - username: alice
     password: s3cret
@@ -53,7 +61,7 @@ users:
 	require.Equal(t, serveModeStandalone, config.Mode)
 	require.Equal(t, "127.0.0.1:28080", config.Listen.QUIC)
 	require.Equal(t, filepath.Join(filepath.Dir(path), "cert.pem"), config.Listen.TLSCert, "relative to the file")
-	require.Equal(t, "/etc/deskconn/key.pem", config.Listen.TLSKey)
+	require.Equal(t, tlsKey, config.Listen.TLSKey)
 	require.Equal(t, []serveConfigUser{
 		{Username: alice, Password: testPassword, Role: common.RoleAdmin},
 		{Username: bob, AuthorizedKeys: []string{testKeyA, testKeyB}, Role: common.RoleMember},
@@ -174,7 +182,9 @@ func TestWriteSampleServeConfig(t *testing.T) {
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != goosWindows { // which has no POSIX permission bits
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 
 	config, err := loadServeConfig(path)
 	require.NoError(t, err, "the sample is a valid config")
@@ -200,7 +210,9 @@ func TestWriteSampleServeConfig(t *testing.T) {
 	require.NoError(t, writeSampleServeConfig(path, true))
 	info, err = os.Stat(path)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "and --force tightens its mode")
+	if runtime.GOOS != goosWindows {
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "and --force tightens its mode")
+	}
 }
 
 func TestParseUserFlag(t *testing.T) {
