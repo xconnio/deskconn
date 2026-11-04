@@ -46,7 +46,8 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 
 // ConnectVPNClient opens a VPN data channel on session, sets up this
 // machine's local TUN device, does the open/ready handshake with the
-// remote end, then routes this machine's traffic through the tunnel and
+// remote end, then routes this machine's traffic through the tunnel (only
+// routes, as normalized by common.ParseVPNRoutes, if any are given) and
 // pumps packets until ctx is done or the channel drops -- undoing every
 // change it made before returning. It doesn't own session itself (never
 // closes it), since session may be shared with other features.
@@ -60,7 +61,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 // something like "tunnel up" should wait for this rather than assume
 // success as soon as the call is made.
 func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, helper *common.VPNHelperClient,
-	onReady func()) error {
+	routes []string, onReady func()) error {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNClientTUNName)
 	if err != nil {
 		return fmt.Errorf("failed to create tun device via deskconn-rootd: %w", err)
@@ -168,29 +169,18 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 		}
 	}
 
-	if err := helper.ReplaceDefaultRoute(4, ifaceName); err != nil {
-		return fmt.Errorf("failed to change default route: %w", err)
-	}
-	teardown = append(teardown, func() { _ = helper.RestoreDefaultRoute(4) })
-
-	// Best-effort: this is only closing an IPv6 leak, not the tunnel itself.
-	if verr := helper.BlockIPv6Default(); verr == nil {
-		teardown = append(teardown, func() { _ = helper.RestoreIPv6Default() })
-	} else {
-		log.Debugf("iptunnel: could not block ipv6 default route, ipv6 traffic may bypass the tunnel: %v", verr)
-	}
-
-	// Lookups would otherwise still go to this network's own resolvers -- leaking every name
-	// looked up, and getting answers picked for this location instead of the exit node's.
-	dnsServers := common.TunnelDNSServers(ready.DNS)
-	if len(dnsServers) == 0 {
-		dnsServers = common.VPNFallbackDNS()
-	}
-	if derr := helper.SetLinkDNS(ifaceName, dnsServers); derr == nil {
-		teardown = append(teardown, func() { _ = helper.RevertLinkDNS(ifaceName) })
-	} else {
-		log.Warnf("iptunnel: could not route dns through the tunnel, lookups will use this "+
-			"network's resolvers: %v", derr)
+	if len(routes) > 0 {
+		// Only these destinations use the tunnel: IPv6 and DNS stay as they are, since blocking
+		// or taking them over would affect everything else on this machine too.
+		for _, route := range routes {
+			if err := helper.AddTunnelRoute(route, ifaceName); err != nil {
+				return fmt.Errorf("failed to route %s through the tunnel: %w", route, err)
+			}
+			added := route
+			teardown = append(teardown, func() { _ = helper.DelTunnelRoute(added, ifaceName) })
+		}
+	} else if err := routeAllTraffic(helper, ifaceName, ready.DNS, &teardown); err != nil {
+		return err
 	}
 
 	common.SafeGo(func() { common.PumpTUNToChannel(tun, channel, closedCh) })
@@ -205,5 +195,35 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	}
 	signalClosed()
 
+	return nil
+}
+
+// routeAllTraffic sends all of this machine's IPv4 traffic and DNS lookups through the tunnel
+// on ifaceName and blocks IPv6, appending the undo of each step to teardown.
+func routeAllTraffic(helper *common.VPNHelperClient, ifaceName string, exitDNS []string, teardown *[]func()) error {
+	if err := helper.ReplaceDefaultRoute(4, ifaceName); err != nil {
+		return fmt.Errorf("failed to change default route: %w", err)
+	}
+	*teardown = append(*teardown, func() { _ = helper.RestoreDefaultRoute(4) })
+
+	// Best-effort: this is only closing an IPv6 leak, not the tunnel itself.
+	if verr := helper.BlockIPv6Default(); verr == nil {
+		*teardown = append(*teardown, func() { _ = helper.RestoreIPv6Default() })
+	} else {
+		log.Debugf("iptunnel: could not block ipv6 default route, ipv6 traffic may bypass the tunnel: %v", verr)
+	}
+
+	// Lookups would otherwise still go to this network's own resolvers -- leaking every name
+	// looked up, and getting answers picked for this location instead of the exit node's.
+	dnsServers := common.TunnelDNSServers(exitDNS)
+	if len(dnsServers) == 0 {
+		dnsServers = common.VPNFallbackDNS()
+	}
+	if derr := helper.SetLinkDNS(ifaceName, dnsServers); derr == nil {
+		*teardown = append(*teardown, func() { _ = helper.RevertLinkDNS(ifaceName) })
+	} else {
+		log.Warnf("iptunnel: could not route dns through the tunnel, lookups will use this "+
+			"network's resolvers: %v", derr)
+	}
 	return nil
 }

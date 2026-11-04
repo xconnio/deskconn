@@ -156,6 +156,18 @@ func (c *VPNHelperClient) DelHostRoute(ip string) error {
 	return err
 }
 
+// AddTunnelRoute mirrors the package-level AddTunnelRoute.
+func (c *VPNHelperClient) AddTunnelRoute(cidr, iface string) error {
+	_, _, err := c.call(VPNOpAddTunnelRoute, VPNTunnelRouteArgs{CIDR: cidr, Iface: iface})
+	return err
+}
+
+// DelTunnelRoute mirrors the package-level DelTunnelRoute.
+func (c *VPNHelperClient) DelTunnelRoute(cidr, iface string) error {
+	_, _, err := c.call(VPNOpDelTunnelRoute, VPNTunnelRouteArgs{CIDR: cidr, Iface: iface})
+	return err
+}
+
 // ReplaceDefaultRoute mirrors the package-level ReplaceDefaultRoute.
 func (c *VPNHelperClient) ReplaceDefaultRoute(ipVersion int, iface string) error {
 	_, _, err := c.call(VPNOpReplaceDefaultRoute, VPNReplaceDefaultRouteArgs{IPVersion: ipVersion, Iface: iface})

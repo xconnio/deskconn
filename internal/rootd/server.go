@@ -63,6 +63,10 @@ func (s *Server) handle(conn *net.UnixConn, req common.VPNHelperRequest) {
 		s.handleAddHostRoute(conn, req)
 	case common.VPNOpDelHostRoute:
 		s.handleDelHostRoute(conn, req)
+	case common.VPNOpAddTunnelRoute:
+		s.handleAddTunnelRoute(conn, req)
+	case common.VPNOpDelTunnelRoute:
+		s.handleDelTunnelRoute(conn, req)
 	case common.VPNOpReplaceDefaultRoute:
 		s.handleReplaceDefaultRoute(conn, req)
 	case common.VPNOpRestoreDefaultRoute:
@@ -172,6 +176,51 @@ func (s *Server) handleDelHostRoute(conn *net.UnixConn, req common.VPNHelperRequ
 		return
 	}
 	s.undo.pop("host_route:" + args.IP)
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
+}
+
+func (s *Server) handleAddTunnelRoute(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNTunnelRouteArgs
+	if err := json.Unmarshal(req.Args, &args); err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+	cidr, err := common.ParseVPNRoute(args.CIDR) // so the undo entry's key matches whatever the form
+	if err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+
+	if err := AddTunnelRoute(cidr, args.Iface); err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+	iface := args.Iface
+	s.undo.push("tunnel_route:"+cidr+"|"+iface, func() {
+		if err := DelTunnelRoute(cidr, iface); err != nil {
+			log.Debugf("deskconn-rootd: failed to remove leftover tunnel route to %s: %v", cidr, err)
+		}
+	})
+	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
+}
+
+func (s *Server) handleDelTunnelRoute(conn *net.UnixConn, req common.VPNHelperRequest) {
+	var args common.VPNTunnelRouteArgs
+	if err := json.Unmarshal(req.Args, &args); err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+	cidr, err := common.ParseVPNRoute(args.CIDR) // so the undo entry's key matches whatever the form
+	if err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+
+	if err := DelTunnelRoute(cidr, args.Iface); err != nil {
+		writeResponse(conn, errResponse(err), -1)
+		return
+	}
+	s.undo.pop("tunnel_route:" + cidr + "|" + args.Iface)
 	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
 }
 

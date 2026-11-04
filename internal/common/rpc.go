@@ -50,6 +50,11 @@ type VPNDelHostRouteArgs struct {
 	IP string `json:"ip"`
 }
 
+type VPNTunnelRouteArgs struct {
+	CIDR  string `json:"cidr"`
+	Iface string `json:"iface"`
+}
+
 type VPNReplaceDefaultRouteArgs struct {
 	IPVersion int    `json:"ip_version"`
 	Iface     string `json:"iface"`

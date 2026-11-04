@@ -1,7 +1,9 @@
 package common
 
 import (
+	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 
@@ -43,6 +45,47 @@ func TunnelDNSServers(servers []string) []string {
 		usable = append(usable, ip.String())
 	}
 	return usable
+}
+
+// ParseVPNRoute normalizes route, an IPv4 address or CIDR range, to the network form "ip route"
+// accepts: 203.0.113.10 becomes 203.0.113.10/32 and 10.1.2.3/16 becomes 10.1.0.0/16. IPv6 is
+// rejected since the tunnel only carries IPv4, and a /0 since it would replace the machine's
+// default route, which a full tunnel deliberately leaves alone (see defaultHalves in rootd).
+func ParseVPNRoute(route string) (string, error) {
+	route = strings.TrimSpace(route)
+	prefix, err := netip.ParsePrefix(route)
+	if err != nil {
+		addr, aerr := netip.ParseAddr(route)
+		if aerr != nil {
+			return "", fmt.Errorf("invalid route %q: want an IPv4 address or CIDR range", route)
+		}
+		prefix = netip.PrefixFrom(addr, addr.BitLen())
+	}
+	if !prefix.Addr().Is4() {
+		return "", fmt.Errorf("invalid route %q: the vpn only carries IPv4", route)
+	}
+	if prefix.Bits() == 0 {
+		return "", fmt.Errorf("invalid route %q: leave out --route to tunnel all traffic", route)
+	}
+	return prefix.Masked().String(), nil
+}
+
+// ParseVPNRoutes runs ParseVPNRoute over routes, dropping duplicates.
+func ParseVPNRoutes(routes []string) ([]string, error) {
+	var parsed []string
+	seen := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		normalized, err := ParseVPNRoute(route)
+		if err != nil {
+			return nil, err
+		}
+		if _, dup := seen[normalized]; dup {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		parsed = append(parsed, normalized)
+	}
+	return parsed, nil
 }
 
 // ParseResolvConfNameservers returns the addresses of the "nameserver"

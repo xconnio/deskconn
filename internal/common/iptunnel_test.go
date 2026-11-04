@@ -8,7 +8,12 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 )
 
-const hetznerDNS = "185.12.64.1"
+const (
+	hetznerDNS = "185.12.64.1"
+	routeIP    = "203.0.113.10"
+	routeHost  = routeIP + "/32"
+	routeNet   = "10.1.0.0/16"
+)
 
 func TestParseResolvConfNameservers(t *testing.T) {
 	data := []byte("# comment\nnameserver " + hetznerDNS + "\nsearch example.com\n" +
@@ -29,4 +34,38 @@ func TestTunnelDNSServers(t *testing.T) {
 	}
 	require.Equal(t, []string{hetznerDNS, "8.8.8.8"}, common.TunnelDNSServers(servers))
 	require.Empty(t, common.TunnelDNSServers(nil))
+}
+
+func TestParseVPNRoute(t *testing.T) {
+	valid := map[string]string{
+		routeIP:             routeHost,
+		" " + routeIP + " ": routeHost,
+		routeHost:           routeHost,
+		"10.1.2.3/16":       routeNet,
+		"128.0.0.0/1":       "128.0.0.0/1",
+	}
+	for input, want := range valid {
+		got, err := common.ParseVPNRoute(input)
+		require.NoError(t, err, input)
+		require.Equal(t, want, got, input)
+	}
+
+	for _, input := range []string{"", "example.com", "default", "1.2.3.4/33", "0.0.0.0/0", "9.9.9.9/0",
+		"2001:db8::1", "2001:db8::/32", "::ffff:1.2.3.4"} {
+		_, err := common.ParseVPNRoute(input)
+		require.Error(t, err, input)
+	}
+}
+
+func TestParseVPNRoutes(t *testing.T) {
+	routes, err := common.ParseVPNRoutes([]string{routeIP, "10.1.2.3/16", routeHost, routeNet})
+	require.NoError(t, err)
+	require.Equal(t, []string{routeHost, routeNet}, routes)
+
+	routes, err = common.ParseVPNRoutes(nil)
+	require.NoError(t, err)
+	require.Empty(t, routes)
+
+	_, err = common.ParseVPNRoutes([]string{routeIP, "nope"})
+	require.Error(t, err)
 }

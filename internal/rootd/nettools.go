@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/xconnio/deskconn/internal/common"
 )
 
 // runNetCmd runs a privileged network configuration command (ip/iptables/nft)
@@ -72,6 +74,35 @@ func DelHostRoute(ip string) error {
 		return err
 	}
 	return runNetCmd("ip", flag, "route", "del", ip+bits)
+}
+
+// AddTunnelRoute sends only cidr over iface (a TUN device, so no gateway is needed), for a
+// tunnel that doesn't take all traffic. It uses "add", not "replace", so a route the tunnel
+// depends on can't be overwritten: replacing the /32 pinned by AddHostRoute for the exit node
+// would route the tunnel into itself.
+func AddTunnelRoute(cidr, iface string) error {
+	route, err := common.ParseVPNRoute(cidr)
+	if err != nil {
+		return err
+	}
+	err = runNetCmd("ip", "-4", "route", "add", route, "dev", iface)
+	if err != nil && strings.Contains(err.Error(), "File exists") {
+		return fmt.Errorf("route %s already exists on this machine", route)
+	}
+	return err
+}
+
+// DelTunnelRoute undoes AddTunnelRoute. A route already gone with iface itself is not an error.
+func DelTunnelRoute(cidr, iface string) error {
+	route, err := common.ParseVPNRoute(cidr)
+	if err != nil {
+		return err
+	}
+	err = runNetCmd("ip", "-4", "route", "del", route, "dev", iface)
+	if err != nil && !isNoSuchRoute(err) {
+		return err
+	}
+	return nil
 }
 
 // defaultHalves splits each family's whole address space in two. Routing both halves over a

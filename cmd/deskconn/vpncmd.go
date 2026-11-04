@@ -5,6 +5,8 @@ import (
 	"runtime"
 
 	"github.com/alecthomas/kingpin/v2"
+
+	"github.com/xconnio/deskconn/internal/common"
 )
 
 type vpnCommands struct {
@@ -14,6 +16,7 @@ type vpnCommands struct {
 	stop       *kingpin.CmdClause
 
 	connectMachine *string
+	connectRoutes  *[]string
 }
 
 func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnCommands {
@@ -21,8 +24,11 @@ func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnComm
 	if runtime.GOOS != "linux" {
 		vpnCmd.Hidden()
 	}
-	connectCmd := vpnCmd.Command("connect", "Connect to a machine and tunnel all traffic through it")
+	connectCmd := vpnCmd.Command("connect",
+		"Connect to a machine and tunnel all traffic, or only --route destinations, through it")
 	connectMachine := machineArg(connectCmd, "ID, name or alias of machine", cfgDirectory)
+	connectRoutes := connectCmd.Flag("route", "Tunnel only this IPv4 address or CIDR range, leaving other traffic, "+
+		"IPv6 and DNS on the normal connection (repeatable)").PlaceHolder("IP|CIDR").Strings()
 	disconnectCmd := vpnCmd.Command("disconnect", "Stop tunneling traffic through the connected machine")
 	serveCmd := vpnCmd.Command("serve", "Let other machines route their traffic through this machine")
 	stopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
@@ -33,19 +39,25 @@ func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnComm
 		serve:          serveCmd,
 		stop:           stopCmd,
 		connectMachine: connectMachine,
+		connectRoutes:  connectRoutes,
 	}
 }
 
 func dispatchVPNCommand(parsedCmd string, cmds *vpnCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.connect.FullCommand():
+		routes, err := common.ParseVPNRoutes(*cmds.connectRoutes)
+		if err != nil {
+			printErr(err)
+			return true
+		}
 		realm, err := machineRealm(*cmds.connectMachine, cfgDirectory)
 		if err != nil {
 			printErr(err)
 			return true
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		runVPNConnect(ctx, cfgDirectory, realm, *cmds.connectMachine)
+		runVPNConnect(ctx, cfgDirectory, realm, *cmds.connectMachine, routes)
 		cancel()
 	case cmds.disconnect.FullCommand():
 		runVPNDisconnect(context.Background(), cfgDirectory)

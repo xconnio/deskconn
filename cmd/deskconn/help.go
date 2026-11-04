@@ -152,9 +152,11 @@ func groupHelpExamples(group string) []string {
 		return []string{"desk port forward office 8080:80", "desk port reverse office 9000:3000"}
 	case "vpn":
 		if standaloneRequested() {
-			return []string{"desk vpn connect", "desk vpn disconnect", "desk vpn serve", "desk vpn stop"}
+			return []string{"desk vpn connect", "desk vpn connect --route 203.0.113.10", "desk vpn disconnect",
+				"desk vpn serve", "desk vpn stop"}
 		}
-		return []string{"desk vpn connect office", "desk vpn disconnect", "desk vpn serve", "desk vpn stop"}
+		return []string{"desk vpn connect office", "desk vpn connect office --route 203.0.113.10",
+			"desk vpn disconnect", "desk vpn serve", "desk vpn stop"}
 	case "agent":
 		if standaloneRequested() {
 			return []string{"desk agent ls", "desk agent pull"}

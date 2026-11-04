@@ -49,6 +49,18 @@ func TestServerReturnsErrors(t *testing.T) {
 	require.True(t, client.Alive())
 }
 
+func TestServerRejectsInvalidTunnelRoutes(t *testing.T) {
+	client, _ := serve(t)
+	defer func() { _ = client.Close() }()
+
+	// Rejected before "ip" runs, so this is safe even as root.
+	for _, route := range []string{"0.0.0.0/0", "2001:db8::/32", "not-a-route", "default"} {
+		require.ErrorContains(t, client.AddTunnelRoute(route, "lo"), "invalid route")
+		require.ErrorContains(t, client.DelTunnelRoute(route, "lo"), "invalid route")
+	}
+	require.True(t, client.Alive())
+}
+
 func TestServerStopsWhenClientDisconnects(t *testing.T) {
 	client, done := serve(t)
 	require.NoError(t, client.Close())
