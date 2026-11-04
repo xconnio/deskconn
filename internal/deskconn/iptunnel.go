@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,7 +49,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 // ConnectVPNClient opens a VPN data channel on session, sets up this
 // machine's local TUN device, does the open/ready handshake with the
 // remote end, then routes this machine's traffic through the tunnel (only
-// routes, as normalized by common.ParseVPNRoutes, if any are given) and
+// routes, as common.ParseVPNRoutes gives them, if any are given) and
 // pumps packets until ctx is done or the channel drops -- undoing every
 // change it made before returning. It doesn't own session itself (never
 // closes it), since session may be shared with other features.
@@ -61,7 +63,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []strin
 // something like "tunnel up" should wait for this rather than assume
 // success as soon as the call is made.
 func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, helper *common.VPNHelperClient,
-	routes []string, onReady func()) error {
+	routes common.VPNRoutes, onReady func()) error {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNClientTUNName)
 	if err != nil {
 		return fmt.Errorf("failed to create tun device via deskconn-rootd: %w", err)
@@ -79,6 +81,10 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 	if err := helper.ConfigureTUNAddress(ifaceName, common.VPNClientCIDR, common.VPNMTU); err != nil {
 		return err
 	}
+
+	// Sees the DNS answers coming back through the tunnel, to route the addresses of
+	// routes.Domains as they're looked up; a no-op without domains.
+	router := NewDNSRouter(routes.Domains, func(cidr string) error { return helper.AddTunnelRoute(cidr, ifaceName) })
 
 	ordered, maxRetransmits := false, uint16(common.VPNMaxRetransmits)
 	channel, err := session.OpenChannel(common.VPNChannelLabel, &webrtc.DataChannelInit{
@@ -123,7 +129,7 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 			}
 			return
 		}
-		if _, werr := tun.Write(msg.Data); werr != nil {
+		if _, werr := tun.Write(router.Filter(msg.Data)); werr != nil {
 			log.Debugf("iptunnel: tun write failed: %v", werr)
 		}
 	})
@@ -169,21 +175,30 @@ func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, h
 		}
 	}
 
-	if len(routes) > 0 {
-		// Only these destinations use the tunnel: IPv6 and DNS stay as they are, since blocking
-		// or taking them over would affect everything else on this machine too.
-		for _, route := range routes {
+	if !routes.Empty() {
+		// Only these destinations use the tunnel: IPv6 and other lookups stay as they are, since
+		// blocking or taking them over would affect everything else on this machine too.
+		for _, route := range routes.CIDRs {
 			if err := helper.AddTunnelRoute(route, ifaceName); err != nil {
 				return fmt.Errorf("failed to route %s through the tunnel: %w", route, err)
 			}
 			added := route
 			teardown = append(teardown, func() { _ = helper.DelTunnelRoute(added, ifaceName) })
 		}
+		if len(routes.Domains) > 0 {
+			if err := routeDomains(helper, ifaceName, ready.DNS, routes, router, &teardown); err != nil {
+				return err
+			}
+		}
 	} else if err := routeAllTraffic(helper, ifaceName, ready.DNS, &teardown); err != nil {
 		return err
 	}
 
 	common.SafeGo(func() { common.PumpTUNToChannel(tun, channel, closedCh) })
+
+	// Looked up once now, through the tunnel, so their current addresses are routed before
+	// anything else on this machine asks for them.
+	primeDomains(ctx, routes.Domains)
 
 	if onReady != nil {
 		onReady()
@@ -226,4 +241,53 @@ func routeAllTraffic(helper *common.VPNHelperClient, ifaceName string, exitDNS [
 			"network's resolvers: %v", derr)
 	}
 	return nil
+}
+
+// routeDomains sends lookups of routes.Domains (and their subdomains) to the exit node's
+// resolvers through the tunnel on ifaceName, where router routes the addresses in the answers.
+// Each step's undo is appended to teardown.
+func routeDomains(helper *common.VPNHelperClient, ifaceName string, exitDNS []string, routes common.VPNRoutes,
+	router *DNSRouter, teardown *[]func()) error {
+	servers := common.TunnelDNSServers(exitDNS)
+	if len(servers) == 0 {
+		servers = common.VPNFallbackDNS()
+	}
+	for _, server := range servers {
+		cidr := server + "/32"
+		if slices.Contains(routes.CIDRs, cidr) {
+			continue
+		}
+		if err := helper.AddTunnelRoute(cidr, ifaceName); err != nil {
+			return fmt.Errorf("failed to route dns server %s through the tunnel: %w", server, err)
+		}
+		*teardown = append(*teardown, func() { _ = helper.DelTunnelRoute(cidr, ifaceName) })
+	}
+	*teardown = append(*teardown, func() {
+		for _, cidr := range router.Stop() {
+			_ = helper.DelTunnelRoute(cidr, ifaceName)
+		}
+	})
+
+	allLookups, err := helper.SetLinkDNSDomains(ifaceName, servers, routes.Domains)
+	if err != nil {
+		return fmt.Errorf("failed to send lookups of %s through the tunnel: %w",
+			strings.Join(routes.Domains, ", "), err)
+	}
+	*teardown = append(*teardown, func() { _ = helper.RevertLinkDNS(ifaceName) })
+	if allLookups {
+		log.Warnf("iptunnel: systemd-resolved isn't answering this machine's lookups, so all of them go "+
+			"through the tunnel; only the addresses of %s are routed through it", strings.Join(routes.Domains, ", "))
+	}
+	return nil
+}
+
+// primeDomains looks each of domains up, for the DNSRouter to route their addresses.
+func primeDomains(ctx context.Context, domains []string) {
+	for _, domain := range domains {
+		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if _, err := net.DefaultResolver.LookupIPAddr(lookupCtx, domain); err != nil {
+			log.Debugf("iptunnel: could not look up %s through the tunnel: %v", domain, err)
+		}
+		cancel()
+	}
 }

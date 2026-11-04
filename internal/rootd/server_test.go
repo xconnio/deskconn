@@ -61,6 +61,18 @@ func TestServerRejectsInvalidTunnelRoutes(t *testing.T) {
 	require.True(t, client.Alive())
 }
 
+func TestServerRejectsInvalidDNSDomains(t *testing.T) {
+	client, _ := serve(t)
+	defer func() { _ = client.Close() }()
+
+	// Rejected before resolvectl runs or resolv.conf is touched, so this is safe even as root.
+	for _, domain := range []string{"-x.com", "Example.com", "example", "a b.com", "1.2.3.4"} {
+		_, err := client.SetLinkDNSDomains("lo", []string{"1.1.1.1"}, []string{domain})
+		require.ErrorContains(t, err, "invalid dns domain")
+	}
+	require.True(t, client.Alive())
+}
+
 func TestServerStopsWhenClientDisconnects(t *testing.T) {
 	client, done := serve(t)
 	require.NoError(t, client.Close())

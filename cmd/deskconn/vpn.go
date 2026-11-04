@@ -62,7 +62,7 @@ const (
 // runVPNConnectChild) with the same terminal, so the sudo and any password
 // prompt still work, and exits once that child reports the tunnel is up or
 // exits itself. The child detaches from the terminal from then on.
-func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, routes []string) {
+func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes) {
 	if os.Getenv(vpnConnectChildEnv) != "" {
 		runVPNConnectChild(cliCtx, cfgDirectory, realm, machine, routes)
 		return
@@ -111,7 +111,7 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, 
 // own teardown to finish before exiting. This process also launches
 // deskconn-rootd (see deskconn.LaunchVPNHelper), since it's the one with a
 // terminal for sudo to prompt on, and waits for it to exit.
-func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine string, routes []string) {
+func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes) {
 	ready := os.NewFile(3, "vpn-ready")
 
 	release, err := claimVPNConnectPID(cfgDirectory)
@@ -158,8 +158,8 @@ func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine str
 	fmt.Println("Waiting for the remote machine to accept the tunnel...")
 	errCh := make(chan error, 1)
 	onReady := func() {
-		if len(routes) > 0 {
-			fmt.Printf("Tunnel up: routing only %s through %q.\n", strings.Join(routes, ", "), machine)
+		if !routes.Empty() {
+			fmt.Printf("Tunnel up: routing only %s through %q.\n", strings.Join(routes.All(), ", "), machine)
 		} else {
 			fmt.Printf("Tunnel up: routing this machine's internet traffic through %q.\n", machine)
 		}

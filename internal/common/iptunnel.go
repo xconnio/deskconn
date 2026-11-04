@@ -70,20 +70,94 @@ func ParseVPNRoute(route string) (string, error) {
 	return prefix.Masked().String(), nil
 }
 
-// ParseVPNRoutes runs ParseVPNRoute over routes, dropping duplicates.
-func ParseVPNRoutes(routes []string) ([]string, error) {
-	var parsed []string
+// ParseVPNDomain normalizes domain for a route by name: lowercased, without a trailing dot or a
+// leading "*." (a domain always covers its subdomains, see MatchVPNDomain). It must be a
+// hostname with at least two labels, the last one not all digits, so it can't be mistaken for
+// an address, and so it's safe to hand to resolvectl.
+func ParseVPNDomain(domain string) (string, error) {
+	d := strings.ToLower(strings.TrimSpace(domain))
+	d = strings.TrimSuffix(strings.TrimPrefix(d, "*."), ".")
+	invalid := fmt.Errorf("invalid route %q: want an IPv4 address, CIDR range or domain", domain)
+	if len(d) > 253 || !strings.Contains(d, ".") {
+		return "", invalid
+	}
+	labels := strings.Split(d, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", invalid
+		}
+		for _, c := range label {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
+				return "", invalid
+			}
+		}
+	}
+	if strings.Trim(labels[len(labels)-1], "0123456789") == "" {
+		return "", invalid
+	}
+	return d, nil
+}
+
+// MatchVPNDomain reports whether name (as asked in a DNS query) is one of domains or a
+// subdomain of one.
+func MatchVPNDomain(name string, domains []string) bool {
+	name = strings.TrimSuffix(strings.ToLower(name), ".")
+	for _, d := range domains {
+		if name == d || strings.HasSuffix(name, "."+d) {
+			return true
+		}
+	}
+	return false
+}
+
+// VPNRoutes is what "desk vpn connect --route" tunnels instead of all traffic: address ranges
+// as ParseVPNRoute normalizes them, and domains (with their subdomains) as ParseVPNDomain does.
+type VPNRoutes struct {
+	CIDRs   []string
+	Domains []string
+}
+
+// Empty reports whether no routes were given, i.e. all traffic goes through the tunnel.
+func (r VPNRoutes) Empty() bool {
+	return len(r.CIDRs) == 0 && len(r.Domains) == 0
+}
+
+// All returns every route, ranges first.
+func (r VPNRoutes) All() []string {
+	return append(append([]string{}, r.CIDRs...), r.Domains...)
+}
+
+// ParseVPNRoutes sorts routes into ranges and domains, normalizing each and dropping
+// duplicates. Anything that looks like an address is parsed as one, so an IPv6 address or a
+// /0 is an error rather than a domain.
+func ParseVPNRoutes(routes []string) (VPNRoutes, error) {
+	var parsed VPNRoutes
 	seen := make(map[string]struct{}, len(routes))
 	for _, route := range routes {
-		normalized, err := ParseVPNRoute(route)
+		trimmed := strings.TrimSpace(route)
+		_, perr := netip.ParsePrefix(trimmed)
+		_, aerr := netip.ParseAddr(trimmed)
+		isAddr := perr == nil || aerr == nil || strings.Contains(trimmed, ":") || strings.Contains(trimmed, "/")
+
+		var normalized string
+		var err error
+		if isAddr {
+			normalized, err = ParseVPNRoute(trimmed)
+		} else {
+			normalized, err = ParseVPNDomain(trimmed)
+		}
 		if err != nil {
-			return nil, err
+			return VPNRoutes{}, err
 		}
 		if _, dup := seen[normalized]; dup {
 			continue
 		}
 		seen[normalized] = struct{}{}
-		parsed = append(parsed, normalized)
+		if isAddr {
+			parsed.CIDRs = append(parsed.CIDRs, normalized)
+		} else {
+			parsed.Domains = append(parsed.Domains, normalized)
+		}
 	}
 	return parsed, nil
 }

@@ -13,6 +13,9 @@ const (
 	routeIP    = "203.0.113.10"
 	routeHost  = routeIP + "/32"
 	routeNet   = "10.1.0.0/16"
+	exampleCom = "example.com"
+	mailCom    = "mail." + exampleCom
+	googleCom  = "google.com"
 )
 
 func TestParseResolvConfNameservers(t *testing.T) {
@@ -58,14 +61,49 @@ func TestParseVPNRoute(t *testing.T) {
 }
 
 func TestParseVPNRoutes(t *testing.T) {
-	routes, err := common.ParseVPNRoutes([]string{routeIP, "10.1.2.3/16", routeHost, routeNet})
+	routes, err := common.ParseVPNRoutes([]string{routeIP, "10.1.2.3/16", routeHost, routeNet,
+		"Example.COM.", "*." + exampleCom, mailCom})
 	require.NoError(t, err)
-	require.Equal(t, []string{routeHost, routeNet}, routes)
+	require.Equal(t, []string{routeHost, routeNet}, routes.CIDRs)
+	require.Equal(t, []string{exampleCom, mailCom}, routes.Domains)
+	require.Equal(t, []string{routeHost, routeNet, exampleCom, mailCom}, routes.All())
+	require.False(t, routes.Empty())
 
 	routes, err = common.ParseVPNRoutes(nil)
 	require.NoError(t, err)
-	require.Empty(t, routes)
+	require.True(t, routes.Empty())
 
-	_, err = common.ParseVPNRoutes([]string{routeIP, "nope"})
-	require.Error(t, err)
+	for _, bad := range []string{"nope", "2001:db8::1", "0.0.0.0/0", "1.2.3.4/40", "1.2.3", "-a.com", "a..com"} {
+		_, err = common.ParseVPNRoutes([]string{routeIP, bad})
+		require.Error(t, err, bad)
+	}
+}
+
+func TestParseVPNDomain(t *testing.T) {
+	for input, want := range map[string]string{
+		googleCom:            googleCom,
+		" WWW.Google.Com. ":  "www.google.com",
+		"*.googleapis.com":   "googleapis.com",
+		"_dmarc.example.org": "_dmarc.example.org",
+		"xn--bcher-kva.de":   "xn--bcher-kva.de",
+	} {
+		got, err := common.ParseVPNDomain(input)
+		require.NoError(t, err, input)
+		require.Equal(t, want, got, input)
+	}
+	for _, input := range []string{"", "localhost", "1.2.3.4", "a b.com", "-x.com", "x-.com", "a..com",
+		"--route=x.com", "~x.com", "x.com/24"} {
+		_, err := common.ParseVPNDomain(input)
+		require.Error(t, err, input)
+	}
+}
+
+func TestMatchVPNDomain(t *testing.T) {
+	domains := []string{googleCom, "example.org"}
+	require.True(t, common.MatchVPNDomain("google.com.", domains))
+	require.True(t, common.MatchVPNDomain("WWW.Google.com.", domains))
+	require.True(t, common.MatchVPNDomain("a.b.example.org", domains))
+	require.False(t, common.MatchVPNDomain("notgoogle.com.", domains))
+	require.False(t, common.MatchVPNDomain("google.com.evil.net.", domains))
+	require.False(t, common.MatchVPNDomain("com.", domains))
 }

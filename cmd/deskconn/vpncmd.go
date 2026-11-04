@@ -27,8 +27,9 @@ func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnComm
 	connectCmd := vpnCmd.Command("connect",
 		"Connect to a machine and tunnel all traffic, or only --route destinations, through it")
 	connectMachine := machineArg(connectCmd, "ID, name or alias of machine", cfgDirectory)
-	connectRoutes := connectCmd.Flag("route", "Tunnel only this IPv4 address or CIDR range, leaving other traffic, "+
-		"IPv6 and DNS on the normal connection (repeatable)").PlaceHolder("IP|CIDR").Strings()
+	connectRoutes := connectCmd.Flag("route", "Tunnel only this IPv4 address, CIDR range or domain (with its "+
+		"subdomains, looked up through the tunnel), leaving other traffic and lookups on the normal connection "+
+		"(repeatable)").PlaceHolder("IP|CIDR|DOMAIN").Strings()
 	disconnectCmd := vpnCmd.Command("disconnect", "Stop tunneling traffic through the connected machine")
 	serveCmd := vpnCmd.Command("serve", "Let other machines route their traffic through this machine")
 	stopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")

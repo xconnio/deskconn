@@ -298,7 +298,8 @@ func (s *Server) handleSetLinkDNS(conn *net.UnixConn, req common.VPNHelperReques
 		return
 	}
 
-	if err := s.dns.SetLinkDNS(args.Iface, args.Servers); err != nil {
+	allLookups, err := s.dns.SetLinkDNS(args.Iface, args.Servers, args.Domains)
+	if err != nil {
 		writeResponse(conn, errResponse(err), -1)
 		return
 	}
@@ -308,7 +309,7 @@ func (s *Server) handleSetLinkDNS(conn *net.UnixConn, req common.VPNHelperReques
 			log.Debugf("deskconn-rootd: failed to revert leftover dns settings on %s: %v", iface, err)
 		}
 	})
-	writeResponse(conn, common.VPNHelperResponse{OK: true}, -1)
+	writeResponse(conn, dataResponse(common.VPNSetLinkDNSData{AllLookups: allLookups}), -1)
 }
 
 func (s *Server) handleRevertLinkDNS(conn *net.UnixConn, req common.VPNHelperRequest) {
