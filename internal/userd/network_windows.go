@@ -3,7 +3,7 @@ package userd
 import (
 	"strings"
 
-	psnet "github.com/shirou/gopsutil/net"
+	psnet "github.com/shirou/gopsutil/v4/net"
 )
 
 // virtualInterfaceKeywords match common non-hardware adapters Windows reports alongside real

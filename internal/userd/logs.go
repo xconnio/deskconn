@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -112,6 +113,82 @@ func journalctlArgs(service string, follow bool, tailN int64, since string) []st
 	}
 
 	return args
+}
+
+func formatJournalLine(line []byte) (string, bool) {
+	tsUsec, fields, err := parseJournalctlEntry(line)
+	if err != nil {
+		return "", false
+	}
+	return formatEntry(tsUsec, fields), true
+}
+
+const (
+	unifiedLogPath          = "/usr/bin/log"
+	unifiedLogDefaultWindow = time.Hour
+	unifiedLogTimeLayout    = "2006-01-02 15:04:05"
+	unifiedLogEntryLayout   = "2006-01-02 15:04:05.000000-0700"
+)
+
+func unifiedLogHistory(follow bool, tailN int64, since string, now time.Time) (time.Time, int64, bool) {
+	if since != "" {
+		return now.Add(-parseSinceDuration(since)), -1, true
+	}
+	if !follow {
+		if tailN < 0 {
+			tailN = 10
+		}
+		return now.Add(-unifiedLogDefaultWindow), tailN, true
+	}
+	if tailN > 0 {
+		return now.Add(-unifiedLogDefaultWindow), tailN, true
+	}
+	return time.Time{}, 0, false
+}
+
+func unifiedLogShowArgs(service string, start time.Time) []string {
+	args := []string{"show", "--style", "ndjson", "--start", start.Format(unifiedLogTimeLayout)}
+	return append(args, unifiedLogPredicate(service)...)
+}
+
+func unifiedLogStreamArgs(service string) []string {
+	return append([]string{"stream", "--style", "ndjson"}, unifiedLogPredicate(service)...)
+}
+
+func unifiedLogPredicate(service string) []string {
+	if service == "" {
+		return nil
+	}
+	quoted := `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(service) + `"`
+	return []string{"--predicate", "process == " + quoted + " OR subsystem == " + quoted}
+}
+
+type unifiedLogEntry struct {
+	Timestamp        string `json:"timestamp"`
+	ProcessImagePath string `json:"processImagePath"`
+	ProcessID        int64  `json:"processID"`
+	EventMessage     string `json:"eventMessage"`
+}
+
+func formatUnifiedLogLine(line []byte, hostname string) (string, bool) {
+	var entry unifiedLogEntry
+	if err := json.Unmarshal(line, &entry); err != nil || entry.Timestamp == "" {
+		return "", false
+	}
+	ts, err := time.Parse(unifiedLogEntryLayout, entry.Timestamp)
+	if err != nil {
+		return "", false
+	}
+
+	fields := map[string]string{"_HOSTNAME": hostname, "MESSAGE": entry.EventMessage}
+	if entry.ProcessImagePath != "" {
+		fields["SYSLOG_IDENTIFIER"] = filepath.Base(entry.ProcessImagePath)
+	}
+	if entry.ProcessID > 0 {
+		fields["_PID"] = strconv.FormatInt(entry.ProcessID, 10)
+	}
+
+	return formatEntry(uint64(ts.UnixMicro()), fields), true //nolint:gosec
 }
 
 func parseJournalctlEntry(line []byte) (uint64, map[string]string, error) {

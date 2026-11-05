@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -207,6 +208,8 @@ func streamLogsRaw(send logSender, sendKey []byte, done <-chan struct{}, ctrl co
 
 	if filepath.IsAbs(ctrl.Source) {
 		streamFileLogsRaw(send, sendKey, done, ctrl.Source, ctrl.Follow, ctrl.TailN)
+	} else if runtime.GOOS == "darwin" {
+		streamUnifiedLogsRaw(send, sendKey, done, ctrl.Source, ctrl.Follow, ctrl.TailN, ctrl.Since)
 	} else {
 		streamJournalLogsRaw(send, sendKey, done, ctrl.Source, ctrl.Follow, ctrl.TailN, ctrl.Since)
 	}
@@ -221,23 +224,39 @@ func isDone(done <-chan struct{}) bool {
 	}
 }
 
-// streamJournalLogsRaw manages journalctl's process lifecycle directly
-// (Kill on done) rather than via exec.CommandContext/context.Context --
-// done is already this stream's own cancellation signal, and there's no
-// caller-supplied context.Context available at this point in a raw-stream
-// handler to thread through instead (mirrors shell.go's
-// killShellProcessGroup, which manages its process the same direct way).
 func streamJournalLogsRaw(send logSender, sendKey []byte, done <-chan struct{},
 	service string, follow bool, tailN int64, since string) {
-	args := journalctlArgs(service, follow, tailN, since)
-	cmd := exec.Command("journalctl", args...)
+	cmd := exec.Command("journalctl", journalctlArgs(service, follow, tailN, since)...) //nolint:gosec
+	runLogCommand(send, sendKey, done, cmd, formatJournalLine, -1, true)
+}
+
+func streamUnifiedLogsRaw(send logSender, sendKey []byte, done <-chan struct{},
+	service string, follow bool, tailN int64, since string) {
+	hostname, _ := os.Hostname()
+	format := func(line []byte) (string, bool) {
+		return formatUnifiedLogLine(line, hostname)
+	}
+
+	if start, keep, ok := unifiedLogHistory(follow, tailN, since, time.Now()); ok {
+		cmd := exec.Command(unifiedLogPath, unifiedLogShowArgs(service, start)...) //nolint:gosec
+		if !runLogCommand(send, sendKey, done, cmd, format, keep, !follow) || !follow {
+			return
+		}
+	}
+
+	cmd := exec.Command(unifiedLogPath, unifiedLogStreamArgs(service)...) //nolint:gosec
+	runLogCommand(send, sendKey, done, cmd, format, -1, false)
+}
+
+func runLogCommand(send logSender, sendKey []byte, done <-chan struct{}, cmd *exec.Cmd,
+	format func([]byte) (string, bool), keepLast int64, reportEmpty bool) bool {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", err.Error())))
-		return
+		return false
 	}
 
 	scanner := bufio.NewScanner(stdout)
@@ -245,7 +264,7 @@ func streamJournalLogsRaw(send logSender, sendKey []byte, done <-chan struct{},
 
 	if err := cmd.Start(); err != nil {
 		sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", err.Error())))
-		return
+		return false
 	}
 
 	killed := make(chan struct{})
@@ -261,40 +280,58 @@ func streamJournalLogsRaw(send logSender, sendKey []byte, done <-chan struct{},
 	defer close(killed)
 
 	var wrote bool
+	var tail []string
 	for scanner.Scan() {
 		if isDone(done) {
-			return
+			return false
 		}
-		tsUsec, fields, perr := parseJournalctlEntry(scanner.Bytes())
-		if perr != nil {
+		line, ok := format(scanner.Bytes())
+		if !ok {
 			continue
 		}
 		wrote = true
-		if !sendLogData(send, sendKey, []byte(formatEntry(tsUsec, fields))) {
-			return
+		if keepLast >= 0 {
+			tail = append(tail, line)
+			if int64(len(tail)) > keepLast {
+				tail = tail[1:]
+			}
+			continue
+		}
+		if !sendLogData(send, sendKey, []byte(line)) {
+			return false
 		}
 	}
 
 	if isDone(done) {
-		return
+		return false
+	}
+
+	for _, line := range tail {
+		if !sendLogData(send, sendKey, []byte(line)) {
+			return false
+		}
 	}
 
 	waitErr := cmd.Wait()
 	if !wrote {
 		if stderr.Len() > 0 {
 			sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", strings.TrimSpace(stderr.String()))))
-			return
+			return false
 		}
 		if waitErr != nil {
 			sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", waitErr.Error())))
-			return
+			return false
 		}
-		sendLogData(send, sendKey, []byte("-- No entries --\n"))
-		return
+		if reportEmpty {
+			sendLogData(send, sendKey, []byte("-- No entries --\n"))
+		}
+		return true
 	}
 	if waitErr != nil && stderr.Len() > 0 && !isDone(done) {
 		sendLogData(send, sendKey, []byte(fmt.Sprintf("error: %s\n", strings.TrimSpace(stderr.String()))))
 	}
+
+	return true
 }
 
 func streamFileLogsRaw(send logSender, sendKey []byte, done <-chan struct{},
