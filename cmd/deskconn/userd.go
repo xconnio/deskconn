@@ -58,6 +58,7 @@ func runUserd(flags userdFlags, standalone bool) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	recordFullDiskAccess(cfgDirectory)
 
 	var standaloneConfig *xconnd.StandaloneConfig
 	var standaloneUsers *userd.StandaloneUsers

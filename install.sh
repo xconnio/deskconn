@@ -283,9 +283,68 @@ EOL
     else
         echo "Enabling and starting $label..."
     fi
+    rm -f "$FULL_DISK_ACCESS_FILE"
     launchctl enable "$domain/$label"
     launchctl bootstrap "$domain" "$plist_file"
     echo "launchd agent $label installed and started - deskconn-userd will run in your session at login!"
+
+    request_full_disk_access "$domain/$label"
+}
+
+# deskconn-userd records here, at startup, whether it has Full Disk Access ("granted" or
+# "missing"). Only it can tell: macOS decides that for the process asking, so checking from
+# this script would test the terminal's access instead.
+FULL_DISK_ACCESS_FILE="$HOME/.deskconn/full-disk-access"
+
+# full_disk_access_status waits for deskconn-userd to (re)write FULL_DISK_ACCESS_FILE, then
+# prints its status, or "unknown" if the daemon didn't get that far.
+full_disk_access_status() {
+    for _ in $(seq 1 20); do
+        if [ -s "$FULL_DISK_ACCESS_FILE" ]; then
+            cat "$FULL_DISK_ACCESS_FILE"
+            return
+        fi
+        sleep 0.5
+    done
+    echo unknown
+}
+
+# Without Full Disk Access, macOS asks separately the first time deskconn-userd reads each
+# protected place (Desktop, Documents, Downloads, external and network volumes, other apps'
+# data), and a command-line tool can't ask for those up front. One Full Disk Access grant
+# covers them all, but only the user can switch it on, in System Settings: open it at the
+# right page, with deskconn revealed in Finder to drag into the list.
+request_full_disk_access() {
+    local target="$1"
+    [ "$(full_disk_access_status)" = "missing" ] || return 0
+
+    echo
+    echo "deskconn needs Full Disk Access to reach your files without macOS asking about each folder."
+    echo "In System Settings > Privacy & Security > Full Disk Access, click + (or drag it in from Finder)"
+    echo "and add:  $EXEC_DIR/deskconn"
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || true
+    open -R "$EXEC_DIR/deskconn" 2>/dev/null || true
+
+    # "curl ... | sh" leaves stdin as the script, so ask on the terminal, if there is one.
+    if ! { exec 3</dev/tty; } 2>/dev/null; then
+        echo "Then restart it with:  launchctl kickstart -k $target"
+        return 0
+    fi
+    while :; do
+        printf "Press Enter once it's switched on (or type s to skip): "
+        local answer=""
+        read -r answer <&3 || break
+        [ "$answer" = "s" ] && break
+        # Full Disk Access applies from the daemon's next start.
+        rm -f "$FULL_DISK_ACCESS_FILE"
+        launchctl kickstart -k "$target"
+        if [ "$(full_disk_access_status)" != "missing" ]; then
+            echo "Full Disk Access granted."
+            break
+        fi
+        echo "deskconn still doesn't have Full Disk Access."
+    done
+    exec 3<&-
 }
 
 case "$OS" in
