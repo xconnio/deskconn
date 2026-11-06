@@ -42,7 +42,7 @@ the account service, and stores the private key in `~/.deskconn/id_ed25519`.
 
 ## Installation
 
-**Linux**
+**macOS and Linux**
 
 ```bash
 curl -fsSL https://get.deskconn.com | sh
@@ -57,6 +57,9 @@ symlink to it. It's the CLI, and `desk serve --mode user|standalone|root` runs t
 | `desk serve --mode user`       | User daemon (`deskconn-userd`), run by the `deskconn-userd` systemd user service at login |
 | `desk serve --mode standalone` | User daemon serving the machine directly, without the cloud (see below)                   |
 | `desk serve --mode root`       | Root helper (`deskconn-rootd`), started on demand with `sudo` as `deskconn-rootd.service` |
+
+On macOS, the user daemon runs as the `com.deskconn.deskconn-userd` launchd agent in your login session instead
+(logs in `~/Library/Logs/deskconn`), and there's no root helper (VPN serving is Linux-only for now).
 
 On Windows, from PowerShell:
 
