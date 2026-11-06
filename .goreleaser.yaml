@@ -5,6 +5,7 @@ project_name: deskconn
 before:
   hooks:
     - go mod tidy
+    - sh scripts/fetch-wintun.sh
 
 builds:
   # One binary: the CLI (the installer links desk to it), and with "serve --mode
@@ -16,6 +17,15 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+    goarch:
+      - amd64
+      - arm64
+  - id: deskconn-windows
+    main: ./cmd/deskconn
+    binary: deskconn
+    env:
+      - CGO_ENABLED=0
+    goos:
       - windows
     goarch:
       - amd64
@@ -30,10 +40,22 @@ archives:
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
+  # Windows also needs the Wintun driver for "deskconn vpn" (see scripts/fetch-wintun.sh).
+  - id: release-bundle-windows
+    ids:
+      - deskconn-windows
+    formats:
+      - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README*
+      - LICENSE*
+      - src: "build/wintun/bin/{{ .Arch }}/wintun.dll"
+        dst: wintun.dll
+        strip_parent: true
+      - src: build/wintun/LICENSE.txt
+        dst: wintun-LICENSE.txt
+        strip_parent: true
 
 checksum:
   name_template: checksums.txt

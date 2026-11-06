@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -139,6 +140,9 @@ func TestEncryptedProcedures(t *testing.T) {
 	require.False(t, busy)
 
 	sleeper := exec.Command("sleep", "30")
+	if runtime.GOOS == goosWindows {
+		sleeper = exec.Command("ping", "-n", "31", "127.0.0.1")
+	}
 	require.NoError(t, sleeper.Start())
 	t.Cleanup(func() { _ = sleeper.Process.Kill(); _ = sleeper.Wait() })
 

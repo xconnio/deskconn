@@ -21,7 +21,7 @@ type vpnCommands struct {
 
 func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnCommands {
 	vpnCmd := app.Command("vpn", "Route traffic through a machine or serve as an exit node")
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		vpnCmd.Hidden()
 	}
 	connectCmd := vpnCmd.Command("connect",

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 
@@ -41,8 +42,12 @@ func TestBeginShellSessionRunsExecCommand(t *testing.T) {
 	p := userd.NewInteractiveShellSession()
 	transport := &userd.FakeShellTransport{}
 
+	command, args := "echo", []string{"hello-exec-test"}
+	if runtime.GOOS == goosWindows { // where echo is built into cmd
+		command, args = "cmd.exe", []string{"/c", "echo", "hello-exec-test"}
+	}
 	shellID, _, _, startReader, err := p.BeginShellSession(common.ShellControlMsg{
-		Op: common.ShellOpSize, Cols: 80, Rows: 24, Command: "echo", Args: []string{"hello-exec-test"},
+		Op: common.ShellOpSize, Cols: 80, Rows: 24, Command: command, Args: args,
 	}, transport)
 	require.NoError(t, err)
 	startReader()
