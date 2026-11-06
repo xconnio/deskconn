@@ -60,6 +60,9 @@ symlink to it. It's the CLI, and `desk serve --mode user|standalone|root` runs t
 
 On macOS, the user daemon runs as the `com.deskconn.deskconn-userd` launchd agent in your login session instead
 (logs in `~/Library/Logs/deskconn`), and there's no root helper (VPN serving is Linux-only for now).
+The installer asks you to give it Full Disk Access (System Settings > Privacy & Security > Full Disk Access):
+without it, macOS asks separately the first time the daemon reads each protected folder (Desktop, Documents,
+Downloads, external drives, ...).
 
 On Windows, from PowerShell:
 
