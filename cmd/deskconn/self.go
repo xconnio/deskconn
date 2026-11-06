@@ -82,6 +82,19 @@ const (
 	legacyService = "deskconnd"
 )
 
+// launchdLabel is the launchd agent install.sh runs deskconn-userd as on macOS.
+const launchdLabel = "com.deskconn." + userdService
+
+// launchdTarget is the deskconn-userd agent in the current user's GUI session.
+func launchdTarget() string {
+	return fmt.Sprintf("gui/%d/%s", os.Getuid(), launchdLabel)
+}
+
+// launchdPlist is where install.sh writes the deskconn-userd agent's plist.
+func launchdPlist(homeDir string) string {
+	return filepath.Join(homeDir, "Library", "LaunchAgents", launchdLabel+".plist")
+}
+
 // userdExecStart is the command the deskconn-userd service runs in mode.
 func userdExecStart(execDir, mode string) string {
 	return filepath.Join(execDir, binaryName) + " serve --mode " + mode
@@ -137,6 +150,9 @@ func updateApp() error {
 
 	fmt.Printf("Restarting %s service...\n", userdService)
 	cmd := exec.Command("systemctl", "--user", "restart", userdService) // nolint: gosec
+	if runtime.GOOS == "darwin" {
+		cmd = exec.Command("launchctl", "kickstart", "-k", launchdTarget()) // nolint: gosec
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -362,6 +378,17 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 			return fmt.Errorf("failed to remove service file: %w", err)
 		}
 		_ = exec.Command("systemctl", "--user", "daemon-reload").Run() // nolint: gosec
+	}
+
+	if runtime.GOOS == "darwin" {
+		plist := launchdPlist(homeDir)
+		if _, err := os.Stat(plist); err == nil {
+			fmt.Printf("Stopping %s service...\n", userdService)
+			_ = exec.Command("launchctl", "bootout", launchdTarget()).Run() // nolint: gosec
+			if err := os.Remove(plist); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to remove launchd plist: %w", err)
+			}
+		}
 	}
 
 	binDir, execDir := installDirs(homeDir)
