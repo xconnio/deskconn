@@ -261,6 +261,9 @@ install_service_darwin() {
     <dict>
         <key>TERM</key>
         <string>xterm-256color</string>
+        <!-- launchd's own PATH lacks Homebrew's, where ffmpeg (video thumbnails) lives. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
     <key>StandardOutPath</key>
     <string>$log_dir/deskconn-userd.log</string>
