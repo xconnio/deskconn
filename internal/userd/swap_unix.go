@@ -2,7 +2,7 @@
 
 package userd
 
-import "github.com/shirou/gopsutil/mem"
+import "github.com/shirou/gopsutil/v4/mem"
 
 func swapMemory() (*mem.SwapMemoryStat, error) {
 	return mem.SwapMemory()

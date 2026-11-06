@@ -3,7 +3,7 @@ package userd
 import (
 	"os"
 
-	psnet "github.com/shirou/gopsutil/net"
+	psnet "github.com/shirou/gopsutil/v4/net"
 )
 
 // isPhysicalInterface reports whether iface is backed by a real hardware device, by checking
