@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/process"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 type ProcessInfo struct {
@@ -92,7 +92,7 @@ func (pm *ProcessMonitor) List() ([]ProcessInfo, error) {
 			Name:       name,
 			Exe:        exe,
 			User:       username,
-			Status:     status,
+			Status:     statusLetter(status),
 			Cmdline:    cmdline,
 			CPUPercent: cpuPercent,
 			MemRSS:     rss,
@@ -149,4 +149,31 @@ func SignalProcesses(pids []int32, sig string) ([]SignalResult, error) {
 	}
 
 	return results, nil
+}
+
+// statusLetter is the ps state letter clients get for what gopsutil reports.
+func statusLetter(status []string) string {
+	if len(status) == 0 {
+		return ""
+	}
+	switch status[0] {
+	case process.Running:
+		return "R"
+	case process.Blocked:
+		return "D"
+	case process.Idle:
+		return "I"
+	case process.Lock:
+		return "L"
+	case process.Sleep:
+		return "S"
+	case process.Stop:
+		return "T"
+	case process.Wait:
+		return "W"
+	case process.Zombie:
+		return "Z"
+	default:
+		return ""
+	}
 }
