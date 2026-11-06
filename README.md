@@ -61,7 +61,7 @@ symlink to it. It's the CLI, and `desk serve --mode user|standalone|root` runs t
 On Windows, from PowerShell:
 
 ```powershell
-irm https://get.deskconn.com/install.ps1 | iex
+irm https://raw.githubusercontent.com/xconnio/deskconn/main/install.ps1 | iex
 ```
 
 This installs the same binary to `%LOCALAPPDATA%\deskconn`, adds it to your `PATH`, and registers the
