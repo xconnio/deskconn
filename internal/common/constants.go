@@ -451,6 +451,8 @@ const (
 	VPNOpConfigureTUN        VPNHelperOp = "configure_tun"
 	VPNOpAddHostRoute        VPNHelperOp = "add_host_route"
 	VPNOpDelHostRoute        VPNHelperOp = "del_host_route"
+	VPNOpAddTunnelRoute      VPNHelperOp = "add_tunnel_route"
+	VPNOpDelTunnelRoute      VPNHelperOp = "del_tunnel_route"
 	VPNOpReplaceDefaultRoute VPNHelperOp = "replace_default_route"
 	VPNOpRestoreDefaultRoute VPNHelperOp = "restore_default_route"
 	VPNOpBlockIPv6Default    VPNHelperOp = "block_ipv6_default"

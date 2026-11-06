@@ -43,35 +43,50 @@ type linkDNS struct {
 // (resolvconf, NetworkManager or a static file) /etc/resolv.conf is swapped
 // for one naming only servers, until RevertLinkDNS puts it back. Every server
 // must be an IP address.
-func (d *linkDNS) SetLinkDNS(iface string, servers []string) error {
+//
+// With domains, only lookups of those domains and their subdomains go to servers: they become
+// iface's routing domains, and iface stops being a default route for other names. That needs
+// systemd-resolved; anywhere else every lookup still goes to servers, reported by allLookups.
+func (d *linkDNS) SetLinkDNS(iface string, servers, domains []string) (allLookups bool, err error) {
 	if len(servers) == 0 {
-		return fmt.Errorf("no dns servers given")
+		return false, fmt.Errorf("no dns servers given")
 	}
 	for _, s := range servers {
 		if net.ParseIP(s) == nil {
-			return fmt.Errorf("invalid dns server %q", s)
+			return false, fmt.Errorf("invalid dns server %q", s)
+		}
+	}
+	routing, defaultRoute := []string{"~."}, "yes"
+	if len(domains) > 0 {
+		routing, defaultRoute = nil, "no"
+		for _, domain := range domains {
+			normalized, err := common.ParseVPNDomain(domain)
+			if err != nil || normalized != domain {
+				return false, fmt.Errorf("invalid dns domain %q", domain)
+			}
+			routing = append(routing, "~"+domain)
 		}
 	}
 
 	if !resolvedHandlesLookups() {
-		return d.replaceResolvConf(servers)
+		return len(domains) > 0, d.replaceResolvConf(servers)
 	}
 
 	if err := runNetCmd("resolvectl", append([]string{"dns", iface}, servers...)...); err != nil {
-		return err
+		return false, err
 	}
-	if err := runNetCmd("resolvectl", "domain", iface, "~."); err != nil {
+	if err := runNetCmd("resolvectl", append([]string{"domain", iface}, routing...)...); err != nil {
 		_ = d.RevertLinkDNS(iface)
-		return err
+		return false, err
 	}
-	if err := runNetCmd("resolvectl", "default-route", iface, "yes"); err != nil {
+	if err := runNetCmd("resolvectl", "default-route", iface, defaultRoute); err != nil {
 		_ = d.RevertLinkDNS(iface)
-		return err
+		return false, err
 	}
 	// Answers cached from before would otherwise keep pointing lookups at servers picked for
-	// the old network.
+	// the old network, or (for domains) skip the tunnel, where their addresses get routed.
 	_ = runNetCmd("resolvectl", "flush-caches")
-	return nil
+	return false, nil
 }
 
 // RevertLinkDNS undoes SetLinkDNS.

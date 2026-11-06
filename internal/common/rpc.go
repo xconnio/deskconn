@@ -50,6 +50,11 @@ type VPNDelHostRouteArgs struct {
 	IP string `json:"ip"`
 }
 
+type VPNTunnelRouteArgs struct {
+	CIDR  string `json:"cidr"`
+	Iface string `json:"iface"`
+}
+
 type VPNReplaceDefaultRouteArgs struct {
 	IPVersion int    `json:"ip_version"`
 	Iface     string `json:"iface"`
@@ -71,6 +76,15 @@ type VPNSetSysctlData struct {
 type VPNSetLinkDNSArgs struct {
 	Iface   string   `json:"iface"`
 	Servers []string `json:"servers"`
+	// Domains, if any, limits the lookups sent to Servers to these domains and their
+	// subdomains, instead of every lookup.
+	Domains []string `json:"domains,omitempty"`
+}
+
+type VPNSetLinkDNSData struct {
+	// AllLookups is set when Domains were given but every lookup was sent to Servers anyway,
+	// since per-domain DNS needs systemd-resolved to be answering this machine's lookups.
+	AllLookups bool `json:"all_lookups,omitempty"`
 }
 
 type VPNRevertLinkDNSArgs struct {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
@@ -15,6 +16,10 @@ import (
 // unixpacket socket.
 type VPNHelperClient struct {
 	conn *net.UnixConn
+
+	// mu keeps each request paired with its response when calls come from several goroutines,
+	// e.g. routes added from DNS answers while the tunnel is up.
+	mu sync.Mutex
 }
 
 // DialVPNHelper connects to a helper already listening on socketPath (see
@@ -54,6 +59,9 @@ func (c *VPNHelperClient) Alive() bool {
 }
 
 func (c *VPNHelperClient) call(op VPNHelperOp, args any) (VPNHelperResponse, int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	var argData json.RawMessage
 	if args != nil {
 		data, err := json.Marshal(args)
@@ -156,6 +164,18 @@ func (c *VPNHelperClient) DelHostRoute(ip string) error {
 	return err
 }
 
+// AddTunnelRoute mirrors the package-level AddTunnelRoute.
+func (c *VPNHelperClient) AddTunnelRoute(cidr, iface string) error {
+	_, _, err := c.call(VPNOpAddTunnelRoute, VPNTunnelRouteArgs{CIDR: cidr, Iface: iface})
+	return err
+}
+
+// DelTunnelRoute mirrors the package-level DelTunnelRoute.
+func (c *VPNHelperClient) DelTunnelRoute(cidr, iface string) error {
+	_, _, err := c.call(VPNOpDelTunnelRoute, VPNTunnelRouteArgs{CIDR: cidr, Iface: iface})
+	return err
+}
+
 // ReplaceDefaultRoute mirrors the package-level ReplaceDefaultRoute.
 func (c *VPNHelperClient) ReplaceDefaultRoute(ipVersion int, iface string) error {
 	_, _, err := c.call(VPNOpReplaceDefaultRoute, VPNReplaceDefaultRouteArgs{IPVersion: ipVersion, Iface: iface})
@@ -180,10 +200,26 @@ func (c *VPNHelperClient) RestoreIPv6Default() error {
 	return err
 }
 
-// SetLinkDNS mirrors the package-level SetLinkDNS.
+// SetLinkDNS mirrors the package-level SetLinkDNS, for every lookup.
 func (c *VPNHelperClient) SetLinkDNS(iface string, servers []string) error {
-	_, _, err := c.call(VPNOpSetLinkDNS, VPNSetLinkDNSArgs{Iface: iface, Servers: servers})
+	_, err := c.SetLinkDNSDomains(iface, servers, nil)
 	return err
+}
+
+// SetLinkDNSDomains mirrors the package-level SetLinkDNS, for lookups of domains (and their
+// subdomains) only, reporting whether every lookup had to be sent to servers instead.
+func (c *VPNHelperClient) SetLinkDNSDomains(iface string, servers, domains []string) (bool, error) {
+	resp, _, err := c.call(VPNOpSetLinkDNS, VPNSetLinkDNSArgs{Iface: iface, Servers: servers, Domains: domains})
+	if err != nil {
+		return false, err
+	}
+	var data VPNSetLinkDNSData
+	if len(resp.Data) > 0 {
+		if err := json.Unmarshal(resp.Data, &data); err != nil {
+			return false, fmt.Errorf("malformed %s response: %w", VPNOpSetLinkDNS, err)
+		}
+	}
+	return data.AllLookups, nil
 }
 
 // RevertLinkDNS mirrors the package-level RevertLinkDNS.

@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+
+	"github.com/xconnio/deskconn/internal/common"
 )
 
 // The vpn subcommand and the root helper it talks to are both Linux-only (TUN devices,
@@ -17,7 +19,7 @@ func runRootd(_ rootdFlags) {
 	fmt.Fprintln(os.Stderr, "desk: the root helper is not supported on this platform")
 }
 
-func runVPNConnect(_ context.Context, _, _, _ string) {
+func runVPNConnect(_ context.Context, _, _, _ string, _ common.VPNRoutes) {
 	fmt.Fprintln(os.Stderr, "desk: vpn is not supported on this platform")
 }
 
