@@ -236,6 +236,8 @@ github.com/xanzy/ssh-agent v0.3.3 h1:+/15pJfg/RsTxqYcX6fHqOXZwwMP+2VyYWJeWM2qQFM
 github.com/xanzy/ssh-agent v0.3.3/go.mod h1:6dzNDKs0J9rVPHPhaGCukekBHKqfl+L3KghI1Bc68Uw=
 github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318 h1:fwjVJyhVx02dtavXvgxfJu+Sz7XouVlbuJeLMvdReu4=
 github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318/go.mod h1:k2I4x+dOyJq5XW6SHbnwrqJEuRf/lO9rbF5habINuMM=
+github.com/xconnio/xconn-core/bindings/go v0.1.6 h1:GUU+mcdR8vl12KNf/kgLBEi6aXHfihOBKipuxSk4lXg=
+github.com/xconnio/xconn-core/bindings/go v0.1.6/go.mod h1:4nqlV1V/QB8ryWQUKsxRUjKiuWggZW3b/GRk1H4StRc=
 github.com/xconnio/xconn-go v0.1.1-0.20261023141601-683389304fa4 h1:anPAOgwLQmC09pJrE1BGKDUPJo+/KZzbUAClYNLzNS0=
 github.com/xconnio/xconn-go v0.1.1-0.20261023141601-683389304fa4/go.mod h1:HlT+jB6kVsslJWkpE2K4G5zFA8fgMf1pdBoLZx+GAR0=
 github.com/xconnio/xconn-webrtc-go v0.0.0-20261027085904-3f71f52c0f0d h1:WDFg7UtASxfCplT6GNGJcP1prjlq3RgzHZwF6eF6o1A=

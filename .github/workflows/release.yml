@@ -15,7 +15,7 @@ on:
 jobs:
   release-main:
     name: Tag and release main build
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Setup go
         uses: actions/setup-go@v7
@@ -32,7 +32,16 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      - name: Install release toolchains
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu gcc-mingw-w64-x86-64 pkg-config
+
+      - name: Download native SDKs
+        run: |
+          ci/prepare-release-sdk.sh "$RUNNER_TEMP/xconn-sdk"
+          echo "XCONN_RELEASE_SDK=$RUNNER_TEMP/xconn-sdk" >> "$GITHUB_ENV"
+
       - name: Create and push release tag
+        if: github.event_name == 'workflow_run'
         env:
           GIT_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |

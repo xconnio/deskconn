@@ -10,7 +10,9 @@ case "$(uname -s)" in
         OS="linux"
         ;;
     Darwin)
-        OS="darwin"
+        echo "Prebuilt macOS releases are not currently available." >&2
+        echo "For source builds, see https://github.com/xconnio/deskconn/blob/main/docs/native-xconn.md" >&2
+        exit 1
         ;;
     *)
         echo "Unsupported OS: $(uname -s). For Windows, use install.ps1 instead."

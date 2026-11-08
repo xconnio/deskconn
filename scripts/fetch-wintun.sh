@@ -13,4 +13,5 @@ echo "$sha256  $zip" | sha256sum -c -
 
 rm -rf build/wintun
 unzip -q "$zip" -d build
+cp build/wintun/LICENSE.txt build/wintun/wintun-LICENSE.txt
 rm -f "$zip"
