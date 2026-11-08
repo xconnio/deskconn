@@ -77,12 +77,21 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 func acceptPortForwardLoopQUIC(ctx context.Context, ln net.Listener, quicSess xconn.MultiplexedSession,
 	realm, remotePort string) error {
 	closer, ok := quicSess.(interface{ Connection() io.Closer })
-	common.SafeGo(func() {
-		<-ctx.Done()
-		_ = ln.Close()
+	return acceptPortForwardConnections(ctx, ln, func() {
 		if ok {
 			_ = closer.Connection().Close()
 		}
+	}, func(conn net.Conn) {
+		forwardOneConnectionQUIC(quicSess, realm, conn, remotePort)
+	})
+}
+
+func acceptPortForwardConnections(ctx context.Context, ln net.Listener,
+	closeSession func(), forward func(net.Conn)) error {
+	common.SafeGo(func() {
+		<-ctx.Done()
+		_ = ln.Close()
+		closeSession()
 	})
 	for {
 		conn, err := ln.Accept()
@@ -92,7 +101,7 @@ func acceptPortForwardLoopQUIC(ctx context.Context, ln net.Listener, quicSess xc
 			}
 			return err
 		}
-		common.SafeGo(func() { forwardOneConnectionQUIC(quicSess, realm, conn, remotePort) })
+		common.SafeGo(func() { forward(conn) })
 	}
 }
 
@@ -124,23 +133,13 @@ func forwardOneConnectionQUIC(quicSess xconn.MultiplexedSession, realm string, l
 
 func acceptPortForwardLoopP2P(ctx context.Context, ln net.Listener, p2pSess ChannelOpener, remotePort string) error {
 	closer, ok := p2pSess.(interface{ Close() error })
-	common.SafeGo(func() {
-		<-ctx.Done()
-		_ = ln.Close()
+	return acceptPortForwardConnections(ctx, ln, func() {
 		if ok {
 			_ = closer.Close()
 		}
+	}, func(conn net.Conn) {
+		forwardOneConnectionP2P(p2pSess, conn, remotePort)
 	})
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
-			return err
-		}
-		common.SafeGo(func() { forwardOneConnectionP2P(p2pSess, conn, remotePort) })
-	}
 }
 
 func forwardOneConnectionP2P(p2pSess ChannelOpener, localConn net.Conn, remotePort string) {
