@@ -20,10 +20,10 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.12.1
 	github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318
+	github.com/xconnio/xconn-core/bindings/go v0.1.6
 	github.com/xconnio/xconn-go v0.1.1-0.20261023141601-683389304fa4
 	github.com/xconnio/xconn-webrtc-go v0.0.0-20261027085904-3f71f52c0f0d
 	go.etcd.io/bbolt v1.4.3
-	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.56.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
@@ -108,6 +108,7 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.14.0 // indirect

@@ -150,6 +150,7 @@ func scaledImage(src image.Image, maxDim int) image.Image {
 				}
 			}
 			n := uint32(samples * samples)
+			//nolint:gosec // RGBA averages fit 16 bits; shifting yields an 8-bit component.
 			dst.SetRGBA(x, y, color.RGBA{uint8(r / n >> 8), uint8(g / n >> 8), uint8(bl / n >> 8), uint8(a / n >> 8)})
 		}
 	}
