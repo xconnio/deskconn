@@ -36,12 +36,12 @@ func collectLogData(t *testing.T, client net.Conn, receiveKey []byte, timeout ti
 
 func startLogsStream(t *testing.T) (client net.Conn, sendKey, receiveKey []byte) {
 	t.Helper()
-	c, server := net.Pipe()
+	caller, _ := newRPCFeatureSession(t)
+	c, err := common.OpenRPCStream(t.Context(), caller, common.ProcedureLogsStream, false)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
-	d := userd.Deskconn{}
-	go d.HandleQUICLogsStream(server)
 
-	sendKey, receiveKey, err := deskconn.QuicClientKeyExchange(c)
+	sendKey, receiveKey, err = deskconn.StreamClientKeyExchange(c)
 	require.NoError(t, err)
 	return c, sendKey, receiveKey
 }
@@ -215,7 +215,7 @@ func TestLogsFollowStopsOnDisconnect(t *testing.T) {
 		close(done)
 	}()
 
-	sendKey, _, err := deskconn.QuicClientKeyExchange(client)
+	sendKey, _, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 
 	f, err := os.CreateTemp("", "logs-disconnect-*.log")

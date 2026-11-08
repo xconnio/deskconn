@@ -10,11 +10,10 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
 )
 
 // RunLogs is the client entry point for `desk machine logs`. It validates since
-// up front, opens one raw stream/channel, sends the one-time log
+// up front, opens one RPC-associated duplex stream, sends the one-time log
 // request, then writes every received chunk straight to out until the
 // machine finishes or ctx is canceled. mode picks "routed"/"direct" itself, or
 // "" uses userd's persistent connection, falling back (without userd)
@@ -34,17 +33,14 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since, out)
+		return runLogsOnStream(ctx, p2pSess, source, follow, tailN, since, out)
 	case ModeRouted:
 		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since, out)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = daemon.Close() }()
-			if daemon.P2P() {
-				return runLogsP2P(ctx, daemon, source, follow, tailN, since, out)
-			}
-			return runLogsOnStream(ctx, daemon, realm, source, follow, tailN, since, out)
+			return runLogsOnStream(ctx, daemon, source, follow, tailN, since, out)
 		}
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			return err
@@ -52,7 +48,7 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
-			return runLogsP2P(ctx, P2PChannels(p2pSess), source, follow, tailN, since, out)
+			return runLogsOnStream(ctx, p2pSess, source, follow, tailN, since, out)
 		}
 		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 		return runLogsQUIC(ctx, realm, cfgDirectory, source, follow, tailN, since, out)
@@ -66,21 +62,19 @@ func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 		return err
 	}
 	defer func() { _ = quicSess.Connection().Close() }()
-	return runLogsOnStream(ctx, quicSess, realm, source, follow, tailN, since, out)
+	return runLogsOnStream(ctx, quicSess, source, follow, tailN, since, out)
 }
 
-// runLogsOnStream runs the log request on a raw stream opened on sess.
-func runLogsOnStream(ctx context.Context, sess xconn.MultiplexedSession, realm, source string,
+// runLogsOnStream runs the log request on an RPC stream returned by sess.
+func runLogsOnStream(ctx context.Context, sess common.StreamSession, source string,
 	follow bool, tailN int64, since string, out io.Writer) error {
-	stream, err := sess.OpenStream()
+	stream, err := common.OpenRPCStream(ctx, sess, common.ProcedureLogsStream, false)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	if err := common.WriteMsg(stream, common.RoutingFrame{Realm: realm, Op: common.FSOpLogs}); err != nil {
-		return err
-	}
-	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
+
+	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
 	if err != nil {
 		return err
 	}
@@ -129,74 +123,6 @@ func runLogsOnStream(ctx context.Context, sess xconn.MultiplexedSession, realm, 
 	for {
 		_ = stream.SetReadDeadline(time.Now().Add(common.ShellIdleTimeout))
 		frame, err := common.ReadFrame(stream)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return nil
-		}
-		kind, plaintext, err := common.DecryptEnvelope(frame, receiveKey)
-		if err != nil {
-			continue
-		}
-		if kind == common.LogMsgData {
-			_, _ = out.Write(plaintext)
-		}
-	}
-}
-
-func runLogsP2P(ctx context.Context, p2pSess ChannelOpener, source string,
-	follow bool, tailN int64, since string, out io.Writer) error {
-	channel, err := p2pSess.OpenMessageChannel(common.LogChannelLabel)
-	if err != nil {
-		return err
-	}
-	defer channel.Close()
-	closed, _ := common.WebrtcBackpressure(channel)
-	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
-	if err != nil {
-		return err
-	}
-	conn := newP2PClientShellConn(channel, closed)
-
-	env, err := common.BuildPortEnvelope(common.LogMsgControl,
-		common.MustJSON(common.LogControlMsg{Source: source, Follow: follow, TailN: tailN, Since: since}), sendKey)
-	if err != nil {
-		return err
-	}
-	if err := conn.sendEnvelope(env); err != nil {
-		return err
-	}
-
-	common.SafeGo(func() {
-		select {
-		case <-ctx.Done():
-			_ = channel.Close()
-		case <-closed:
-		}
-	})
-
-	common.SafeGo(func() {
-		ticker := time.NewTicker(common.ShellPingInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-closed:
-				return
-			case <-ticker.C:
-				env, err := common.BuildPortEnvelope(common.LogMsgPing, nil, sendKey)
-				if err != nil {
-					continue
-				}
-				if err := conn.sendEnvelope(env); err != nil {
-					return
-				}
-			}
-		}
-	})
-
-	for {
-		frame, err := common.RecvPriority(conn.msgCh, closed, common.ShellIdleTimeout)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

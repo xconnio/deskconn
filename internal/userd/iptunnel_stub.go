@@ -6,7 +6,7 @@ import (
 	"context"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // vpnServer is a stub on non-Linux platforms: the VPN/iptunnel feature depends on TUN devices
@@ -33,13 +33,13 @@ func (d *Deskconn) handleVPNChannel(channel common.MessageChannel) {
 // reports the feature as unavailable here instead of registering nothing (registerLocalProcedures
 // wires these unconditionally, so the RPCs must exist on every platform, even if only to fail).
 func ProxyVPNStartHandler(*Deskconn) xconn.InvocationHandler {
-	return func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-		return xconn.NewInvocationError(common.ErrOperationFailed, "VPN serving is not supported on this platform")
+	return func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
+		return xconn.NewResultError(common.ErrOperationFailed, "VPN serving is not supported on this platform")
 	}
 }
 
 func ProxyVPNStopHandler(*Deskconn) xconn.InvocationHandler {
-	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-		return xconn.NewInvocationError(common.ErrOperationFailed, "VPN serving is not supported on this platform")
+	return func(context.Context, *xconn.Invocation) *xconn.Result {
+		return xconn.NewResultError(common.ErrOperationFailed, "VPN serving is not supported on this platform")
 	}
 }

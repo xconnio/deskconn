@@ -8,7 +8,7 @@ import (
 	pty "github.com/aymanbagabas/go-pty"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 type App = app

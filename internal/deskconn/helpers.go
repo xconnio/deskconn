@@ -10,10 +10,9 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
-	xconnauth "github.com/xconnio/xconn-go/auth"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
+	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 const ErrAuthenticationFailed = "wamp.error.authentication_failed"
@@ -116,7 +115,7 @@ func ConnectCloudRealm(cfgDirectory string) (*xconn.Session, error) {
 }
 
 func ConnectCloudCryptosign(ctx context.Context, authid, privKey string) (*xconn.Session, error) {
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, nil)
+	authenticator, err := auth.NewCryptoSignAuthenticator(authid, privKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
@@ -138,7 +137,7 @@ func ConnectCloudCryptosign(ctx context.Context, authid, privKey string) (*xconn
 }
 
 func ConnectCloudCRA(ctx context.Context, username, password string) (*xconn.QUICSession, error) {
-	authenticator := xconnauth.NewWAMPCRAAuthenticator(username, password, nil)
+	authenticator := auth.NewWAMPCRAAuthenticator(username, password, nil)
 	return xconn.ConnectQUIC(ctx, common.CloudQUICAddress(), common.Realm, &xconn.QUICDialerConfig{
 		Authenticator: authenticator,
 		TLSConfig:     common.CloudQUICTLSConfig(),
@@ -207,7 +206,7 @@ func ConnectMachineRealmP2PSession(
 
 func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
 	onDisconnect func()) (*xconn.Session, error) {
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
+	authenticator, err := auth.NewCryptoSignAuthenticator(authid, privateKey, map[string]any{})
 	if err != nil {
 		return nil, err
 	}
@@ -300,5 +299,5 @@ func clientAuthenticator(realm, cfgDirectory string) (auth.ClientAuthenticator, 
 	if err != nil {
 		return nil, err
 	}
-	return xconnauth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
+	return auth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
 }

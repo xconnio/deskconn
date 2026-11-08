@@ -178,25 +178,17 @@ func TestEndShellInputNoOpAfterMigration(t *testing.T) {
 	assert.True(t, hasSession, "migrating away must not tear down the PTY the new transport now owns")
 }
 
-// TestHandleQUICShellStreamEndToEnd drives shell over a net.Pipe through
-// the real entry point (HandleQUICStream): routing frame, key exchange,
+// TestHandleQUICShellStreamEndToEnd drives shell through its RPC endpoint:
+// end-to-end key exchange,
 // size, one keystroke, then "exit\r\n" against a real spawned shell, checking
 // output comes back decrypted and the stream ends cleanly on exit.
 func TestHandleQUICShellStreamEndToEnd(t *testing.T) {
-	client, server := net.Pipe()
+	caller, _ := newRPCFeatureSession(t)
+	client, err := common.OpenRPCStream(t.Context(), caller, common.ProcedureShellStream, false)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 
-	d := userd.NewShellDeskconn()
-	go func() {
-		op, err := userd.ReadStreamOp(server)
-		if err != nil {
-			return
-		}
-		d.DispatchQUICOp(op, server)
-	}()
-
-	require.NoError(t, common.WriteMsg(client, common.RoutingFrame{Op: common.FSOpShell}))
-	sendKey, receiveKey, err := deskconn.QuicClientKeyExchange(client)
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 
 	require.NoError(t, sendQUICShellControl(client, sendKey,
@@ -226,20 +218,12 @@ func TestHandleQUICShellStreamEndToEnd(t *testing.T) {
 // from expiring during genuine silence) doesn't disrupt an otherwise-normal
 // session -- the PTY keeps running and later data still reaches it.
 func TestHandleQUICShellStreamIgnoresPing(t *testing.T) {
-	client, server := net.Pipe()
+	caller, _ := newRPCFeatureSession(t)
+	client, err := common.OpenRPCStream(t.Context(), caller, common.ProcedureShellStream, false)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 
-	d := userd.NewShellDeskconn()
-	go func() {
-		op, err := userd.ReadStreamOp(server)
-		if err != nil {
-			return
-		}
-		d.DispatchQUICOp(op, server)
-	}()
-
-	require.NoError(t, common.WriteMsg(client, common.RoutingFrame{Op: common.FSOpShell}))
-	sendKey, receiveKey, err := deskconn.QuicClientKeyExchange(client)
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 
 	require.NoError(t, sendQUICShellControl(client, sendKey,

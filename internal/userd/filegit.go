@@ -13,7 +13,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // GitStatusEntry Status is one of "untracked", "added", "modified", "ignored".
@@ -233,86 +233,86 @@ func headContent(repo *git.Repository, relSlash string) (string, bool) {
 	return content, true
 }
 
-func (d *Deskconn) handleGitStatus(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleGitStatus(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	result, err := d.files.GitStatus(args.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	resultBytes, err := json.Marshal(result)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }
 
-func (d *Deskconn) handleGitOriginal(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleGitOriginal(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	result, err := d.files.GitOriginal(args.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	resultBytes, err := json.Marshal(result)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }

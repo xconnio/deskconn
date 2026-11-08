@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/xconnio/deskconn/internal/common"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	xconnd "github.com/xconnio/xconn-go/xconn"
 )
 
 func attach(flagUsername, name string) error {

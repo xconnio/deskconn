@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // LocalRealm is the realm on deskconnd's local socket (see SocketURI), which apps join

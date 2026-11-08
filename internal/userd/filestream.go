@@ -11,12 +11,8 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 )
 
-// DispatchQUICOp resumes handling a QUIC stream that userd has already
-// classified and relayed locally: op is the routingFrame.Op userd read
-// before relaying (see ReadStreamOp), and stream is everything
-// after that routing frame, untouched -- exactly what userd's old,
-// single-process HandleQUICStream saw right after its own read of it.
-func (d *Deskconn) DispatchQUICOp(op common.FSOp, stream net.Conn) {
+// serveStreamOperation handles encrypted feature messages for one authorized RPC.
+func (d *Deskconn) serveStreamOperation(op common.FSOp, stream net.Conn) {
 	defer stream.Close()
 
 	switch op {
@@ -37,7 +33,7 @@ func (d *Deskconn) DispatchQUICOp(op common.FSOp, stream net.Conn) {
 		return
 	}
 
-	sendKey, receiveKey, err := quicServerKeyExchange(stream)
+	sendKey, receiveKey, err := streamServerKeyExchange(stream)
 	if err != nil {
 		return
 	}
@@ -47,29 +43,34 @@ func (d *Deskconn) DispatchQUICOp(op common.FSOp, stream net.Conn) {
 		return
 	}
 
+	if req.Op != op {
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: "operation does not match RPC endpoint"}, sendKey)
+		return
+	}
+
 	// A transfer starts with a list (download) or init (upload), both answered with an
 	// FSResponse, so that's where a client learns file transfers are disabled.
 	if err := d.capabilities.check(filesAppID); err != nil {
 		if req.Op == common.FSOpList || req.Op == common.FSOpInit {
-			_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+			_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		}
 		return
 	}
 
 	switch req.Op {
 	case common.FSOpList:
-		quicServeList(stream, req, sendKey)
+		streamServeList(stream, req, sendKey)
 	case common.FSOpInit:
-		quicServeInit(stream, req, sendKey)
+		streamServeInit(stream, req, sendKey)
 	case common.FSOpRead, common.FSOpWrite:
-		quicServeSession(stream, req, sendKey, receiveKey)
+		streamServeSession(stream, req, sendKey, receiveKey)
 	}
 }
 
-// quicServerKeyExchange is the client's quicClientKeyExchange's server-side
+// streamServerKeyExchange is the server side of StreamClientKeyExchange:
 // counterpart: receive the client's ephemeral public key, derive session
 // keys, send back our own public key.
-func quicServerKeyExchange(stream net.Conn) (sendKey, receiveKey []byte, err error) {
+func streamServerKeyExchange(stream net.Conn) (sendKey, receiveKey []byte, err error) {
 	var clientKey common.KeyExchangeMsg
 	if err := common.ReadMsg(stream, &clientKey); err != nil {
 		return nil, nil, err
@@ -88,12 +89,16 @@ func quicServerKeyExchange(stream net.Conn) (sendKey, receiveKey []byte, err err
 	return sendKey, receiveKey, nil
 }
 
-// quicServeSession serves req and then any further read/write requests the
+// streamServeSession serves req and then any further read/write requests the
 // client sends on the same stream, one at a time, until the client closes
 // its side (a normal end of session, surfaced here as a read error) or a
 // transport failure occurs.
-func quicServeSession(stream net.Conn, req common.FSRequest, sendKey, receiveKey []byte) {
+func streamServeSession(stream net.Conn, req common.FSRequest, sendKey, receiveKey []byte) {
+	operation := req.Op
 	for {
+		if req.Op != operation {
+			return
+		}
 		var err error
 		switch req.Op {
 		case common.FSOpRead:
@@ -114,15 +119,15 @@ func quicServeSession(stream net.Conn, req common.FSRequest, sendKey, receiveKey
 	}
 }
 
-func quicServeList(stream net.Conn, req common.FSRequest, sendKey []byte) {
+func streamServeList(stream net.Conn, req common.FSRequest, sendKey []byte) {
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 	entries, err := common.BuildManifest(resolvedRoot, req.Recursive)
 	if err != nil {
-		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 	_ = common.WriteEncryptedMsg(stream, common.FSResponse{OK: true, Entries: entries}, sendKey)
@@ -135,7 +140,7 @@ func quicServeList(stream net.Conn, req common.FSRequest, sendKey []byte) {
 func quicServeReadOnce(stream net.Conn, req common.FSRequest, sendKey []byte) error {
 	resolvedRoot, basePath, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 	}
 
 	// See serveWebRTCReadOnce for why a single-file root resolves to resolvedRoot directly
@@ -147,7 +152,7 @@ func quicServeReadOnce(stream net.Conn, req common.FSRequest, sendKey []byte) er
 
 	f, err := os.Open(absPath) //nolint:gosec
 	if err != nil {
-		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 	}
 	defer f.Close()
 
@@ -159,15 +164,15 @@ func quicServeReadOnce(stream net.Conn, req common.FSRequest, sendKey []byte) er
 	return common.CopyEncrypted(stream, section, req.Length, sendKey, nil)
 }
 
-func quicServeInit(stream net.Conn, req common.FSRequest, sendKey []byte) {
+func streamServeInit(stream net.Conn, req common.FSRequest, sendKey []byte) {
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 	rootIsDir := common.IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
 	if err := common.MaterializeTargets(req.Entries, resolvedRoot, rootIsDir); err != nil {
-		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		_ = common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 		return
 	}
 	_ = common.WriteEncryptedMsg(stream, common.FSResponse{OK: true}, sendKey)
@@ -178,7 +183,7 @@ func quicServeInit(stream net.Conn, req common.FSRequest, sendKey []byte) {
 func quicServeWriteOnce(stream net.Conn, req common.FSRequest, sendKey, receiveKey []byte) error {
 	resolvedRoot, _, err := remoteRootAndBase(req.Path)
 	if err != nil {
-		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 	}
 	rootIsDir := common.IsRootDir(resolvedRoot, req.SourceIsDir, req.TargetIsDirHint)
 	// See serveWebRTCWriteOnce for why passing req.RelPath as sourceRoot is safe.
@@ -186,7 +191,7 @@ func quicServeWriteOnce(stream net.Conn, req common.FSRequest, sendKey, receiveK
 
 	f, err := os.OpenFile(dest, os.O_WRONLY, 0) //nolint:gosec
 	if err != nil {
-		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: err.Error()}, sendKey)
+		return common.WriteEncryptedMsg(stream, common.FSResponse{Err: withoutPath(err).Error()}, sendKey)
 	}
 	defer f.Close()
 
@@ -199,4 +204,12 @@ func quicServeWriteOnce(stream net.Conn, req common.FSRequest, sendKey, receiveK
 		return err
 	}
 	return common.WriteEncryptedMsg(stream, common.FSResponse{OK: true}, sendKey)
+}
+
+func remoteRootAndBase(rootArg string) (root, base string, err error) {
+	root, err = resolvePath(rootArg)
+	if err != nil {
+		return "", "", err
+	}
+	return root, filepath.Dir(root), nil
 }

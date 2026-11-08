@@ -90,14 +90,14 @@ func callMachine(cfgDirectory, machine, procedure string, args ...any) (any, err
 	}
 	defer func() { _ = session.Close() }()
 
-	resp := session.Call(procedure).Args(args...).Do()
+	resp := session.Call(procedure).Args(args...).Execute()
 	if resp.Err != nil {
 		return nil, resp.Err
 	}
 	if resp.ArgsLen() == 0 {
 		return nil, nil
 	}
-	return resp.Args()[0], nil
+	return resp.Args[0], nil
 }
 
 func listApps(cfgDirectory, machine string) error {

@@ -5,32 +5,33 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 func parseFileProxyArgs(ctx context.Context, inv *xconn.Invocation, clientSessions *ClientSessions,
-	cfgDirectory string) (strArg string, bytesArg []byte, sess *xconn.Session, invErr *xconn.InvocationResult) {
+	cfgDirectory string) (strArg string, bytesArg []byte, sess *xconn.Session, invErr *xconn.Result) {
 	realm, err := inv.ArgString(0)
 	if err != nil {
-		return "", nil, nil, xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return "", nil, nil, xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	strArg, err = inv.ArgString(1)
 	if err != nil {
-		return "", nil, nil, xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return "", nil, nil, xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	bytesArg, err = inv.ArgBytes(2)
 	if err != nil {
-		return "", nil, nil, xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return "", nil, nil, xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	sess, err = clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 	if err != nil {
-		return "", nil, nil, xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return "", nil, nil, xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	return strArg, bytesArg, sess, nil
 }
@@ -96,7 +97,7 @@ func keysRejected(err error) bool {
 }
 
 func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 		procedure, payload, machineSession, invErr := parseFileProxyArgs(ctx, inv, clientSessions, cfgDirectory)
 		if invErr != nil {
 			return invErr
@@ -106,9 +107,9 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 
 		result, err := clientSessions.keys.call(machineSession, procedure, payload)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
-		return xconn.NewInvocationResult(result)
+		return xconn.NewResult(result)
 	}
 }
 
@@ -133,104 +134,104 @@ func (c *proxyKeyCache) call(machineSession *xconn.Session, procedure string, pa
 
 func ProxyMachineInfoHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
 
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 		realm, err := inv.ArgString(0)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 
 		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 		defer clientSessions.holdSession(realm, machineSess)()
 
 		result, err := clientSessions.keys.call(machineSess, common.ProcedureMachineInfo, nil)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 
-		return xconn.NewInvocationResult(result)
+		return xconn.NewResult(result)
 	}
 }
 
 func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 		realm, err := inv.ArgString(0)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 
 		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 		defer clientSessions.holdSession(realm, machineSess)()
 
 		start := time.Now()
-		callResp := machineSess.Call(common.ProcedurePing).Do()
+		callResp := machineSess.Call(common.ProcedurePing).Execute()
 		if callResp.Err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, callResp.Err.Error())
 		}
 
-		return xconn.NewInvocationResult(time.Since(start).Milliseconds())
+		return xconn.NewResult(time.Since(start).Milliseconds())
 	}
 }
 
 func ProxyPrinterListHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 		realm, err := inv.ArgString(0)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 
 		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 		defer clientSessions.holdSession(realm, machineSess)()
 
 		var printers []any
 		if err := appCall(machineSess, printerAppID, common.ProcedurePrinterList, nil, &printers); err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 
-		return xconn.NewInvocationResult(printers)
+		return xconn.NewResult(printers)
 	}
 }
 
 func ProxyPrinterPrintHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 		realm, err := inv.ArgString(0)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 		printer, err := inv.ArgString(1)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 		filename, err := inv.ArgString(2)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 		data, err := inv.ArgBytes(3)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 
 		machineSess, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 		defer clientSessions.holdSession(realm, machineSess)()
 
 		req := map[string]any{"printer": printer, "filename": filename, "data": data}
 		var jobID string
 		if err := appCall(machineSess, printerAppID, common.ProcedurePrinterPrint, req, &jobID); err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 
-		return xconn.NewInvocationResult(jobID)
+		return xconn.NewResult(jobID)
 	}
 }
 
@@ -248,14 +249,14 @@ type listedApp struct {
 // keys of the app's own key exchange (see ProcedureCapabilitiesList): req, if not nil, is
 // sent as JSON and the JSON result is unmarshaled into out.
 func appCall(session *xconn.Session, appID, procedure string, req, out any) error {
-	listResp := session.Call(common.ProcedureCapabilitiesList).Do()
+	listResp := session.Call(common.ProcedureCapabilitiesList).Execute()
 	if listResp.Err != nil {
 		return listResp.Err
 	}
-	if len(listResp.Args()) == 0 {
+	if len(listResp.Args) == 0 {
 		return errors.New("machine returned no apps list")
 	}
-	data, err := json.Marshal(listResp.Args()[0])
+	data, err := json.Marshal(listResp.Args[0])
 	if err != nil {
 		return err
 	}
@@ -292,18 +293,18 @@ func appCall(session *xconn.Session, appID, procedure string, req, out any) erro
 // path and decrypts the chunks with its cached keys for that machine, so they reach the
 // CLI in plain text over the local socket.
 func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 		realm, err := inv.ArgString(0)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 		remotePath, err := inv.ArgString(1)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 		machineSession, err := clientSessions.EnsureMachineSession(ctx, realm, cfgDirectory)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 		defer clientSessions.holdSession(realm, machineSession)()
 
@@ -311,54 +312,60 @@ func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.
 		for {
 			enc, err := clientSessions.keys.keysFor(machineSession, rejected)
 			if err != nil {
-				return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+				return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 			}
 
 			pathJSON, err := json.Marshal(remotePath)
 			if err != nil {
-				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+				return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 			}
 			encryptedPath, err := common.EncryptPayload(pathJSON, enc.SendKey)
 			if err != nil {
-				return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+				return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 			}
 
-			callCtx, cancel := context.WithCancel(ctx)
-			var chunkErr error
-			callResp := machineSession.Call(common.ProcedureFileCat).
-				ProgressReceiver(func(pr *xconn.ProgressResult) {
-					if chunkErr != nil {
-						return
-					}
-					encrypted, err := pr.ArgBytes(0)
-					if err == nil {
-						var chunk []byte
-						if chunk, err = common.DecryptPayload(encrypted, enc.ReceiveKey); err == nil {
-							err = inv.SendProgress([]any{chunk}, nil)
-						}
-					}
-					if err != nil {
-						chunkErr = err
-						cancel()
-					}
-				}).
-				Args(encryptedPath).
-				DoContext(callCtx)
-			cancel()
-
-			if chunkErr != nil {
-				return xconn.NewInvocationError(common.ErrOperationFailed, chunkErr.Error())
-			}
-			if callResp.Err != nil {
-				// Keys the machine no longer has: it rejected the call before sending anything,
-				// so exchange again and retry once.
-				if rejected == nil && keysRejected(callResp.Err) {
+			err = forwardCat(ctx, machineSession, inv, encryptedPath, enc.ReceiveKey)
+			if err != nil {
+				if rejected == nil && keysRejected(err) {
 					rejected = enc
 					continue
 				}
-				return xconn.NewInvocationError(common.ErrOperationFailed, callResp.Err.Error())
+				return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 			}
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
+		}
+	}
+}
+
+func forwardCat(ctx context.Context, session *xconn.Session, inv *xconn.Invocation,
+	encryptedPath, receiveKey []byte) error {
+	call, err := session.Call(common.ProcedureFileCat).Args(encryptedPath).StreamContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer call.Close()
+
+	for {
+		result, err := call.Receive(ctx)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if result.Details["progress"] != true {
+			continue
+		}
+		encrypted, err := result.ArgBytes(0)
+		if err != nil {
+			return err
+		}
+		chunk, err := common.DecryptPayload(encrypted, receiveKey)
+		if err != nil {
+			return err
+		}
+		if err := inv.SendProgress([]any{chunk}, nil); err != nil {
+			return err
 		}
 	}
 }

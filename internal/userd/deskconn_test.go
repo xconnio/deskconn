@@ -11,7 +11,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // goosWindows is runtime.GOOS's value on Windows, shared by tests that skip or branch on it.
@@ -68,7 +68,7 @@ func TestMachineIsDesktop(t *testing.T) {
 	d := userd.NewDeskconn(true, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
-	callResp := caller.Call(common.ProcedureMachineIsDesktop).Do()
+	callResp := caller.Call(common.ProcedureMachineIsDesktop).Execute()
 	require.NoError(t, callResp.Err)
 
 	isDesktop, err := callResp.ArgBool(0)
@@ -82,7 +82,7 @@ func TestMachineIsDesktopFalseOnServer(t *testing.T) {
 	d := userd.NewDeskconn(false, t.TempDir())
 	require.NoError(t, d.Register(callee))
 
-	callResp := caller.Call(common.ProcedureMachineIsDesktop).Do()
+	callResp := caller.Call(common.ProcedureMachineIsDesktop).Execute()
 	require.NoError(t, callResp.Err)
 
 	isDesktop, err := callResp.ArgBool(0)
@@ -104,7 +104,7 @@ func TestEncryptedProceduresRequireKeyExchange(t *testing.T) {
 		common.ProcedureAppIcon,
 		common.ProcedureShellIsBusy,
 	} {
-		callResp := caller.Call(procedure).Do()
+		callResp := caller.Call(procedure).Execute()
 		require.ErrorContains(t, callResp.Err, "call key exchange first", procedure)
 	}
 }

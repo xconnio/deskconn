@@ -9,8 +9,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/wampproto-go"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/protocol"
 )
 
 const MetaTopicSessionLeave = "wamp.session.on_leave"
@@ -27,7 +27,7 @@ type Deskconn struct {
 	desktop              bool
 	vpn                  *vpnServer
 	capabilities         *capabilities
-	relayConns           relayConns
+	streamConns          streamConns
 	settings             *settings
 	// standaloneUsers are who may connect in standalone mode, or nil in user mode.
 	standaloneUsers *StandaloneUsers
@@ -62,6 +62,10 @@ func NewDeskconn(desktopEnvironment bool, cfgDirectory string) *Deskconn {
 
 func (d *Deskconn) Register(session *xconn.Session) error {
 	handlers := map[string]xconn.InvocationHandler{
+		common.ProcedurePortForwardStream:  d.streamHandler(common.FSOpPortForward, false),
+		common.ProcedurePortReverseStream:  d.streamHandler(common.FSOpPortReverse, false),
+		common.ProcedureAgentForwardStream: d.streamHandler(common.FSOpAgentForward, false),
+		common.ProcedureLogsStream:         d.streamHandler(common.FSOpLogs, false),
 		common.ProcedureKeyExchange:        d.handleKeyExchange,
 		common.ProcedureMachineInfo:        d.handleMachineInfo,
 		common.ProcedureMachineIsDesktop:   d.handleMachineIsDesktop,
@@ -74,8 +78,8 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		common.ProcedureAppsRegister:       d.handleAppsRegister,
 		common.ProcedureSettingsList:       d.settings.handleList,
 		common.ProcedureSettingsSave:       d.settings.handleSave,
-		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-			return xconn.NewInvocationResult()
+		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
+			return xconn.NewResult()
 		},
 	}
 	if d.standaloneUsers != nil {
@@ -88,7 +92,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 	// remotecontrol-app.
 
 	for uri, handler := range handlers {
-		response := session.Register(uri, handler).Invoke(wampproto.InvokeLast).Do()
+		response := session.Register(uri, handler).Invoke(protocol.InvokeLast).Execute()
 		if response.Err != nil {
 			return response.Err
 		}
@@ -101,7 +105,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		return err
 	}
 
-	subResp := session.Subscribe(MetaTopicSessionLeave, d.handleSessionLeave).Do()
+	subResp := session.Subscribe(MetaTopicSessionLeave, d.handleSessionLeave).Execute()
 	if subResp.Err != nil {
 		return subResp.Err
 	}
@@ -119,50 +123,50 @@ func (d *Deskconn) handleSessionLeave(event *xconn.Event) {
 	d.handleAppUnregister(sessionID)
 }
 
-func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleKeyExchange(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	clientPublicKey, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	serverPublicKey, serverPrivateKey, err := common.CreateX25519KeyPair()
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	sharedSecret, err := common.PerformKeyExchange(serverPrivateKey, clientPublicKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	sendKey, err := common.DeriveKeyHKDF(sharedSecret, []byte("backendToFrontend"))
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	receiveKey, err := common.DeriveKeyHKDF(sharedSecret, []byte("frontendToBackend"))
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	d.keys.store(inv.Caller(), &encryptionKeys{sendKey: sendKey, receiveKey: receiveKey})
 
-	return xconn.NewInvocationResult(serverPublicKey)
+	return xconn.NewResult(serverPublicKey)
 }
 
-func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, ok := d.keys.fetch(inv.Caller())
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+		return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
 	}
 
 	encrypted, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	plaintext, err := common.DecryptPayload(encrypted, enc.receiveKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	var args struct {
@@ -171,26 +175,26 @@ func (d *Deskconn) handleFileBrowse(_ context.Context, inv *xconn.Invocation) *x
 		Limit  int    `json:"limit"`
 	}
 	if err := json.Unmarshal(plaintext, &args); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	result, err := d.files.Browse(args.Path, args.Cursor, args.Limit)
 	if err != nil {
 		if errors.Is(err, errFilePathEscapesHome) || errors.Is(err, os.ErrNotExist) {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	d.thumbnails.prefetch(inv.Caller(), result.Entries, args.Cursor == "")
 
 	resultBytes, err := json.Marshal(result)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	encryptedResult, err := common.EncryptPayload(resultBytes, enc.sendKey)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
-	return xconn.NewInvocationResult(encryptedResult)
+	return xconn.NewResult(encryptedResult)
 }

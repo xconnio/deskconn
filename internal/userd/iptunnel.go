@@ -10,11 +10,11 @@ import (
 	"os"
 	"sync"
 
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // vpnServer tracks whether this Deskconn is currently willing to act as a
@@ -335,22 +335,22 @@ func ValidateIPv4Source(pkt []byte, expected net.IP) bool {
 // serving this way -- this feature's only gate today, in place of a real
 // consent prompt.
 func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
-	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 		helperSocket, err := inv.ArgString(0)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 
 		helper, err := common.DialVPNHelper(helperSocket)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 
 		if err := d.ArmVPNServing(helper); err != nil {
 			_ = helper.Close()
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
-		return xconn.NewInvocationResult()
+		return xconn.NewResult()
 	}
 }
 
@@ -358,10 +358,10 @@ func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
 // tunnel and closing the helper connection so deskconn-rootd unwinds and exits. Meant to run as
 // an independent command from "desk vpn serve", not necessarily the same terminal.
 func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
-	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
+	return func(context.Context, *xconn.Invocation) *xconn.Result {
 		if !d.DisarmVPNServing() {
-			return xconn.NewInvocationError(common.ErrOperationFailed, "not currently serving")
+			return xconn.NewResultError(common.ErrOperationFailed, "not currently serving")
 		}
-		return xconn.NewInvocationResult()
+		return xconn.NewResult()
 	}
 }

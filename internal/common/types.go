@@ -7,8 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/xconnio/wampproto-go/auth"
-	xconnauth "github.com/xconnio/xconn-go/auth"
+	auth "github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 type Organization struct {
@@ -95,9 +94,9 @@ func (t *StandaloneTarget) Authenticator() (auth.ClientAuthenticator, error) {
 		if err != nil {
 			return nil, err
 		}
-		return xconnauth.NewWAMPCRAAuthenticator(t.AuthID, password, map[string]any{}), nil
+		return auth.NewWAMPCRAAuthenticator(t.AuthID, password, map[string]any{}), nil
 	}
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(t.AuthID, t.PrivateKey, map[string]any{})
+	authenticator, err := auth.NewCryptoSignAuthenticator(t.AuthID, t.PrivateKey, map[string]any{})
 	if err != nil {
 		return nil, fmt.Errorf("invalid private key: %w", err)
 	}
@@ -172,20 +171,4 @@ func ServedRealm(realm string) string {
 		return StandaloneRealm
 	}
 	return realm
-}
-
-// StreamProxyRequest is what the CLI sends on userd's stream proxy socket. With an
-// empty Kind it only asks which transport the persistent connection to Realm's machine
-// has; otherwise it opens a raw QUIC stream, or a data channel named Label, on it.
-type StreamProxyRequest struct {
-	Realm string    `json:"realm"`
-	Kind  RelayKind `json:"kind,omitempty"`
-	Label string    `json:"label,omitempty"`
-}
-
-// StreamProxyResponse answers a StreamProxyRequest. After a successful open, the rest of
-// the connection is the stream itself.
-type StreamProxyResponse struct {
-	Kind  RelayKind `json:"kind,omitempty"`
-	Error string    `json:"error,omitempty"`
 }

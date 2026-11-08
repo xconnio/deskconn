@@ -1,7 +1,5 @@
 package deskconn
 
-import "github.com/xconnio/deskconn/internal/common"
-
 // Aliases exposing unexported transfer internals to the package's external tests.
 
 const (
@@ -17,17 +15,3 @@ var (
 )
 
 type TransferChunk = transferChunk
-
-// ReadAllShellEnvelopes reads channel through the P2P shell connection until it ends.
-func ReadAllShellEnvelopes(channel common.MessageChannel) [][]byte {
-	closed, _ := common.WebrtcBackpressure(channel)
-	conn := newP2PClientShellConn(channel, closed)
-	var got [][]byte
-	for {
-		envelope, err := conn.recvEnvelope()
-		if err != nil {
-			return got
-		}
-		got = append(got, envelope)
-	}
-}

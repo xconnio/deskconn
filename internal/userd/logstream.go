@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
@@ -54,7 +53,7 @@ func sendLogData(send logSender, sendKey []byte, data []byte) bool {
 func (d *Deskconn) handleQUICLogsStream(stream net.Conn) {
 	defer stream.Close()
 
-	sendKey, receiveKey, err := quicServerKeyExchange(stream)
+	sendKey, receiveKey, err := streamServerKeyExchange(stream)
 	if err != nil {
 		return
 	}
@@ -118,79 +117,6 @@ func (d *Deskconn) handleQUICLogsStream(stream net.Conn) {
 	})
 
 	streamLogsRaw(send, sendKey, done, ctrl)
-}
-
-// HandleLogsChannel serves one `desk machine logs` session over a raw WebRTC
-// data channel, mirroring handleQUICLogsStream.
-func (d *Deskconn) HandleLogsChannel(_ string, channel common.MessageChannel, firstMessage []byte) {
-	common.SafeGo(func() { d.serveLogsChannel(channel, firstMessage) })
-}
-
-func (d *Deskconn) serveLogsChannel(channel common.MessageChannel, firstMessage []byte) {
-	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
-	if err != nil {
-		_ = channel.Close()
-		return
-	}
-
-	closed, _ := common.WebrtcBackpressure(channel)
-	msgCh := make(chan []byte, 8)
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		select {
-		case msgCh <- msg.Data:
-		case <-closed:
-		}
-	})
-
-	first, err := common.RecvPriority(msgCh, closed, common.P2PRequestTimeout)
-	if err != nil {
-		_ = channel.Close()
-		return
-	}
-	_, plaintext, err := common.DecryptEnvelope(first, receiveKey)
-	if err != nil {
-		_ = channel.Close()
-		return
-	}
-	var ctrl common.LogControlMsg
-	if err := json.Unmarshal(plaintext, &ctrl); err != nil {
-		_ = channel.Close()
-		return
-	}
-
-	send := newLogSender(channel.Send)
-
-	common.SafeGo(func() {
-		ticker := time.NewTicker(common.ShellPingInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-closed:
-				return
-			case <-ticker.C:
-				env, err := common.BuildPortEnvelope(common.LogMsgPing, nil, sendKey)
-				if err != nil {
-					continue
-				}
-				if err := send(env); err != nil {
-					_ = channel.Close()
-					return
-				}
-			}
-		}
-	})
-
-	common.SafeGo(func() {
-		for {
-			if _, err := common.RecvPriority(msgCh, closed, common.ShellIdleTimeout); err != nil {
-				_ = channel.Close()
-				return
-			}
-		}
-	})
-
-	streamLogsRaw(send, sendKey, closed, ctrl)
-	_ = channel.Close()
 }
 
 // streamLogsRaw validates ctrl.Since (matching handleLogs' old validation,

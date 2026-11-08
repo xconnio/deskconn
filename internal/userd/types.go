@@ -11,9 +11,9 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
-	xconnauth "github.com/xconnio/xconn-go/auth"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	xconnauth "github.com/xconnio/xconn-core/bindings/go/auth"
+	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // quicConn is a machine's QUIC connection plus a count of the operations running on it.
@@ -164,7 +164,7 @@ func machineAnswers(ctx context.Context, session *xconn.Session) error {
 	ctx, cancel := context.WithTimeout(ctx, machineAnswersTimeout)
 	defer cancel()
 	for _, procedure := range []string{common.ProcedurePing, legacyProcedurePing} {
-		err := session.Call(procedure).DoContext(ctx).Err
+		err := session.Call(procedure).ExecuteContext(ctx).Err
 		if err == nil {
 			return nil
 		}

@@ -13,7 +13,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 type accountCommands struct {
@@ -72,7 +72,7 @@ func runLogin(cfgDirectory, username string) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return session.Call(common.ProcedureLogin).Do().Err
+	return session.Call(common.ProcedureLogin).Execute().Err
 }
 
 // runLogout signs out and tells the local daemon.
@@ -84,7 +84,7 @@ func runLogout(cfgDirectory string) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return session.Call(common.ProcedureLogout).Do().Err
+	return session.Call(common.ProcedureLogout).Execute().Err
 }
 
 func whoami(cfgDirectory string) error {

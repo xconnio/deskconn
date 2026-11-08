@@ -7,10 +7,8 @@ import (
 	"io"
 )
 
-// WriteFrame/ReadFrame are the raw length-prefixed framing every message on
-// a QUIC file-transfer stream uses, whether it carries plaintext JSON (the
-// RoutingFrame and key exchange, which the router and the peer must be able
-// to read) or an encrypted payload (everything after the key exchange).
+// WriteFrame and ReadFrame delimit feature messages inside an RPC byte stream.
+// The key exchange uses plaintext JSON; subsequent messages are encrypted.
 func WriteFrame(w io.Writer, data []byte) error {
 	var length [4]byte
 	binary.BigEndian.PutUint32(length[:], uint32(len(data))) //nolint:gosec
@@ -80,24 +78,11 @@ func ReadEncryptedMsg(r io.Reader, v any, key []byte) error {
 	return json.Unmarshal(plaintext, v)
 }
 
-// RoutingFrame is the first message on every client-opened QUIC stream.
-// deskconn-router's connBroker reads exactly these fields to route the
-// stream to the right machine, then bridges the rest of the stream through
-// unmodified -- so it must be sent in the clear, before the key exchange
-// (see KeyExchangeMsg) and the encrypted real request that follow it.
-type RoutingFrame struct {
-	Realm     string `json:"realm"`
-	Op        FSOp   `json:"op"`
-	Path      string `json:"path"`
-	Recursive bool   `json:"recursive,omitempty"`
-}
-
 // KeyExchangeMsg carries one side's ephemeral X25519 public key. Everything
 // after the exchange -- every FSRequest/FSResponse and all file data -- is
 // ChaCha20-Poly1305 encrypted with the derived keys, since deskconn-router
 // terminates QUIC/TLS at each hop rather than tunneling it through, and
-// would otherwise see the plaintext it's relaying. Reused as-is for --mode
-// p2p (see filestreamencryption.go).
+// would otherwise see the plaintext it is forwarding.
 type KeyExchangeMsg struct {
 	PublicKey []byte `json:"public_key"`
 }
