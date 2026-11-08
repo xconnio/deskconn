@@ -25,6 +25,12 @@ jobs:
       - name: Install XConn native SDK
         run: make native-sdk
 
+      - name: Check release configuration
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: check
+
       - name: Pull in all Go dependencies
         run: go mod vendor
 
@@ -50,3 +56,33 @@ jobs:
 
       - name: Run unit tests
         run: make test
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CGO_ENABLED: '1'
+      CC: gcc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf
+      - name: Test Windows native integration
+        run: |
+          sdk="$(cygpath -u "$RUNNER_TEMP")/xconn-sdk"
+          ci/prepare-release-sdk.sh "$sdk" windows_amd64
+          export PKG_CONFIG_PATH="$(cygpath -m "$sdk/windows_amd64/lib/pkgconfig")"
+          go test -tags xconn_static ./internal/connectivity ./relay
+          go build -tags xconn_static -ldflags "-linkmode external -extldflags '-static'" -o deskconn.exe ./cmd/deskconn
+          if objdump -p deskconn.exe | grep -Ei 'DLL Name:.*(xconn_ffi|libgcc|libstdc|libwinpthread)'; then
+            echo 'Release binary must not depend on XConn or MinGW runtime DLLs' >&2
+            exit 1
+          fi
