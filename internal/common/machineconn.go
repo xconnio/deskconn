@@ -5,12 +5,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 // Standalone URL schemes: quic://host:port, or https://host:port[/path] for WebTransport.
@@ -82,10 +81,9 @@ func ConnectStandalone(ctx context.Context, rawURL, certHash, realm string,
 	}
 	closeConn := func() error { return sess.Connection().CloseWithError(0, "") }
 	return &MachineConn{
-		Session:    sess.Session,
-		openStream: sess.OpenStream,
-		closeConn:  closeConn,
-		close:      closeSessionAndConn(sess.Close, closeConn),
+		Session:   sess.Session,
+		closeConn: closeConn,
+		close:     closeSessionAndConn(sess.Close, closeConn),
 	}, nil
 }
 
@@ -98,27 +96,22 @@ func closeSessionAndConn(closeSession, closeConn func() error) func() error {
 	}
 }
 
-// MachineConn is a connection to a machine: one WAMP session plus raw streams opened
-// alongside it, over QUIC (cloud or standalone) or WebTransport (standalone).
+// MachineConn owns a machine session and its QUIC or WebTransport connection.
+// Feature streams are attached to ordinary RPC arguments and results.
 type MachineConn struct {
 	*xconn.Session
-	openStream func() (net.Conn, error)
-	closeConn  func() error // the whole connection
-	close      func() error // this session
+	closeConn func() error // the whole connection
+	close     func() error // this session
 }
 
 // NewQUICMachineConn wraps a QUIC session.
 func NewQUICMachineConn(s *xconn.QUICSession) *MachineConn {
 	return &MachineConn{
-		Session:    s.Session,
-		openStream: s.OpenStream,
-		closeConn:  s.Connection().Close,
-		close:      s.Close,
+		Session:   s.Session,
+		closeConn: s.Connection().Close,
+		close:     s.Close,
 	}
 }
-
-// OpenStream opens a raw stream to the machine.
-func (c *MachineConn) OpenStream() (net.Conn, error) { return c.openStream() }
 
 // Connection is the underlying connection shared by the session and its streams.
 func (c *MachineConn) Connection() io.Closer { return closerFunc(c.closeConn) }

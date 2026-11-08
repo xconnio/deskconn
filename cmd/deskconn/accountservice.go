@@ -8,7 +8,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // The account service backend: it keeps the accounts and their machines, signs users in with
@@ -67,7 +67,7 @@ func connectAccountServiceCRA(ctx context.Context, username, password string,
 func accountServiceLogin(ctx context.Context, username, password, publicKey string) (time.Time, error) {
 	var expiresAt time.Time
 	err := connectAccountServiceCRA(ctx, username, password, func(session *xconn.Session) error {
-		if err := session.Call(procedureAccountLogin).Args(username).Do().Err; err != nil {
+		if err := session.Call(procedureAccountLogin).Args(username).Execute().Err; err != nil {
 			return err
 		}
 
@@ -76,7 +76,7 @@ func accountServiceLogin(ctx context.Context, username, password, publicKey stri
 			return err
 		}
 
-		callResp := session.Call(procedureAccountLoginVerify).Args(username, otp, publicKey).Do()
+		callResp := session.Call(procedureAccountLoginVerify).Args(username, otp, publicKey).Execute()
 		if callResp.Err != nil {
 			return fmt.Errorf("failed to verify otp: %w", callResp.Err)
 		}
@@ -96,7 +96,7 @@ func accountServiceLogin(ctx context.Context, username, password, publicKey stri
 }
 
 func accountServiceName(session *xconn.Session) (string, error) {
-	callResp := session.Call(procedureAccountGet).Do()
+	callResp := session.Call(procedureAccountGet).Execute()
 	if callResp.Err != nil {
 		return "", callResp.Err
 	}
@@ -112,17 +112,17 @@ func accountServiceName(session *xconn.Session) (string, error) {
 }
 
 func accountServiceLogout(session *xconn.Session, publicKey string) error {
-	return session.Call(procedurePrincipalDelete).Arg(publicKey).Do().Err
+	return session.Call(procedurePrincipalDelete).Arg(publicKey).Execute().Err
 }
 
 func accountServiceMachines(session *xconn.Session) ([]common.Machine, error) {
-	callResp := session.Call(procedureDesktopList).Do()
+	callResp := session.Call(procedureDesktopList).Execute()
 	if callResp.Err != nil {
 		return []common.Machine{}, callResp.Err
 	}
 
 	var machines []common.Machine
-	jsonData, err := json.Marshal(callResp.Args())
+	jsonData, err := json.Marshal(callResp.Args)
 	if err != nil {
 		return []common.Machine{}, err
 	}
@@ -137,7 +137,7 @@ func accountServiceAttach(ctx context.Context, username, password, machineID, pu
 	name string) (string, error) {
 	var realm string
 	err := connectAccountServiceCRA(ctx, username, password, func(session *xconn.Session) error {
-		callResp := session.Call(procedureDesktopAttach).Args(machineID, publicKey, name).Do()
+		callResp := session.Call(procedureDesktopAttach).Args(machineID, publicKey, name).Execute()
 		if callResp.Err != nil {
 			return callResp.Err
 		}
@@ -152,5 +152,5 @@ func accountServiceAttach(ctx context.Context, username, password, machineID, pu
 }
 
 func accountServiceDetach(session *xconn.Session, machineID string) error {
-	return session.Call(procedureDesktopDetach).Args(machineID).Do().Err
+	return session.Call(procedureDesktopDetach).Args(machineID).Execute().Err
 }

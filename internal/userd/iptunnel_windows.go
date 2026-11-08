@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -26,7 +25,8 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // On Windows the exit node is a userspace NAT rather than the Linux TUN + iptables setup: a
@@ -446,23 +446,23 @@ func ValidateIPv4Source(pkt []byte, expected net.IP) bool {
 
 // ProxyVPNStartHandler arms "desk vpn serve". There's no helper to hand over on Windows.
 func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
-	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
+	return func(context.Context, *xconn.Invocation) *xconn.Result {
 		d.vpn.mu.Lock()
 		defer d.vpn.mu.Unlock()
 		if d.vpn.closed {
-			return xconn.NewInvocationError(common.ErrOperationFailed, "shutting down")
+			return xconn.NewResultError(common.ErrOperationFailed, "shutting down")
 		}
 		if d.vpn.armed {
-			return xconn.NewInvocationError(common.ErrOperationFailed, "already serving")
+			return xconn.NewResultError(common.ErrOperationFailed, "already serving")
 		}
 		d.vpn.armed = true
-		return xconn.NewInvocationResult()
+		return xconn.NewResult()
 	}
 }
 
 // ProxyVPNStopHandler disarms serving, tearing down any active tunnel.
 func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
-	return func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
+	return func(context.Context, *xconn.Invocation) *xconn.Result {
 		d.vpn.mu.Lock()
 		armed := d.vpn.armed
 		sess := d.vpn.active
@@ -471,11 +471,11 @@ func ProxyVPNStopHandler(d *Deskconn) xconn.InvocationHandler {
 		d.vpn.mu.Unlock()
 
 		if !armed {
-			return xconn.NewInvocationError(common.ErrOperationFailed, "not currently serving")
+			return xconn.NewResultError(common.ErrOperationFailed, "not currently serving")
 		}
 		if sess != nil {
 			sess.close()
 		}
-		return xconn.NewInvocationResult()
+		return xconn.NewResult()
 	}
 }

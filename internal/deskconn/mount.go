@@ -22,7 +22,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // mountCacheTimeout is how long the kernel (and mountFS's own readdir
@@ -65,7 +65,7 @@ type MountCaller func(ctx context.Context, payload []byte) ([]byte, error)
 func ProxyMountCaller(localSession *xconn.Session, realm string) MountCaller {
 	return func(ctx context.Context, payload []byte) ([]byte, error) {
 		resp := localSession.Call(common.ProcedureProxyFileOp).
-			Args(realm, common.ProcedureMountFS, payload).DoContext(ctx)
+			Args(realm, common.ProcedureMountFS, payload).ExecuteContext(ctx)
 		if resp.Err != nil {
 			return nil, resp.Err
 		}

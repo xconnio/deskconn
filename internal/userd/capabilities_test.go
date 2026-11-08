@@ -7,10 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/wampproto-go/serializers"
-	"github.com/xconnio/xconn-go"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/serializers"
 )
 
 // Only a machine's owners and admins may enable or disable apps. Remote callers reach
@@ -25,24 +25,26 @@ func TestCapabilitiesSetNeedsManager(t *testing.T) {
 
 	caps, err := userd.NewCapabilities([]*userd.App{{ID: "screenshot", Name: "Screenshot"}}, dir, appSession)
 	require.NoError(t, err)
-	require.NoError(t, appSession.Register(common.ProcedureCapabilitiesSet, caps.Set()).Do().Err)
+	require.NoError(t, appSession.Register(common.ProcedureCapabilitiesSet, caps.Set()).Execute().Err)
 
 	device, err := xconnd.NewDeviceRouter(machineRealm)
 	require.NoError(t, err)
 	t.Cleanup(device.Close)
 	bridge, err := xconn.ConnectInMemory(device, machineRealm)
 	require.NoError(t, err)
-	require.NoError(t, xconnd.RegisterBridge(bridge, &xconnd.App{
+	applicationBridge, err := xconnd.NewBridge(t.Context(), bridge, &xconnd.App{
 		Session: appSession,
 		NewSession: func(authID, authRole string) (*xconn.Session, error) {
 			return connectAs(appRouter, common.LocalRealm, authID, authRole)
 		},
 		Prefixes: []string{common.ProcedurePrefix, common.ProcedureAdminPrefix},
-	}))
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, applicationBridge.Close()) })
 
 	set := func(t *testing.T, caller *xconn.Session, enabled bool) error {
 		t.Helper()
-		return caller.Call(common.ProcedureCapabilitiesSet).Args("screenshot", enabled).Do().Err
+		return caller.Call(common.ProcedureCapabilitiesSet).Args("screenshot", enabled).Execute().Err
 	}
 
 	for _, role := range []string{common.RoleOwner, common.RoleAdmin} {
@@ -93,5 +95,5 @@ func connectAs(router *xconn.Router, realm, authID, authRole string) (*xconn.Ses
 	if err != nil {
 		return nil, err
 	}
-	return xconn.NewSession(base, base.Serializer()), nil
+	return xconn.NewSession(base, base.Serializer())
 }

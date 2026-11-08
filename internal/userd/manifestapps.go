@@ -17,7 +17,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // A manifest app's UI is YAML that clients render (see https://github.com/xconnio/app-engine).
@@ -331,21 +331,21 @@ func storeManifest(directory string, files map[string]string) error {
 // Its argument is the app's files as JSON, {"<path>": "<yaml>"}, app.yaml at the root. It
 // returns the app's id. Only the machine's owner and admins may call it (see
 // ProcedureManifestRegister).
-func (c *capabilities) handleManifestRegister(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (c *capabilities) handleManifestRegister(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	if !isManager(inv) {
-		return xconn.NewInvocationError(common.ErrNotAuthorized, "only the machine's owner and admins may register apps")
+		return xconn.NewResultError(common.ErrNotAuthorized, "only the machine's owner and admins may register apps")
 	}
 	payload, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	var files map[string]string
 	if err := json.Unmarshal(payload, &files); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	m, err := resolveManifest(files)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	c.Lock()
@@ -353,64 +353,64 @@ func (c *capabilities) handleManifestRegister(_ context.Context, inv *xconn.Invo
 	if _, ok := c.manifests[m.app.ID]; !ok && slices.ContainsFunc(c.apps(), func(a *app) bool {
 		return a.ID == m.app.ID
 	}) {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, fmt.Sprintf("app %s is already registered",
+		return xconn.NewResultError(common.ErrInvalidArgument, fmt.Sprintf("app %s is already registered",
 			m.app.ID))
 	}
 	if err := storeManifest(filepath.Join(c.manifestsPath, m.app.ID), files); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	c.manifests[m.app.ID] = m
 	c.publish()
 	log.Printf("Registered manifest app %s", m.app.ID)
-	return xconn.NewInvocationResult(m.app.ID)
+	return xconn.NewResult(m.app.ID)
 }
 
 // handleManifestUnregister removes the manifest app with the given id. Only the machine's
 // owner and admins may call it (see ProcedureManifestUnregister).
-func (c *capabilities) handleManifestUnregister(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (c *capabilities) handleManifestUnregister(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	if !isManager(inv) {
-		return xconn.NewInvocationError(common.ErrNotAuthorized, "only the machine's owner and admins may unregister apps")
+		return xconn.NewResultError(common.ErrNotAuthorized, "only the machine's owner and admins may unregister apps")
 	}
 	id, err := inv.ArgString(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	c.Lock()
 	defer c.Unlock()
 	if _, ok := c.manifests[id]; !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "manifest app not found: "+id)
+		return xconn.NewResultError(common.ErrInvalidArgument, "manifest app not found: "+id)
 	}
 	if err := os.RemoveAll(filepath.Join(c.manifestsPath, id)); err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	delete(c.manifests, id)
 	if _, ok := c.states[id]; ok {
 		delete(c.states, id)
 		if err := c.save(); err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 	}
 	c.publish()
 	log.Printf("Unregistered manifest app %s", id)
-	return xconn.NewInvocationResult()
+	return xconn.NewResult()
 }
 
 // handleManifestGet returns an enabled manifest app's resolved app.yaml.
-func (c *capabilities) handleManifestGet(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (c *capabilities) handleManifestGet(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	id, err := inv.ArgString(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 
 	c.Lock()
 	defer c.Unlock()
 	m, ok := c.manifests[id]
 	if !ok {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "manifest app not found: "+id)
+		return xconn.NewResultError(common.ErrInvalidArgument, "manifest app not found: "+id)
 	}
 	if !c.isEnabled(id) {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, disabledMessage(id))
+		return xconn.NewResultError(common.ErrInvalidArgument, disabledMessage(id))
 	}
-	return xconn.NewInvocationResult(m.resolved)
+	return xconn.NewResult(m.resolved)
 }

@@ -2,17 +2,19 @@ package deskconn_test
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	"github.com/stretchr/testify/require"
 
+	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
+	"github.com/xconnio/xconn-core/bindings/go"
+	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 const (
@@ -20,85 +22,45 @@ const (
 	waitTick    = 20 * time.Millisecond
 )
 
-// p2pTestConnection adapts a bare offerer *webrtc.PeerConnection to
-// P2PChannelOpener, letting tests drive DownloadFilesP2P/UploadFilesP2P
-// without a real WAMP handshake -- xconnwebrtc.WebRTCSession satisfies
-// P2PChannelOpener the same way in production.
-type p2pTestConnection struct {
-	pc *webrtc.PeerConnection
-}
-
-func (c *p2pTestConnection) OpenChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error) {
-	return c.pc.CreateDataChannel(label, options)
-}
-
-// newP2PTestConnection establishes one real, connected pair of pion
-// PeerConnections over loopback (host ICE candidates only, no STUN/TURN
-// needed) and wires the answerer's incoming data channels to
-// (*Deskconn).HandleAuxDataChannel -- the exact same production entry point
-// cmd/deskconnd/main.go registers via webRtcManager.OnDataChannel, not a
-// lower-level handler reached only in tests. It returns the offerer side as
-// a ChannelOpener; every DownloadFilesP2P/UploadFilesP2P call in these
-// tests reuses this single PeerConnection for its control call and every
-// parallel worker's channel, matching production.
-func newP2PTestConnection(t *testing.T) deskconn.ChannelOpener {
+// File-transfer tests use the same Rust-backed WAMP/WebRTC connection as production.
+func newP2PTestConnection(t *testing.T) common.StreamSession {
 	t.Helper()
-	return deskconn.P2PChannels(newP2PTestPeerConnection(t))
+	return newP2PTestPeerConnection(t)
 }
 
-// newP2PTestPeerConnection is newP2PTestConnection's offerer, before it's
-// wrapped to open channels directly.
-func newP2PTestPeerConnection(t *testing.T) deskconn.P2PChannelOpener {
+func newP2PTestPeerConnection(t *testing.T) common.StreamSession {
 	t.Helper()
-
-	offererPC, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	router, err := xconn.NewRouter(nil)
 	require.NoError(t, err)
-	answererPC, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	t.Cleanup(router.Close)
+	require.NoError(t, router.AddRealm("test", &xconn.RealmConfig{AutoDiscloseCaller: true, Meta: true,
+		Roles: []xconn.RealmRole{{Name: "anonymous", Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix",
+			AllowCall: true, AllowRegister: true, AllowSubscribe: true, AllowPublish: true}}}}}))
+	signaling, err := xconn.ConnectInMemory(router, "test")
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = offererPC.Close()
-		_ = answererPC.Close()
-	})
-
-	// At least one data channel must exist before the offer to bootstrap the
-	// SCTP association; every channel opened afterward (by common.OpenDataChannel)
-	// rides that same association with no renegotiation needed.
-	_, err = offererPC.CreateDataChannel("bootstrap", nil)
+	t.Cleanup(func() { _ = signaling.Close() })
+	provider := webrtc.NewWebRTCHandler()
+	backend := userd.NewDeskconn(false, t.TempDir())
+	require.NoError(t, backend.Register(signaling))
+	t.Cleanup(func() { backend.CloseStreams() })
+	require.NoError(t, provider.SetupContext(t.Context(), &webrtc.ProviderConfig{
+		Session: signaling, Router: router, ProcedureHandleOffer: "offer",
+		TopicHandleRemoteCandidates: "to-provider", TopicPublishLocalCandidate: "to-client",
+	}))
+	t.Cleanup(func() { _ = provider.Close() })
+	ctx, cancel := context.WithTimeout(t.Context(), waitTimeout)
+	defer cancel()
+	clientSignal, err := xconn.ConnectInMemory(router, "test")
 	require.NoError(t, err)
-
-	var d userd.Deskconn
-	answererPC.OnDataChannel(func(dc *webrtc.DataChannel) {
-		if dc.Label() == "bootstrap" {
-			return
-		}
-		var once sync.Once
-		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-			once.Do(func() {
-				d.HandleFileStreamChannel("test-session", dc, msg.Data)
-			})
-		})
-	})
-
-	offer, err := offererPC.CreateOffer(nil)
+	t.Cleanup(func() { _ = clientSignal.Close() })
+	session, err := webrtc.ConnectWAMPContext(ctx, &webrtc.ClientConfig{Session: clientSignal, Realm: "test",
+		ProcedureWebRTCOffer: "offer", TopicAnswererOnCandidate: "to-provider", TopicOffererOnCandidate: "to-client"})
 	require.NoError(t, err)
-	offerGatherComplete := webrtc.GatheringCompletePromise(offererPC)
-	require.NoError(t, offererPC.SetLocalDescription(offer))
-	<-offerGatherComplete
-
-	require.NoError(t, answererPC.SetRemoteDescription(*offererPC.LocalDescription()))
-	answer, err := answererPC.CreateAnswer(nil)
+	t.Cleanup(func() { _ = session.Close(); _ = session.Connection().Close() })
+	address, err := session.Connection().SelectedRemoteAddress(ctx)
 	require.NoError(t, err)
-	answerGatherComplete := webrtc.GatheringCompletePromise(answererPC)
-	require.NoError(t, answererPC.SetLocalDescription(answer))
-	<-answerGatherComplete
-
-	require.NoError(t, offererPC.SetRemoteDescription(*answererPC.LocalDescription()))
-
-	require.Eventually(t, func() bool {
-		return offererPC.ConnectionState() == webrtc.PeerConnectionStateConnected
-	}, waitTimeout, waitTick, "peer connections never reached the connected state")
-
-	return &p2pTestConnection{pc: offererPC}
+	require.NotEmpty(t, address, "VPN routing needs the selected ICE peer address")
+	return session
 }
 
 func TestDownloadFilesP2PSingleFile(t *testing.T) {
@@ -109,7 +71,7 @@ func TestDownloadFilesP2PSingleFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcFile, content, 0644))
 
 	dstFile := filepath.Join(t.TempDir(), "hello.txt")
-	require.NoError(t, deskconn.DownloadFilesP2P(sess, srcFile, dstFile, false, 0))
+	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 0))
 
 	got, err := os.ReadFile(dstFile)
 	require.NoError(t, err)
@@ -127,7 +89,7 @@ func TestDownloadFilesP2PLargeFileSpansMultipleChunks(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcFile, content, 0644))
 
 	dstFile := filepath.Join(t.TempDir(), "big.bin")
-	require.NoError(t, deskconn.DownloadFilesP2P(sess, srcFile, dstFile, false, 0))
+	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 0))
 
 	got, err := os.ReadFile(dstFile)
 	require.NoError(t, err)
@@ -143,7 +105,7 @@ func TestDownloadFilesP2PDirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "subdir", "nested.txt"), []byte("nested content"), 0644))
 
 	dstDir := t.TempDir()
-	require.NoError(t, deskconn.DownloadFilesP2P(sess, srcDir, dstDir, true, 0))
+	require.NoError(t, deskconn.DownloadFiles(sess, srcDir, dstDir, true, 0))
 
 	base := filepath.Base(srcDir)
 	got, err := os.ReadFile(filepath.Join(dstDir, base, "root.txt"))
@@ -157,7 +119,7 @@ func TestDownloadFilesP2PDirectory(t *testing.T) {
 
 func TestDownloadFilesP2PNonExistentPath(t *testing.T) {
 	sess := newP2PTestConnection(t)
-	err := deskconn.DownloadFilesP2P(sess, "/nonexistent/path/that/does/not/exist", t.TempDir(), false, 0)
+	err := deskconn.DownloadFiles(sess, "/nonexistent/path/that/does/not/exist", t.TempDir(), false, 0)
 	require.Error(t, err)
 }
 
@@ -169,7 +131,7 @@ func TestUploadFilesP2PSingleFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcFile, content, 0644))
 
 	dstFile := filepath.Join(t.TempDir(), "upload.bin")
-	require.NoError(t, deskconn.UploadFilesP2P(sess, srcFile, dstFile, false, 0))
+	require.NoError(t, deskconn.UploadFiles(sess, srcFile, dstFile, false, 0))
 
 	got, err := os.ReadFile(dstFile)
 	require.NoError(t, err)
@@ -185,7 +147,7 @@ func TestUploadFilesP2PDirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "subdir", "nested.txt"), []byte("nested content"), 0644))
 
 	dstDir := t.TempDir()
-	require.NoError(t, deskconn.UploadFilesP2P(sess, srcDir, dstDir, true, 0))
+	require.NoError(t, deskconn.UploadFiles(sess, srcDir, dstDir, true, 0))
 
 	base := filepath.Base(srcDir)
 	got, err := os.ReadFile(filepath.Join(dstDir, base, "root.txt"))
@@ -199,7 +161,7 @@ func TestUploadFilesP2PDirectory(t *testing.T) {
 
 func TestUploadFilesP2PNonExistentLocalPath(t *testing.T) {
 	sess := newP2PTestConnection(t)
-	err := deskconn.UploadFilesP2P(sess, "/nonexistent/local/path", t.TempDir(), false, 0)
+	err := deskconn.UploadFiles(sess, "/nonexistent/local/path", t.TempDir(), false, 0)
 	require.Error(t, err)
 }
 
@@ -214,7 +176,7 @@ func TestDownloadFilesP2PCustomWorkerCount(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcFile, content, 0644))
 
 	dstFile := filepath.Join(t.TempDir(), "custom.bin")
-	require.NoError(t, deskconn.DownloadFilesP2P(sess, srcFile, dstFile, false, 1))
+	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 1))
 
 	got, err := os.ReadFile(dstFile)
 	require.NoError(t, err)

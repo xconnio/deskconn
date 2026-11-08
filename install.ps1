@@ -17,9 +17,8 @@ if ($Arch -eq 'x86' -and $env:PROCESSOR_ARCHITEW6432) {
 
 switch ($Arch) {
     'AMD64' { $GoArch = 'amd64' }
-    'ARM64' { $GoArch = 'arm64' }
     default {
-        Write-Error "Unsupported architecture: $Arch"
+        Write-Error "Unsupported architecture: $Arch. DeskConn requires Windows amd64."
         exit 1
     }
 }

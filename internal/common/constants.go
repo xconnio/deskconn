@@ -13,22 +13,6 @@ const (
 	ErrNoSuchProcedure = "wamp.error.no_such_procedure"
 )
 
-// These WebRTC data-channel labels identify which feature a freshly opened
-// channel belongs to. They're checked both by the client side (when dialing
-// out, see shellclient.go/portstreamclient.go/agentforwardclient.go/
-// logstreamclient.go) and by userd's relay dispatch (see its streamrelay.go), which
-// hands the channel xconn relays to whichever local backend handles that feature -- a
-// file-stream channel has no label of its own (checked last, as the
-// fallback case) since its first message -- a plaintext public key -- is
-// content-indistinguishable from these features' first message.
-const (
-	ShellChannelLabel        = "shell"
-	PortForwardChannelLabel  = "portforward"
-	PortReverseChannelLabel  = "portreverse"
-	AgentForwardChannelLabel = "agentforward"
-	LogChannelLabel          = "logs"
-)
-
 // These are the procedures the local CLI-facing realm exposes (LocalRealm,
 // hosted on deskconn.sock by xconn's app layer, with userd registering the
 // handlers) -- wire-protocol identifiers the CLI (root package) calls
@@ -66,6 +50,20 @@ const (
 // identifiers shared between the CLI and userd regardless of which
 // process implements the handler, so they live here rather than in the
 // host package.
+// RPC endpoints select and authorize features before byte traffic starts.
+const (
+	ProcedureFileListStream     = "io.xconn.deskconn.file.stream.list"
+	ProcedureFileReadStream     = "io.xconn.deskconn.file.stream.read"
+	ProcedureFileInitStream     = "io.xconn.deskconn.file.stream.init"
+	ProcedureFileWriteStream    = "io.xconn.deskconn.file.stream.write"
+	ProcedureShellStream        = "io.xconn.deskconn.shell.stream"
+	ProcedurePortForwardStream  = "io.xconn.deskconn.port.forward.stream"
+	ProcedurePortReverseStream  = "io.xconn.deskconn.port.reverse.stream"
+	ProcedureAgentForwardStream = "io.xconn.deskconn.agent.forward.stream"
+	ProcedureLogsStream         = "io.xconn.deskconn.logs.stream"
+	ProcedureProxyStream        = LocalProcedurePrefix + "proxy.stream"
+)
+
 const (
 	ProcedureKeyExchange    = "io.xconn.deskconn.key.exchange"
 	ProcedureShellIsBusy    = "io.xconn.deskconn.shell.isbusy"
@@ -206,32 +204,10 @@ const (
 )
 
 const (
-	P2PMsgControl byte = iota // encrypted JSON control message (FSRequest/FSResponse)
-	P2PMsgData                // encrypted raw chunk bytes
-)
-
-const (
-	// FileStreamChunkSize is the size of each binary data channel message
-	// used while streaming a byte range, in either direction. Set just under
-	// pion's default SCTP max message size (math.MaxUint16 = 65535 bytes),
-	// leaving room for the 1-byte envelope kind prefix and the 28-byte
-	// ChaCha20-Poly1305 nonce+tag overhead.
-	FileStreamChunkSize = 65024
-
-	// FileStreamMaxBuffered/FileStreamBufferedLow mirror the backpressure
-	// thresholds used for the main WAMP peer in xconn-webrtc-go's peer.go, so a
-	// slow reader can't make the send buffer grow unbounded.
-	FileStreamMaxBuffered = 512 * 1024 // 512KB
-	FileStreamBufferedLow = 256 * 1024 // 256KB
-
-	// FileStreamRequestTimeout bounds how long a write handler waits between
-	// binary messages before giving up on a stalled sender.
-	FileStreamRequestTimeout = 10 * time.Second
-
-	// FileStreamSessionIdleTimeout bounds how long a read/write channel
+	// FileStreamSessionIdleTimeout bounds how long a read/write stream
 	// waits for the next chunk request from its worker before giving up and
 	// closing -- normally the worker either sends another request right away
-	// or closes the channel itself once its share of the transfer is done.
+	// or closes the stream once its share of the transfer is done.
 	FileStreamSessionIdleTimeout = 30 * time.Second
 )
 
@@ -387,41 +363,6 @@ const ShellIdleTimeout = FileStreamSessionIdleTimeout
 const (
 	ShellMsgControl byte = iota // encrypted JSON ShellControlMsg
 	ShellMsgData                // encrypted raw PTY input/output bytes
-)
-
-const (
-	RelayKindQUIC   RelayKind = "quic"
-	RelayKindWebRTC RelayKind = "webrtc"
-)
-
-const (
-	relayFrameBinary relayFrameKind = 0
-	relayFrameText   relayFrameKind = 1
-)
-
-// maxRelayFrameSize bounds ReadRelayFrame's allocation.
-const maxRelayFrameSize = 1 << 20 // 1 MiB
-
-// relayBufferedHigh/Low bound how much data RelayWebRTCChannel lets pile up
-// in the real channel's own SCTP send buffer before pausing reads from conn.
-const (
-	RelayBufferedHigh = 512 * 1024
-	RelayBufferedLow  = 256 * 1024
-)
-
-// StreamProxySocket is userd's stream proxy socket, in the config directory.
-const StreamProxySocket = "deskconn-streams.sock"
-
-// StreamProxyConnectTimeout bounds connecting to the machine for a stream proxy request.
-const StreamProxyConnectTimeout = 30 * time.Second
-
-// Socket and channel buffer sizes for the stream proxy, chosen so a proxied stream
-// buffers about as much as a direct one in each direction.
-const (
-	StreamProxyUpstreamBuffer   = 64 * 1024 // CLI -> userd
-	StreamProxyDownstreamBuffer = 2 << 20   // userd -> CLI
-	StreamProxyBufferedHigh     = 256 * 1024
-	StreamProxyBufferedLow      = 128 * 1024
 )
 
 const (

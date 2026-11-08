@@ -6,20 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strings"
-	"sync/atomic"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
-	xconnauth "github.com/xconnio/xconn-go/auth"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	auth "github.com/xconnio/xconn-core/bindings/go/auth"
+	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 var ErrKeyExpired = errors.New("authentication key expired, please login again")
@@ -49,24 +45,10 @@ func CfgDirectory() (string, error) {
 	return cfgDirectory, nil
 }
 
-// UnixSocketURI builds a "unix://" URI for a local unix-domain-socket path, for xconn.Connect*
-// functions -- which parse the URI with net/url and dial its .Path field directly.
-//
-// On Windows, net/url unconditionally prepends "/" to a hierarchical URI's path, and Windows'
-// AF_UNIX implementation rejects that leading slash once it's followed by a drive letter (e.g.
-// "/C:/Users/..."), regardless of which slash direction the rest of the path uses. Stripping
-// the drive letter and converting to forward slashes works around this: Windows resolves a
-// driveless absolute path against the dialing process's current drive, which is always correct
-// here since every caller builds path from CfgDirectory (the current user's own profile
-// directory) - always on the same drive as whatever deskconn process is doing the dialing.
+// UnixSocketURI builds the local yamux URI on Unix systems.
+// Use ConnectDaemon for a connection that also supports Windows.
 func UnixSocketURI(path string) string {
-	if runtime.GOOS == "windows" {
-		if len(path) >= 2 && path[1] == ':' {
-			path = path[2:]
-		}
-		path = strings.ReplaceAll(path, `\`, "/")
-	}
-	return "unix://" + path
+	return "unix+yamux://" + path
 }
 
 func MachinesFromCfg(cfgDirectory string) ([]Machine, error) {
@@ -129,7 +111,7 @@ func ConnectMachineRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*
 		return nil, err
 	}
 
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, nil)
+	authenticator, err := auth.NewCryptoSignAuthenticator(authid, privKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
@@ -167,20 +149,10 @@ func ICEServers() []xconnwebrtc.ICEServer {
 	})
 }
 
-// ConnectWebrtcSession negotiates a WebRTC session to realm's machine, signaling over
-// session, and joins realm over it with authenticator. The connection is closed once it
-// fails, so every data channel on it reports closed: pion doesn't close them on a failed
-// connection by itself, which would leave a shell or port forward to a machine that
-// went away waiting forever.
+// ConnectWebrtcSession negotiates a direct WebRTC session using WAMP signaling.
+// The Rust transport closes failed peer connections and their data channels.
 func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator auth.ClientAuthenticator,
 	onDisconnect func()) (*xconnwebrtc.WebRTCSession, error) {
-	var connection atomic.Pointer[webrtc.PeerConnection]
-	closeIfFailed := func() {
-		if pc := connection.Load(); pc != nil && pc.ConnectionState() == webrtc.PeerConnectionStateFailed {
-			// From its own goroutine, not from inside pion's state change callback.
-			SafeGo(func() { _ = pc.Close() })
-		}
-	}
 	config := &xconnwebrtc.ClientConfig{
 		Realm:                    realm,
 		ProcedureWebRTCOffer:     ProcedureWebRTCOffer,
@@ -191,7 +163,6 @@ func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator au
 		Session:                  session,
 		ICEServers:               ICEServers(),
 		OnDisconnect: func() {
-			closeIfFailed()
 			if onDisconnect != nil {
 				onDisconnect()
 			}
@@ -202,8 +173,6 @@ func ConnectWebrtcSession(session *xconn.Session, realm string, authenticator au
 	if err != nil {
 		return nil, err
 	}
-	connection.Store(webrtcSess.Connection())
-	closeIfFailed() // in case it failed before connection was set
 	return webrtcSess, nil
 }
 
@@ -227,7 +196,7 @@ func ClientKeyExchangeWith(session *xconn.Session, procedure string) (*SessionKe
 		return nil, err
 	}
 
-	keyResp := session.Call(procedure).Args(publicKey).Do()
+	keyResp := session.Call(procedure).Args(publicKey).Execute()
 	if keyResp.Err != nil {
 		return nil, keyResp.Err
 	}
@@ -253,7 +222,7 @@ func EncryptedCall(session *xconn.Session, procedure string, payload []byte, enc
 		return nil, err
 	}
 
-	opResp := session.Call(procedure).Args(encrypted).Do()
+	opResp := session.Call(procedure).Args(encrypted).Execute()
 	if opResp.Err != nil {
 		return nil, opResp.Err
 	}

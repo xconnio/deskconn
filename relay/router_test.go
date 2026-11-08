@@ -2,16 +2,19 @@ package relay_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 const (
@@ -96,28 +99,28 @@ func TestCustomCallbacks(t *testing.T) {
 	// The machine from the Machines callback serves its realm, and the user reaches it.
 	machine, err := connect(t, uri, machineRealm, machineAuthID, machineKey.private)
 	require.NoError(t, err)
-	resp := machine.Register(procedurePing, func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-		return xconn.NewInvocationResult("pong")
-	}).Do()
+	resp := machine.Register(procedurePing, func(context.Context, *xconn.Invocation) *xconn.Result {
+		return xconn.NewResult("pong")
+	}).Execute()
 	require.NoError(t, resp.Err)
 
 	user, err := connect(t, uri, machineRealm, userAuthID, userKey.private)
 	require.NoError(t, err)
-	callResp := user.Call(procedurePing).Do()
+	callResp := user.Call(procedurePing).Execute()
 	require.NoError(t, callResp.Err)
 	require.Equal(t, "pong", callResp.ArgStringOr(0, ""))
 
 	// Apps' procedures, under AppPrefixes, are served the same way; other prefixes aren't.
-	resp = machine.Register(procedureAppPing, func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-		return xconn.NewInvocationResult("app pong")
-	}).Do()
+	resp = machine.Register(procedureAppPing, func(context.Context, *xconn.Invocation) *xconn.Result {
+		return xconn.NewResult("app pong")
+	}).Execute()
 	require.NoError(t, resp.Err)
-	callResp = user.Call(procedureAppPing).Do()
+	callResp = user.Call(procedureAppPing).Execute()
 	require.NoError(t, callResp.Err)
 	require.Equal(t, "app pong", callResp.ArgStringOr(0, ""))
-	resp = machine.Register("io.xconn.other.ping", func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-		return xconn.NewInvocationResult()
-	}).Do()
+	resp = machine.Register("io.xconn.other.ping", func(context.Context, *xconn.Invocation) *xconn.Result {
+		return xconn.NewResult()
+	}).Execute()
 	require.Error(t, resp.Err)
 
 	// Authenticate refuses who it doesn't know.
@@ -129,13 +132,13 @@ func TestCustomCallbacks(t *testing.T) {
 	require.NoError(t, r.AddMachine(second))
 	secondSession, err := connect(t, uri, secondRealmName, secondAuthID, secondKey.private)
 	require.NoError(t, err)
-	resp = secondSession.Register(procedurePing, func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-		return xconn.NewInvocationResult("pong 2")
-	}).Do()
+	resp = secondSession.Register(procedurePing, func(context.Context, *xconn.Invocation) *xconn.Result {
+		return xconn.NewResult("pong 2")
+	}).Execute()
 	require.NoError(t, resp.Err)
 	secondUser, err := connect(t, uri, secondRealmName, userAuthID, userKey.private)
 	require.NoError(t, err)
-	callResp = secondUser.Call(procedurePing).Do()
+	callResp = secondUser.Call(procedurePing).Execute()
 	require.NoError(t, callResp.Err)
 	require.Equal(t, "pong 2", callResp.ArgStringOr(0, ""))
 
@@ -143,11 +146,62 @@ func TestCustomCallbacks(t *testing.T) {
 	if late, err := connect(t, uri, secondRealmName, userAuthID, userKey.private); err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		require.Error(t, late.Call(procedurePing).DoContext(ctx).Err, "no longer served")
+		require.Error(t, late.Call(procedurePing).ExecuteContext(ctx).Err, "no longer served")
 	}
 }
 
 func TestAuthenticateRequired(t *testing.T) {
 	_, err := relay.New(context.Background(), relay.Config{})
 	require.ErrorContains(t, err, "Authenticate is required")
+}
+
+func TestCertificateEndpointClosesWithServingContext(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	httpAddress := httpListener.Addr().String()
+	require.NoError(t, httpListener.Close())
+	udpListener, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	udpAddress := udpListener.LocalAddr().String()
+	require.NoError(t, udpListener.Close())
+	router, err := relay.New(ctx, relay.Config{
+		Authenticate:        func(auth.Request) (auth.Response, error) { return auth.NewResponse("test", "trusted", 0) },
+		WebTransportAddress: udpAddress, CertHashAddress: httpAddress,
+	})
+	require.NoError(t, err)
+	defer router.Close()
+	serving, stop := context.WithCancel(ctx)
+	defer stop()
+	finished := make(chan error, 1)
+	go func() { finished <- router.Serve(serving) }()
+	client := &http.Client{Timeout: time.Second}
+	require.Eventually(t, func() bool {
+		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+httpAddress+"/wt-cert-hash", nil)
+		if requestErr != nil {
+			return false
+		}
+		response, requestErr := client.Do(request)
+		if requestErr != nil {
+			return false
+		}
+		defer response.Body.Close()
+		var value struct{ Hash string }
+		if json.NewDecoder(response.Body).Decode(&value) != nil {
+			return false
+		}
+		hash, decodeErr := base64.StdEncoding.DecodeString(value.Hash)
+		return decodeErr == nil && len(hash) == 32
+	}, 3*time.Second, 10*time.Millisecond)
+	stop()
+	select {
+	case err = <-finished:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("Hub did not join its certificate endpoint")
+	}
+	listener, err := net.Listen("tcp", httpAddress)
+	require.NoError(t, err, "certificate listener survived shutdown")
+	require.NoError(t, listener.Close())
 }

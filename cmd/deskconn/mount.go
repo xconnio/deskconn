@@ -7,7 +7,6 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
 )
 
 func mountFiles(cfgDirectory, target, mountpoint, mode string, readOnly, debug bool) error {
@@ -40,7 +39,7 @@ func mountFiles(cfgDirectory, target, mountpoint, mode string, readOnly, debug b
 				Close: func() { _ = p2pSess.Leave() },
 			}, nil
 		default:
-			localSession, err := xconn.ConnectAnonymous(ctx, common.DaemonURI(cfgDirectory), common.LocalRealm)
+			localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
 			if err != nil {
 				return nil, err
 			}

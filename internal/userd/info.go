@@ -5,10 +5,10 @@ import (
 	"math"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
-func (d *Deskconn) handleMachineInfo(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleMachineInfo(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult
@@ -16,16 +16,16 @@ func (d *Deskconn) handleMachineInfo(_ context.Context, inv *xconn.Invocation) *
 
 	machineInfo, err := GetMachineInfo()
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	return encryptResult(enc, machineInfo)
 }
 
-func (d *Deskconn) handleMachineIsDesktop(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
-	return xconn.NewInvocationResult(d.desktop)
+func (d *Deskconn) handleMachineIsDesktop(_ context.Context, _ *xconn.Invocation) *xconn.Result {
+	return xconn.NewResult(d.desktop)
 }
 
-func (d *Deskconn) handleProcessList(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleProcessList(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult
@@ -33,7 +33,7 @@ func (d *Deskconn) handleProcessList(_ context.Context, inv *xconn.Invocation) *
 
 	infos, err := d.processes.List()
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	return encryptResult(enc, infos)
 }
@@ -44,7 +44,7 @@ type processSignalArgs struct {
 	Signal string  `json:"signal"`
 }
 
-func (d *Deskconn) handleProcessSignal(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleProcessSignal(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult
@@ -58,19 +58,19 @@ func (d *Deskconn) handleProcessSignal(_ context.Context, inv *xconn.Invocation)
 	pids := make([]int32, 0, len(args.PIDs))
 	for _, pid64 := range args.PIDs {
 		if pid64 < 0 || pid64 > math.MaxInt32 {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, "pid out of range")
+			return xconn.NewResultError(common.ErrInvalidArgument, "pid out of range")
 		}
 		pids = append(pids, int32(pid64))
 	}
 
 	results, err := SignalProcesses(pids, args.Signal)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	return encryptResult(enc, results)
 }
 
-func (d *Deskconn) handleAppList(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleAppList(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult
@@ -78,7 +78,7 @@ func (d *Deskconn) handleAppList(_ context.Context, inv *xconn.Invocation) *xcon
 
 	procs, err := d.processes.List()
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	return encryptResult(enc, d.appRegistry.Build(procs))
 }
@@ -89,7 +89,7 @@ type imageResult struct {
 	Data []byte `json:"data"`
 }
 
-func (d *Deskconn) handleAppIcon(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleAppIcon(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult
@@ -102,7 +102,7 @@ func (d *Deskconn) handleAppIcon(_ context.Context, inv *xconn.Invocation) *xcon
 
 	mimeType, data, err := ReadIcon(name)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	return encryptResult(enc, imageResult{Mime: mimeType, Data: data})
 }

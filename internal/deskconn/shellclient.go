@@ -13,12 +13,10 @@ import (
 	"time"
 
 	"github.com/muesli/cancelreader"
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
 )
 
 // ModeRouted/ModeDirect are the "routed"/"direct" --mode flag values every raw-stream
@@ -49,46 +47,11 @@ type shellConn interface {
 	close() error
 }
 
-type quicClientShellConn struct{ stream net.Conn }
+type streamClientShellConn struct{ stream net.Conn }
 
-func (c *quicClientShellConn) sendEnvelope(e []byte) error   { return common.WriteFrame(c.stream, e) }
-func (c *quicClientShellConn) recvEnvelope() ([]byte, error) { return common.ReadFrame(c.stream) }
-func (c *quicClientShellConn) close() error                  { return c.stream.Close() }
-
-type p2pClientShellConn struct {
-	channel common.MessageChannel
-	msgCh   chan []byte
-	closed  <-chan struct{}
-}
-
-// newP2PClientShellConn takes over channel's OnMessage handler -- callers
-// must complete key exchange first and pass webrtcBackpressure's existing
-// closed channel rather than calling webrtcBackpressure again, which would
-// replace its OnClose/OnError registration.
-func newP2PClientShellConn(channel common.MessageChannel, closed <-chan struct{}) *p2pClientShellConn {
-	c := &p2pClientShellConn{channel: channel, msgCh: make(chan []byte, 8), closed: closed}
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		common.DeliverUnlessClosed(c.msgCh, msg.Data, closed)
-	})
-	return c
-}
-
-func (c *p2pClientShellConn) sendEnvelope(e []byte) error { return c.channel.Send(e) }
-func (c *p2pClientShellConn) recvEnvelope() ([]byte, error) {
-	select {
-	case data := <-c.msgCh:
-		return data, nil
-	case <-c.closed:
-		// Whatever arrived before the close still comes first.
-		select {
-		case data := <-c.msgCh:
-			return data, nil
-		default:
-			return nil, io.ErrClosedPipe
-		}
-	}
-}
-func (c *p2pClientShellConn) close() error { return c.channel.Close() }
+func (c *streamClientShellConn) sendEnvelope(e []byte) error   { return common.WriteFrame(c.stream, e) }
+func (c *streamClientShellConn) recvEnvelope() ([]byte, error) { return common.ReadFrame(c.stream) }
+func (c *streamClientShellConn) close() error                  { return c.stream.Close() }
 
 func sendShellControl(conn shellConn, sendKey []byte, msg common.ShellControlMsg) error {
 	plaintext, err := json.Marshal(msg)
@@ -142,30 +105,26 @@ func dialShellQUIC(ctx context.Context, realm, cfgDirectory string,
 	if err != nil {
 		return nil, err
 	}
-	return shellHandshakeQUIC(quicSess, realm, ctrl, func() { _ = quicSess.Connection().Close() })
+	return shellHandshakeOnStream(ctx, quicSess, ctrl, func() { _ = quicSess.Connection().Close() })
 }
 
-// shellHandshakeQUIC opens the shell on a stream of sess. release frees sess: it's
+// shellHandshakeOnStream opens the shell on a stream of sess. release frees sess: it's
 // called if the handshake fails, and otherwise becomes part of the result's cleanup.
-func shellHandshakeQUIC(sess xconn.MultiplexedSession, realm string, ctrl common.ShellControlMsg,
+func shellHandshakeOnStream(ctx context.Context, sess common.StreamSession, ctrl common.ShellControlMsg,
 	release func()) (*shellHandshakeResult, error) {
-	stream, err := sess.OpenStream()
+	stream, err := common.OpenRPCStream(ctx, sess, common.ProcedureShellStream, false)
 	if err != nil {
 		release()
 		return nil, err
 	}
 	cleanup := func() { _ = stream.Close(); release() }
-	if err := common.WriteMsg(stream, common.RoutingFrame{Realm: realm, Op: common.FSOpShell}); err != nil {
-		cleanup()
-		return nil, err
-	}
-	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
+	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
 	if err != nil {
 		cleanup()
 		return nil, err
 	}
 
-	conn := &quicClientShellConn{stream: stream}
+	conn := &streamClientShellConn{stream: stream}
 	if err := sendShellControl(conn, sendKey, ctrl); err != nil {
 		cleanup()
 		return nil, err
@@ -187,48 +146,14 @@ func dialShellP2P(ctx context.Context, realm, cfgDirectory string,
 	if err != nil {
 		return nil, err
 	}
-	return shellHandshakeP2P(P2PChannels(p2pSess), ctrl, func() { _ = p2pSess.Close() })
-}
-
-// shellHandshakeP2P is shellHandshakeQUIC over a data channel.
-func shellHandshakeP2P(p2pSess ChannelOpener, ctrl common.ShellControlMsg,
-	release func()) (*shellHandshakeResult, error) {
-	channel, err := p2pSess.OpenMessageChannel(common.ShellChannelLabel)
-	if err != nil {
-		release()
-		return nil, err
-	}
-	cleanup := func() { _ = channel.Close(); release() }
-	closed, _ := common.WebrtcBackpressure(channel)
-	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
-	if err != nil {
-		cleanup()
-		return nil, err
-	}
-
-	conn := newP2PClientShellConn(channel, closed)
-	if err := sendShellControl(conn, sendKey, ctrl); err != nil {
-		cleanup()
-		return nil, err
-	}
-	ack, err := recvShellAck(conn, receiveKey)
-	if err != nil {
-		cleanup()
-		return nil, err
-	}
-	return &shellHandshakeResult{
-		conn: conn, sendKey: sendKey, receiveKey: receiveKey,
-		shellID: ack.ShellID, token: ack.Token, cleanup: cleanup,
-	}, nil
+	return shellHandshakeOnStream(ctx, p2pSess, ctrl, func() { _ = p2pSess.Close() })
 }
 
 // dialShellDaemon opens the shell on userd's persistent connection.
-func dialShellDaemon(ds *DaemonStreams, realm string, ctrl common.ShellControlMsg) (*shellHandshakeResult, error) {
+func dialShellDaemon(ctx context.Context, ds *DaemonStreams,
+	ctrl common.ShellControlMsg) (*shellHandshakeResult, error) {
 	release := func() { _ = ds.Close() }
-	if ds.P2P() {
-		return shellHandshakeP2P(ds, ctrl, release)
-	}
-	return shellHandshakeQUIC(ds, realm, ctrl, release)
+	return shellHandshakeOnStream(ctx, ds, ctrl, release)
 }
 
 // activeShellConn is the connection the stdin/resize/output loops below are
@@ -382,7 +307,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 		daemon, err = DialDaemonStreams(ctx, realm, cfgDirectory)
 		switch {
 		case err == nil:
-			primary, err = dialShellDaemon(daemon, realm, ctrl)
+			primary, err = dialShellDaemon(ctx, daemon, ctrl)
 		case errors.Is(err, ErrDaemonUnavailable):
 			primary, err = dialShellQUIC(ctx, realm, cfgDirectory, ctrl)
 		}
@@ -418,7 +343,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 			if err != nil {
 				return nil, err
 			}
-			return dialShellDaemon(p2p, realm, migrateCtrl)
+			return dialShellDaemon(ctx, p2p, migrateCtrl)
 		})
 	case daemon == nil && mode == "":
 		go migrateShell(active, primary, func() (*shellHandshakeResult, error) {

@@ -10,7 +10,7 @@ RPC-associated byte streams. VPN retains its native datagram channel.
 The app uses the published Core Go module and Native SDK `v0.1.6`. A sibling
 Core checkout and Rust are not required.
 
-## Build and test on Linux or macOS
+## Build and test on Linux or Apple Silicon macOS
 
 Install Go, a C compiler and pkg-config. Install the released native SDK once,
 then use the normal build commands:
@@ -53,20 +53,30 @@ build uses the `xconn_static`, `netgo`, and `osusergo` Go tags and external stat
 linking. Linux glibc runtime facilities may still load system modules; this does
 not promise a hermetic executable on every Linux distribution.
 
-## Release work still required
+## Releases and Windows
 
-The existing CI and GoReleaser setup targets the former standalone Go build.
-Before publishing this migration, make those jobs install the released static SDK.
-The Go module dependency now resolves from its published release.
-The native SDK supports Linux, macOS ARM64 and Windows amd64. Windows builds
-require MinGW-w64 GCC and manual SDK extraction; the shell installer supports
-Linux and macOS. The release jobs still need per-platform SDK setup. Do not use the
-existing release configuration to distribute this development integration.
+Releases build Linux amd64/arm64 and Windows amd64 using the matching published
+static SDKs. GoReleaser enables Cgo and selects GCC, ARM64 GCC or MinGW-w64 GCC.
+`ci/prepare-release-sdk.sh` downloads and verifies each archive. The release
+workflow installs these toolchains before building. Windows arm64 is excluded
+because XConn does not support it yet.
 
-The migration is exercised by the DeskConn race suite, including encrypted file
-transfers, standalone QUIC/WebTransport authentication, persistent stream proxies
-and Rust-backed WebRTC channels. Independent original-Go interoperability tests
-live in the XConn repository.
+Prebuilt macOS releases are disabled for now. macOS source support is retained;
+the published native SDK supports source builds on Apple Silicon.
+
+For a local Windows build, use an MSYS2 MinGW64 shell with Go, GCC and pkg-config:
+
+```sh
+ci/prepare-release-sdk.sh /tmp/xconn-sdk windows_amd64
+export PKG_CONFIG_PATH=/tmp/xconn-sdk/windows_amd64/lib/pkgconfig
+go build -tags xconn_static -ldflags "-linkmode external -extldflags '-static'" -o deskconn.exe ./cmd/deskconn
+```
+
+Windows local applications use authenticated loopback yamux because the native
+SDK has no Windows Unix-socket support. The daemon writes an owner-only endpoint
+file with a fresh random secret. CLI commands use `common.ConnectDaemon`;
+applications use `appkit.Connect(ctx, cfgDirectory)` on every platform.
+Unix applications may continue using `appkit.SocketURI` with a normal client.
 
 ## Shared connectivity
 
@@ -78,28 +88,10 @@ The former raw-stream relay sockets and feature data-channel endpoints are
 removed. Web and mobile clients must adopt the RPC stream endpoints before
 deploying this backend; older raw-channel clients cannot use them.
 
-## Static binary size measurements
-
-Measured on Ubuntu 26.04, x86-64, with Go 1.26, retaining every transport.
-All sizes are after `strip`, in decimal MB; each row includes preceding changes.
-
-| Build | Size |
-| --- | ---: |
-| Original static build | 48.60 MB |
-| Discard unused linker sections | 41.43 MB |
-| Thin LTO and one Rust codegen unit | 37.91 MB |
-| Rust size optimization (`opt-level = "z"`) | 34.45 MB |
-| Use rustls instead of OpenSSL for WebSocket TLS | 27.88 MB |
-
-The final build is 42.6% smaller. Panic unwinding remains enabled. Functional
-Rust, Go binding, DeskConn, and TLS certificate validation tests passed; these
-measurements do not establish the throughput impact of size optimization.
-QUIC and WebTransport still use separate upstream QUIC implementations.
-
 ## Application ownership
 
 `internal/connectivity` owns DeskConn’s attachment protocol, identity/credential
-storage and device roles. RPC streams share the Unix yamux application socket.
+storage and device roles. RPC streams share the local yamux application connection.
 Generic RPC bridging runs in the Rust XConn engine; DeskConn owns its cloud
 reconnect policy. Packet encryption also delegates to
 `bindings/go/crypto`, preserving the existing key labels and packet format.

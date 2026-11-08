@@ -11,12 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/vpnwin"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
+	"github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // The same bounds as common.PumpTUNToChannel, which only reads from a file.
@@ -27,12 +26,11 @@ const (
 
 // pinTargets returns what must keep using the current default route once it's replaced: the
 // WebRTC peer, so the tunnel doesn't route into itself, and the cloud relay.
-func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []net.IP {
+func pinTargets(ctx context.Context, session *webrtc.WebRTCSession) []net.IP {
 	var ips []net.IP
 
-	if pair, err := session.Connection().SCTP().Transport().ICETransport().GetSelectedCandidatePair(); err == nil &&
-		pair != nil && pair.Remote != nil {
-		if ip := net.ParseIP(pair.Remote.Address); ip != nil {
+	if address, err := session.Connection().SelectedRemoteAddress(ctx); err == nil {
+		if ip := net.ParseIP(address); ip != nil {
 			ips = append(ips, ip)
 		}
 	}
@@ -52,7 +50,7 @@ func pinTargets(ctx context.Context, session *xconnwebrtc.WebRTCSession) []net.I
 // ConnectVPNClient does what the Linux one does, in this process rather than through a root
 // helper: the Windows tunnel process is itself elevated, as Wintun sessions can't leave the
 // process that started them. Removing the device on the way out undoes everything it set up.
-func ConnectVPNClient(ctx context.Context, session *xconnwebrtc.WebRTCSession, onReady func()) error {
+func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, onReady func()) error {
 	device, err := vpnwin.Open(common.VPNClientTUNName)
 	if err != nil {
 		return err

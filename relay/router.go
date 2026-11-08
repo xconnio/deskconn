@@ -1,5 +1,5 @@
 // Package relay is the Deskconn cloud router: the cloud realm, a realm per machine, and the
-// relay that carries clients' raw streams to machines. Who may join, and which machines
+// RPC streams that carry clients' data to machines. Who may join, and which machines
 // exist, are left to callbacks (see Config), so it runs with any account backend.
 package relay
 
@@ -10,13 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 const (
@@ -88,8 +88,8 @@ type Config struct {
 	MachinePermissions func(authid string) []xconn.Permission
 
 	// UserRoles are the roles users get in a machine's realm, with what each may do there
-	// (see MachineUserPermissions). Users with any of them may also relay raw streams to the
-	// machine. Which machines a user may join, and with which role, is up to Authenticate.
+	// (see MachineUserPermissions). RPC streams follow these procedure permissions.
+	// Which machines a user may join, and with which role, is up to Authenticate.
 	UserRoles []xconn.RealmRole
 
 	// Where to listen. An empty address leaves that transport off.
@@ -110,7 +110,6 @@ type Router struct {
 	config  Config
 	router  *xconn.Router
 	session *xconn.Session
-	relay   *connBroker
 }
 
 // New sets up the realms, including those of config.Machines, ready to Serve.
@@ -123,18 +122,20 @@ func New(ctx context.Context, config Config) (*Router, error) {
 	if err != nil {
 		return nil, err
 	}
+	r := &Router{config: config, router: router}
+	ready := false
+	defer func() {
+		if !ready {
+			r.Close()
+		}
+	}()
+
 	if err := router.AddRealm(CloudRealm, &xconn.RealmConfig{AutoDiscloseCaller: true, Roles: config.Roles}); err != nil {
 		return nil, err
 	}
 	if err := router.EnableMetaAPI(CloudRealm); err != nil {
 		return nil, err
 	}
-
-	userRoles := make(map[string]bool, len(config.UserRoles))
-	for _, role := range config.UserRoles {
-		userRoles[role.Name] = true
-	}
-	r := &Router{config: config, router: router, relay: newConnBroker(userRoles)}
 
 	if config.Machines != nil {
 		machines, err := config.Machines(ctx)
@@ -155,7 +156,17 @@ func New(ctx context.Context, config Config) (*Router, error) {
 	if err := r.registerProcedures(); err != nil {
 		return nil, err
 	}
+	ready = true
 	return r, nil
+}
+
+// Close releases the router and its internal session. Cancel Serve's context
+// and wait for it to return before closing the router.
+func (r *Router) Close() {
+	if r.session != nil {
+		_ = r.session.Close()
+	}
+	r.router.Close()
 }
 
 // Session is the router's own session on the cloud realm, e.g. for Config.Authenticate to
@@ -166,9 +177,12 @@ func (r *Router) Session() *xconn.Session {
 
 // Serve listens on config's addresses until ctx is done.
 func (r *Router) Serve(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
+
 	server := xconn.NewServer(r.router, authenticator{authenticate: r.config.Authenticate}, &xconn.ServerConfig{
-		KeepAliveInterval: 30 * time.Second,
-		KeepAliveTimeout:  10 * time.Second,
+		KeepAliveInterval: 30 * time.Second, KeepAliveTimeout: 10 * time.Second,
 	})
 
 	if r.config.RawSocketAddress != "" {
@@ -188,23 +202,12 @@ func (r *Router) Serve(ctx context.Context) error {
 				return err
 			}
 		}
-		listener, err := server.ListenAndServeQUIC(r.config.QUICAddress, tlsConfig)
+		listener, err := server.ListenQUIC(ctx, r.config.QUICAddress, &tlsConfig.Certificates[0])
 		if err != nil {
 			return fmt.Errorf("failed to start QUIC listener: %w", err)
 		}
 		defer listener.Close()
 		log.Printf("QUIC listening on %s", r.config.QUICAddress)
-
-		go func() {
-			for conn := range listener.AcceptSession() {
-				go r.relay.onDeviceConnect(conn.Ctx, conn.Session, conn.QUICConn)
-			}
-		}()
-		go func() {
-			for stream := range listener.AcceptStream() {
-				go r.relay.onClientStream(stream.Conn, stream.Session)
-			}
-		}()
 	}
 
 	if r.config.WebTransportAddress != "" {
@@ -218,26 +221,17 @@ func (r *Router) Serve(ctx context.Context) error {
 			if r.config.CertHashAddress != "" {
 				// Browsers trust a self-signed certificate through serverCertificateHashes,
 				// without installing a CA.
-				go serveCertHash(r.config.CertHashAddress, base64.StdEncoding.EncodeToString(certHash))
+				workers.Go(func() {
+					serveCertHash(ctx, r.config.CertHashAddress, base64.StdEncoding.EncodeToString(certHash))
+				})
 			}
 		}
-		listener, err := server.ListenAndServeWebTransport(r.config.WebTransportAddress, tlsConfig, "/wamp")
+		listener, err := server.ListenWebTransport(ctx, r.config.WebTransportAddress, "/wamp", tlsConfig.Certificates[0])
 		if err != nil {
 			return fmt.Errorf("failed to start WebTransport listener: %w", err)
 		}
 		defer listener.Close()
 		log.Printf("WebTransport listening on %s", r.config.WebTransportAddress)
-
-		go func() {
-			for range listener.AcceptSession() {
-				// Browser WAMP sessions are fully handled by the router.
-			}
-		}()
-		go func() {
-			for stream := range listener.AcceptStream() {
-				go r.relay.onClientStream(stream.Conn, stream.Session)
-			}
-		}()
 	}
 
 	<-ctx.Done()
@@ -302,22 +296,22 @@ func (r *Router) RemoveMachine(machine Machine) error {
 // registerProcedures registers ProcedureAddRealm and ProcedureRemoveRealm.
 func (r *Router) registerProcedures() error {
 	machineHandler := func(apply func(Machine) error) xconn.InvocationHandler {
-		return func(_ context.Context, invocation *xconn.Invocation) *xconn.InvocationResult {
+		return func(_ context.Context, invocation *xconn.Invocation) *xconn.Result {
 			if len(invocation.Args()) != 2 {
-				return xconn.NewInvocationError(errInvalidArgument, "must be called with two arguments (realm and authid)")
+				return xconn.NewResultError(errInvalidArgument, "must be called with two arguments (realm and authid)")
 			}
 			realm, err := invocation.ArgString(0)
 			if err != nil {
-				return xconn.NewInvocationError(errInvalidArgument, err.Error())
+				return xconn.NewResultError(errInvalidArgument, err.Error())
 			}
 			authid, err := invocation.ArgString(1)
 			if err != nil {
-				return xconn.NewInvocationError(errInvalidArgument, err.Error())
+				return xconn.NewResultError(errInvalidArgument, err.Error())
 			}
 			if err := apply(Machine{AuthID: authid, Realm: realm}); err != nil {
-				return xconn.NewInvocationError(errOperationFailed, err.Error())
+				return xconn.NewResultError(errOperationFailed, err.Error())
 			}
-			return xconn.NewInvocationResult()
+			return xconn.NewResult()
 		}
 	}
 
@@ -325,7 +319,7 @@ func (r *Router) registerProcedures() error {
 		ProcedureAddRealm:    machineHandler(r.AddMachine),
 		ProcedureRemoveRealm: machineHandler(r.RemoveMachine),
 	} {
-		if resp := r.session.Register(procedure, handler).Do(); resp.Err != nil {
+		if resp := r.session.Register(procedure, handler).Execute(); resp.Err != nil {
 			return resp.Err
 		}
 		log.Printf("Registered procedure %s", procedure)
@@ -346,11 +340,7 @@ func (a authenticator) Authenticate(request auth.Request) (auth.Response, error)
 	return a.authenticate(request)
 }
 
-func isMachineSession(session xconn.BaseSession) bool {
-	return strings.HasPrefix(session.AuthRole(), machineAuthRolePrefix)
-}
-
-func serveCertHash(address, hashBase64 string) {
+func serveCertHash(ctx context.Context, address, hashBase64 string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/wt-cert-hash", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -362,7 +352,9 @@ func serveCertHash(address, hashBase64 string) {
 	})
 	log.Infof("WebTransport cert hash available at http://%s/wt-cert-hash", address)
 	server := &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	if err := server.ListenAndServe(); err != nil {
+	stop := context.AfterFunc(ctx, func() { _ = server.Close() })
+	defer stop()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Errorf("cert hash server: %v", err)
 	}
 }

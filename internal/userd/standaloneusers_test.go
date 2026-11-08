@@ -2,7 +2,6 @@ package userd_test
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,13 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/userd"
-	wampproto "github.com/xconnio/wampproto-go"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/wampproto-go/serializers"
-	"github.com/xconnio/xconn-go"
-	xconnauth "github.com/xconnio/xconn-go/auth"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
+	wampproto "github.com/xconnio/xconn-core/bindings/go/protocol"
+	"github.com/xconnio/xconn-core/bindings/go/serializers"
 )
 
 const (
@@ -58,15 +56,10 @@ func startStandaloneServer(t *testing.T, dbPath string, fixed ...userd.Standalon
 	cert, err := common.LoadOrCreateCertificate(filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"))
 	require.NoError(t, err)
 	server := xconn.NewServer(router, users, &xconn.ServerConfig{})
-	listener, err := server.ListenAndServeQUIC("127.0.0.1:0",
-		&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	listener, err := server.ListenQUIC(t.Context(), "127.0.0.1:0", &cert)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
-	go func() {
-		for range listener.AcceptSession() { //nolint:revive // only draining
-		}
-	}()
-	return &standaloneServer{users: users, url: "quic://" + listener.Addr().String(),
+	return &standaloneServer{users: users, url: "quic://" + listener.Address,
 		certHash: common.CertificateFingerprint(cert)}
 }
 
@@ -77,7 +70,7 @@ func (s *standaloneServer) connect(authenticator auth.ClientAuthenticator) (*com
 }
 
 func password(username, password string) auth.ClientAuthenticator {
-	return xconnauth.NewWAMPCRAAuthenticator(username, password, map[string]any{})
+	return auth.NewWAMPCRAAuthenticator(username, password, map[string]any{})
 }
 
 func keyPair(t *testing.T) (public, private string) {
@@ -89,7 +82,7 @@ func keyPair(t *testing.T) (public, private string) {
 
 func key(t *testing.T, username, private string) auth.ClientAuthenticator {
 	t.Helper()
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(username, private, map[string]any{})
+	authenticator, err := auth.NewCryptoSignAuthenticator(username, private, map[string]any{})
 	require.NoError(t, err)
 	return authenticator
 }
@@ -132,17 +125,17 @@ func (s *standaloneServer) admin(t *testing.T, authenticator auth.ClientAuthenti
 
 // call calls procedure with args: a user's fields as kwargs, a username as the argument, or
 // kwargs as they are.
-func (a *admin) call(procedure string, args any) (xconn.CallResponse, error) {
+func (a *admin) call(procedure string, args any) (*xconn.Result, error) {
 	call := a.conn.Call(procedure)
 	switch args := args.(type) {
 	case userd.StandaloneUser:
 		data, err := json.Marshal(args)
 		if err != nil {
-			return xconn.CallResponse{}, err
+			return nil, err
 		}
 		var kwargs map[string]any
 		if err := json.Unmarshal(data, &kwargs); err != nil {
-			return xconn.CallResponse{}, err
+			return nil, err
 		}
 		call = call.Kwargs(kwargs)
 	case map[string]any:
@@ -150,7 +143,7 @@ func (a *admin) call(procedure string, args any) (xconn.CallResponse, error) {
 	case string:
 		call = call.Args(args)
 	}
-	resp := call.Do()
+	resp := call.Execute()
 	return resp, resp.Err
 }
 
@@ -158,8 +151,8 @@ func (a *admin) list(t *testing.T) []userd.StandaloneUserInfo {
 	t.Helper()
 	resp, err := a.call(common.ProcedureStandaloneUsersList, nil)
 	require.NoError(t, err)
-	require.Len(t, resp.Args(), 1)
-	data, err := json.Marshal(resp.Args()[0])
+	require.Len(t, resp.Args, 1)
+	data, err := json.Marshal(resp.Args[0])
 	require.NoError(t, err)
 	var users []userd.StandaloneUserInfo
 	require.NoError(t, json.Unmarshal(data, &users))
@@ -308,8 +301,10 @@ func TestStandaloneUsersOnlyForAdmins(t *testing.T) {
 	list := func(role string) error {
 		base, err := xconn.ConnectInMemoryBase(router, "realm1", "someone", role, &serializers.MsgPackSerializer{}, 16)
 		require.NoError(t, err)
-		caller := xconn.NewSession(base, base.Serializer())
-		return caller.Call(common.ProcedureStandaloneUsersList).Do().Err
+		caller, err := xconn.NewSession(base, base.Serializer())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = caller.Close() })
+		return caller.Call(common.ProcedureStandaloneUsersList).Execute().Err
 	}
 	require.NoError(t, list(common.RoleAdmin))
 	// No other role, owners' and the cloud's included, nor local sessions.

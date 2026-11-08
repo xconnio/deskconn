@@ -7,9 +7,9 @@ import (
 	"os"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
-	xconnd "github.com/xconnio/xconn-go/xconn"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 // Attach adds this machine to username's machines as desktopName and keeps the key its

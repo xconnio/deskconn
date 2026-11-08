@@ -22,8 +22,7 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/vpnwin"
-	"github.com/xconnio/xconn-go"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
+	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 const (
@@ -62,12 +61,12 @@ func runRootd(_ rootdFlags) {
 }
 
 func callVPNProcedure(ctx context.Context, cfgDirectory, procedure string) error {
-	session, err := xconn.ConnectAnonymous(ctx, common.DaemonURI(cfgDirectory), common.LocalRealm)
+	session, err := common.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = session.Leave() }()
-	return session.Call(procedure).DoContext(ctx).Err
+	return session.Call(procedure).ExecuteContext(ctx).Err
 }
 
 // On Windows the exit node runs inside userd and needs no root helper: see userd/iptunnel_windows.go.
