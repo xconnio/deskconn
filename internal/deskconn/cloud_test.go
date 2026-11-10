@@ -121,10 +121,18 @@ func startCloud(t *testing.T, f *fakeCloud) {
 	require.NoError(t, err)
 	go func() { _ = r.Serve(ctx) }()
 
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t)
 	t.Setenv("DESKCONN_CLOUD_QUIC_ADDRESS", address)
 	deskconn.SetCloud(f.cloud())
 	t.Cleanup(func() { deskconn.SetCloud(nil) })
+}
+
+// setTestHome keeps a test out of the real ~/.deskconn: os.UserHomeDir goes by USERPROFILE on Windows.
+func setTestHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 }
 
 func TestCloudWithoutAccountService(t *testing.T) {
@@ -184,7 +192,7 @@ func TestCloudDaemonConfig(t *testing.T) {
 		TopicDetachFormat:     "my.%s.detach",
 	})
 	t.Cleanup(func() { deskconn.SetCloud(nil) })
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t)
 
 	config, err := deskconn.DaemonCloudConfig(t.TempDir())
 	require.NoError(t, err)

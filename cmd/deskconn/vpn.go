@@ -62,7 +62,7 @@ const (
 // runVPNConnectChild) with the same terminal, so the sudo and any password
 // prompt still work, and exits once that child reports the tunnel is up or
 // exits itself. The child detaches from the terminal from then on.
-func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes) {
+func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes, _ bool) {
 	if os.Getenv(vpnConnectChildEnv) != "" {
 		runVPNConnectChild(cliCtx, cfgDirectory, realm, machine, routes)
 		return

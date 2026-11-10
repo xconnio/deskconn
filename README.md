@@ -64,10 +64,15 @@ On Windows, from PowerShell:
 irm https://get.deskconn.com/install.ps1 | iex
 ```
 
-This installs the same binary to `%LOCALAPPDATA%\deskconn`, adds it to your `PATH`, and registers the
-user daemon as a scheduled task that starts at logon (there's no root helper on Windows yet — VPN serving is
-Linux-only for now). Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
+This installs the same binary to `%LOCALAPPDATA%\deskconn`, along with the [Wintun](https://www.wintun.net) driver
+that `deskconn vpn connect` uses, adds it to your `PATH`, and registers the user daemon as a scheduled task that
+starts at logon. Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
 (`desk.cpl`) and can't be safely overridden.
+
+`deskconn vpn connect` brings up a UAC prompt, and while a tunnel is up Windows asks the tunnel's DNS resolvers first
+(a Linux exit node's own, or public resolvers through a Windows one), though its smart multi-homed name resolution may
+still send lookups to other adapters' resolvers too. `deskconn vpn serve` needs no prompt or driver: it runs inside the
+daemon, as a userspace NAT that carries TCP, UDP and ping.
 
 ## Getting started
 

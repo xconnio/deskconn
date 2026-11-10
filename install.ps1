@@ -72,6 +72,15 @@ try {
     # ExecDir rather than depending on PATH.
     Copy-Item $DeskconnExe (Join-Path $BinDir 'deskconn.exe') -Force
     Copy-Item $DeskconnExe (Join-Path $ExecDir 'deskconn.exe') -Force
+
+    # The TUN driver for "deskconn vpn", loaded from next to whichever exe the helper runs as.
+    $WintunDll = Join-Path $TmpDir 'wintun.dll'
+    if (-not (Test-Path $WintunDll)) {
+        Write-Error "Release archive does not contain wintun.dll."
+        exit 1
+    }
+    Copy-Item $WintunDll (Join-Path $BinDir 'wintun.dll') -Force
+    Copy-Item $WintunDll (Join-Path $ExecDir 'wintun.dll') -Force
 } finally {
     Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
 }
