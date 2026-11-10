@@ -69,9 +69,10 @@ that `deskconn vpn connect` uses, adds it to your `PATH`, and registers the user
 starts at logon. Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
 (`desk.cpl`) and can't be safely overridden.
 
-`deskconn vpn connect` brings up a UAC prompt, and while a tunnel is up Windows asks the exit node's DNS resolvers first,
-though its smart multi-homed name resolution may still send lookups to other adapters' resolvers too. `deskconn vpn
-serve` needs no prompt or driver: it runs inside the daemon, as a userspace NAT that carries TCP and UDP but not ICMP.
+`deskconn vpn connect` brings up a UAC prompt, and while a tunnel is up Windows asks the tunnel's DNS resolvers first
+(a Linux exit node's own, or public resolvers through a Windows one), though its smart multi-homed name resolution may
+still send lookups to other adapters' resolvers too. `deskconn vpn serve` needs no prompt or driver: it runs inside the
+daemon, as a userspace NAT that carries TCP, UDP and ping.
 
 ## Getting started
 

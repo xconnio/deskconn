@@ -44,7 +44,8 @@ const (
 var ErrClosed = errors.New("tunnel device closed")
 
 // Device is a Wintun adapter and its session. Everything set on the adapter, routes included, goes
-// away with it, also if this process dies.
+// away with it, also if this process dies. The host routes PinHostRoute adds are on the physical
+// interface instead, so a crash leaves them behind: harmless /32 routes via the usual gateway.
 type Device struct {
 	adapter *wintun.Adapter
 	session wintun.Session
@@ -81,14 +82,11 @@ func CheckDLL() error {
 		"source build run \"make build\", which fetches it into bin", wintunDLLName, exe)
 }
 
-// Open creates an adapter named name and starts a session on it, first removing any adapter of
-// that name left behind.
+// Open creates an adapter named name and starts a session on it. An adapter left behind by a
+// process that died is removed by Wintun itself, which cleans up orphaned adapters on creation.
 func Open(name string) (*Device, error) {
 	if err := CheckDLL(); err != nil {
 		return nil, err
-	}
-	if stale, err := wintun.OpenAdapter(name); err == nil {
-		_ = stale.Close()
 	}
 
 	adapter, err := wintun.CreateAdapter(name, wintunTunnelType, nil)
@@ -131,7 +129,7 @@ func (d *Device) resolveInterface() error {
 }
 
 // Read waits for the next IPv4 packet from the system. IPv6 is dropped here: the tunnel only
-// carries IPv4, and BlockIPv6 routes IPv6 into this device for exactly this to happen to it.
+// carries IPv4, and RouteAll(6) routes IPv6 into this device for exactly this to happen to it.
 func (d *Device) Read(buf []byte) (int, error) {
 	for {
 		n, again, err := d.readOne(buf)

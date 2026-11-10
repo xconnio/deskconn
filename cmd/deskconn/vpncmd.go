@@ -9,14 +9,18 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 )
 
+// vpnTunnelChildFlag marks the elevated process that "vpn connect" starts on Windows as the tunnel.
+const vpnTunnelChildFlag = "tunnel-child"
+
 type vpnCommands struct {
 	connect    *kingpin.CmdClause
 	disconnect *kingpin.CmdClause
 	serve      *kingpin.CmdClause
 	stop       *kingpin.CmdClause
 
-	connectMachine *string
-	connectRoutes  *[]string
+	connectMachine     *string
+	connectRoutes      *[]string
+	connectTunnelChild *bool
 }
 
 func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnCommands {
@@ -30,17 +34,20 @@ func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnComm
 	connectRoutes := connectCmd.Flag("route", "Tunnel only this IPv4 address, CIDR range or domain (with its "+
 		"subdomains, looked up through the tunnel), leaving other traffic and lookups on the normal connection "+
 		"(repeatable)").PlaceHolder("IP|CIDR|DOMAIN").Strings()
+	connectTunnelChild := connectCmd.Flag(vpnTunnelChildFlag, "Run as the elevated tunnel process "+
+		"(internal, Windows)").Hidden().Bool()
 	disconnectCmd := vpnCmd.Command("disconnect", "Stop tunneling traffic through the connected machine")
 	serveCmd := vpnCmd.Command("serve", "Let other machines route their traffic through this machine")
 	stopCmd := vpnCmd.Command("stop", "Stop serving as a VPN exit node")
 
 	return &vpnCommands{
-		connect:        connectCmd,
-		disconnect:     disconnectCmd,
-		serve:          serveCmd,
-		stop:           stopCmd,
-		connectMachine: connectMachine,
-		connectRoutes:  connectRoutes,
+		connect:            connectCmd,
+		disconnect:         disconnectCmd,
+		serve:              serveCmd,
+		stop:               stopCmd,
+		connectMachine:     connectMachine,
+		connectRoutes:      connectRoutes,
+		connectTunnelChild: connectTunnelChild,
 	}
 }
 
@@ -58,7 +65,7 @@ func dispatchVPNCommand(parsedCmd string, cmds *vpnCommands, cfgDirectory string
 			return true
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		runVPNConnect(ctx, cfgDirectory, realm, *cmds.connectMachine, routes)
+		runVPNConnect(ctx, cfgDirectory, realm, *cmds.connectMachine, routes, *cmds.connectTunnelChild)
 		cancel()
 	case cmds.disconnect.FullCommand():
 		runVPNDisconnect(context.Background(), cfgDirectory)

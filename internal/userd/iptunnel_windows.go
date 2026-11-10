@@ -31,8 +31,9 @@ import (
 
 // On Windows the exit node is a userspace NAT rather than the Linux TUN + iptables setup: a
 // netstack terminates the client's TCP and UDP and redials each flow with ordinary sockets. That
-// needs no driver, no elevation and no WinNAT, and changes nothing on the machine. ICMP isn't
-// carried, as sending it would need elevation.
+// needs no driver, no elevation and no WinNAT, and changes nothing on the machine. Of ICMP, only
+// echo requests are carried, answered with IcmpSendEcho (see icmp_windows.go), which needs no
+// elevation either.
 
 const (
 	vpnNICID          = 1
@@ -280,19 +281,51 @@ func vpnDestinationAllowed(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.Equal(net.IPv4bcast) {
 		return false
 	}
-	if _, subnet, err := net.ParseCIDR(common.VPNSubnetCIDR); err != nil || subnet.Contains(ip) {
+	if vpnSubnet.Contains(ip) {
 		return false
 	}
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return false
-	}
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.Equal(ip) {
-			return false
+	local, err := vpnLocalAddrs.contains(ip)
+	return err == nil && !local
+}
+
+var _, vpnSubnet, _ = net.ParseCIDR(common.VPNSubnetCIDR) //nolint:gochecknoglobals
+
+// vpnLocalAddrs caches this machine's addresses, as listing them is slow on Windows and
+// vpnDestinationAllowed runs for every new flow, inline in the UDP forwarder.
+var vpnLocalAddrs localAddrCache //nolint:gochecknoglobals
+
+const vpnLocalAddrsTTL = 5 * time.Second
+
+type localAddrCache struct {
+	mu      sync.Mutex
+	addrs   []net.IP
+	err     error
+	expires time.Time
+}
+
+func (c *localAddrCache) contains(ip net.IP) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if now := time.Now(); now.After(c.expires) {
+		c.expires = now.Add(vpnLocalAddrsTTL)
+		c.addrs = c.addrs[:0]
+		var addrs []net.Addr
+		addrs, c.err = net.InterfaceAddrs()
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				c.addrs = append(c.addrs, ipNet.IP)
+			}
 		}
 	}
-	return true
+	if c.err != nil {
+		return false, c.err
+	}
+	for _, addr := range c.addrs {
+		if addr.Equal(ip) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *vpnTunnelSession) forwardTCP(r *tcp.ForwarderRequest) {
