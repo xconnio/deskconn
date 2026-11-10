@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// trueValue is how .desktop entries spell a true flag.
+const trueValue = "true"
+
 // desktopDirs and scanDesktopFiles below scan Linux's .desktop files.
 func desktopDirs() []string {
 	dirs := []string{

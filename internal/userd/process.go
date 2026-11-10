@@ -7,8 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/process"
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 type ProcessInfo struct {
@@ -24,10 +23,17 @@ type ProcessInfo struct {
 	MemPercent float32 `json:"mem_percent"`
 }
 
+// processSnapshot is one process as an OS-specific listProcesses reads it, before its
+// CPU usage is known.
+type processSnapshot struct {
+	info    ProcessInfo
+	cpuTime float64 // seconds the process has run for
+}
+
 // processSample lets CPU usage be computed as a delta against the previous poll.
 type processSample struct {
-	times *cpu.TimesStat
-	at    time.Time
+	cpuTime float64
+	at      time.Time
 }
 
 type ProcessMonitor struct {
@@ -40,7 +46,7 @@ func NewProcessMonitor() *ProcessMonitor {
 }
 
 func (pm *ProcessMonitor) List() ([]ProcessInfo, error) {
-	procs, err := process.Processes()
+	snapshots, err := listProcesses()
 	if err != nil {
 		return nil, err
 	}
@@ -51,53 +57,23 @@ func (pm *ProcessMonitor) List() ([]ProcessInfo, error) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	seen := make(map[int32]bool, len(procs))
-	infos := make([]ProcessInfo, 0, len(procs))
-	for _, p := range procs {
-		times, err := p.Times()
-		if err != nil {
-			// Process likely exited between listing and sampling.
-			continue
-		}
-
-		name, _ := p.Name()
-		exe, _ := p.Exe()
-		username, _ := p.Username()
-		status, _ := p.Status()
-		cmdline, _ := p.Cmdline()
-		ppid, _ := p.Ppid()
-		memPercent, _ := p.MemoryPercent()
-
-		var rss uint64
-		if memInfo, err := p.MemoryInfo(); err == nil && memInfo != nil {
-			rss = memInfo.RSS
-		}
-
-		var cpuPercent float64
-		if prev, ok := pm.samples[p.Pid]; ok {
+	seen := make(map[int32]bool, len(snapshots))
+	infos := make([]ProcessInfo, 0, len(snapshots))
+	for _, s := range snapshots {
+		info := s.info
+		if prev, ok := pm.samples[info.PID]; ok {
 			if elapsed := now.Sub(prev.at).Seconds(); elapsed > 0 {
-				delta := times.Total() - prev.times.Total()
-				cpuPercent = delta / elapsed / float64(numCPU) * 100
-				if cpuPercent < 0 {
-					cpuPercent = 0
+				delta := s.cpuTime - prev.cpuTime
+				info.CPUPercent = delta / elapsed / float64(numCPU) * 100
+				if info.CPUPercent < 0 {
+					info.CPUPercent = 0
 				}
 			}
 		}
-		pm.samples[p.Pid] = processSample{times: times, at: now}
-		seen[p.Pid] = true
+		pm.samples[info.PID] = processSample{cpuTime: s.cpuTime, at: now}
+		seen[info.PID] = true
 
-		infos = append(infos, ProcessInfo{
-			PID:        p.Pid,
-			PPID:       ppid,
-			Name:       name,
-			Exe:        exe,
-			User:       username,
-			Status:     status,
-			Cmdline:    cmdline,
-			CPUPercent: cpuPercent,
-			MemRSS:     rss,
-			MemPercent: memPercent,
-		})
+		infos = append(infos, info)
 	}
 
 	for pid := range pm.samples {

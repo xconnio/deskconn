@@ -186,3 +186,9 @@ func NewMountFS() (func(payload []byte) ([]byte, error), func() int) {
 
 // CloseSettings lets go of the settings database, which Windows won't delete while open.
 func (d *Deskconn) CloseSettings() error { return d.settings.close() }
+
+type DesktopEntry = desktopEntry
+
+func BuildApps(procs []ProcessInfo, registry map[string]DesktopEntry) []AppInfo {
+	return buildApps(procs, registry)
+}
