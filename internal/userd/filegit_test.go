@@ -25,9 +25,18 @@ func runGit(t *testing.T, dir string, args ...string) {
 	require.NoErrorf(t, err, "git %v: %s", args, out)
 }
 
+// resolvedTempDir is t.TempDir with symlinks resolved: on macOS it lives under /var, a
+// symlink to /private/var, and go-git reports repo roots by their resolved path.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return dir
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := resolvedTempDir(t)
 	runGit(t, dir, "init")
 	runGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init")
 	return dir
