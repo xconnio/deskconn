@@ -9,6 +9,9 @@ case "$(uname -s)" in
     Linux)
         OS="linux"
         ;;
+    Darwin)
+        OS="darwin"
+        ;;
     *)
         echo "Unsupported OS: $(uname -s). For Windows, use install.ps1 instead."
         exit 1
@@ -70,15 +73,18 @@ mkdir -p "$BASH_COMP_DIR" "$ZSH_COMP_DIR"
 rm -f "$BASH_COMP_DIR/deskconn" "$ZSH_COMP_DIR/_deskconn"
 
 "$BIN_DIR/desk" --completion-script-bash > "$BASH_COMP_DIR/desk"
-# ':' is in COMP_WORDBREAKS by default, which splits "device:path" at the colon.
-sed -i '/_desk_bash_autocomplete() {/a\    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}' "$BASH_COMP_DIR/desk"
 
+# ':' is in COMP_WORDBREAKS by default, which splits "device:path" at the colon.
 # Make path completions behave like "cd": show only the last path segment
 # in the menu, and don't add a trailing space after directories/"device:".
+# (awk rather than "sed -i", whose syntax differs between GNU and macOS sed.)
 AWK_SCRIPT="$(mktemp)"
 cat > "$AWK_SCRIPT" << 'AWKEOF'
 {
     print
+    if ($0 == "_desk_bash_autocomplete() {") {
+        print "    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}"
+    }
     if ($0 == "    COMPREPLY=( $(compgen -W \"${opts}\" -- ${cur}) )") {
         print "    compopt -o filenames 2>/dev/null || true"
         print "    if [ \"${#COMPREPLY[@]}\" -eq 1 ] && [[ \"${COMPREPLY[0]}\" == */ || \"${COMPREPLY[0]}\" == *: ]]; then"
@@ -111,9 +117,14 @@ case ":$PATH:" in
         [ -f "$HOME/.bashrc" ]        && add_to_path "$HOME/.bashrc"
         [ -f "$HOME/.bash_profile" ]  && add_to_path "$HOME/.bash_profile"
         [ -f "$HOME/.zshrc" ]         && add_to_path "$HOME/.zshrc"
-        # Fall back to .profile if none of the above exist
+        # Fall back to .profile if none of the above exist (.zshrc on macOS, where zsh is
+        # the default shell and doesn't read .profile)
         if [ ! -f "$HOME/.bashrc" ] && [ ! -f "$HOME/.bash_profile" ] && [ ! -f "$HOME/.zshrc" ]; then
-            add_to_path "$HOME/.profile"
+            if [ "$OS" = "darwin" ]; then
+                add_to_path "$HOME/.zshrc"
+            else
+                add_to_path "$HOME/.profile"
+            fi
         fi
         echo "Run this to apply immediately:  export PATH=\"\$HOME/.local/bin:\$PATH\""
         ;;
@@ -215,4 +226,154 @@ EOL
     echo "Systemd service deskconn-userd installed and started!"
 }
 
-install_service_linux
+# The user daemon runs as a per-user launchd agent in the GUI session - the macOS
+# equivalent of "systemctl --user" on Linux and the logon scheduled task on Windows.
+install_service_darwin() {
+    local label="com.deskconn.deskconn-userd"
+    local domain="gui/$(id -u)"
+    local plist_file="$HOME/Library/LaunchAgents/$label.plist"
+    local log_dir="$HOME/Library/Logs/deskconn"
+
+    echo "Setting up launchd agent $label..."
+    mkdir -p "$(dirname "$plist_file")" "$log_dir"
+
+    cat > "$plist_file" <<EOL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$EXEC_DIR/deskconn</string>
+        <string>serve</string>
+        <string>--mode</string>
+        <string>user</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TERM</key>
+        <string>xterm-256color</string>
+        <!-- launchd's own PATH lacks Homebrew's, where ffmpeg (video thumbnails) lives. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>$log_dir/deskconn-userd.log</string>
+    <key>StandardErrorPath</key>
+    <string>$log_dir/deskconn-userd.log</string>
+</dict>
+</plist>
+EOL
+
+    if ! launchctl print "$domain" >/dev/null 2>&1; then
+        echo "No GUI session for $(id -un), so the agent wasn't loaded now. It will start at next login."
+        echo "Start the daemon manually with:  $EXEC_DIR/deskconn serve --mode user"
+        return
+    fi
+
+    # Unload a running agent first so the rewritten plist (and the new binary) are what
+    # gets loaded; bootout returns before the agent is fully gone, and bootstrapping it
+    # again before then fails.
+    if launchctl print "$domain/$label" >/dev/null 2>&1; then
+        echo "Agent $label exists. Restarting..."
+        launchctl bootout "$domain/$label" 2>/dev/null || true
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            launchctl print "$domain/$label" >/dev/null 2>&1 || break
+            sleep 0.5
+        done
+    else
+        echo "Enabling and starting $label..."
+    fi
+    rm -f "$FULL_DISK_ACCESS_FILE"
+    launchctl enable "$domain/$label"
+    local loaded=""
+    for _ in 1 2 3 4 5; do
+        if launchctl bootstrap "$domain" "$plist_file" 2>/dev/null; then
+            loaded=1
+            break
+        fi
+        sleep 1
+    done
+    if [ -z "$loaded" ]; then
+        echo "Couldn't load $label (the old agent may still be exiting). It will start at next login."
+        echo "Start it now with:  launchctl bootstrap $domain $plist_file"
+        return
+    fi
+    echo "launchd agent $label installed and started - deskconn-userd will run in your session at login!"
+
+    request_full_disk_access "$domain/$label"
+}
+
+# deskconn-userd records here, at startup, whether it has Full Disk Access ("granted" or
+# "missing"). Only it can tell: macOS decides that for the process asking, so checking from
+# this script would test the terminal's access instead.
+FULL_DISK_ACCESS_FILE="$HOME/.deskconn/full-disk-access"
+
+# full_disk_access_status waits for deskconn-userd to (re)write FULL_DISK_ACCESS_FILE, then
+# prints its status, or "unknown" if the daemon didn't get that far.
+full_disk_access_status() {
+    for _ in $(seq 1 20); do
+        if [ -s "$FULL_DISK_ACCESS_FILE" ]; then
+            cat "$FULL_DISK_ACCESS_FILE"
+            return
+        fi
+        sleep 0.5
+    done
+    echo unknown
+}
+
+# Without Full Disk Access, macOS asks separately the first time deskconn-userd reads each
+# protected place (Desktop, Documents, Downloads, external and network volumes, other apps'
+# data), and a command-line tool can't ask for those up front. One Full Disk Access grant
+# covers them all, but only the user can switch it on, in System Settings: open it at the
+# right page, with deskconn revealed in Finder to drag into the list.
+request_full_disk_access() {
+    local target="$1"
+    [ "$(full_disk_access_status)" = "missing" ] || return 0
+
+    echo
+    echo "deskconn needs Full Disk Access to reach your files without macOS asking about each folder."
+    echo "In System Settings > Privacy & Security > Full Disk Access, click + (or drag it in from Finder)"
+    echo "and add:  $EXEC_DIR/deskconn"
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || true
+    open -R "$EXEC_DIR/deskconn" 2>/dev/null || true
+
+    # "curl ... | sh" leaves stdin as the script, so ask on the terminal, if there is one.
+    if ! true 2>/dev/null </dev/tty; then
+        echo "Then restart it with:  launchctl kickstart -k $target"
+        return 0
+    fi
+    exec 3</dev/tty
+    while :; do
+        printf "Press Enter once it's switched on (or type s to skip): "
+        local answer=""
+        read -r answer <&3 || break
+        [ "$answer" = "s" ] && break
+        # Full Disk Access applies from the daemon's next start.
+        rm -f "$FULL_DISK_ACCESS_FILE"
+        launchctl kickstart -k "$target"
+        if [ "$(full_disk_access_status)" != "missing" ]; then
+            echo "Full Disk Access granted."
+            break
+        fi
+        echo "deskconn still doesn't have Full Disk Access."
+    done
+    exec 3<&-
+}
+
+case "$OS" in
+    linux)
+        install_service_linux
+        ;;
+    darwin)
+        install_service_darwin
+        ;;
+esac
