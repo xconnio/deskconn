@@ -23,7 +23,7 @@ The Deskconn ecosystem consists of five pieces. This repository contains the two
 
 ```
 desk CLI
-    │  (Unix socket — ~/.deskconn/deskconn.sock)
+    │  (local yamux — Unix socket or authenticated Windows loopback)
     ▼
 deskconn-userd (local proxy)
     │  (WebSocket — wss://api.deskconn.com/ws or WebRTC P2P)
@@ -43,7 +43,7 @@ the account service, and stores the private key in `~/.deskconn/id_ed25519`.
 ## Installation
 
 ```bash
-# On macOS and Linux.
+# On Linux.
 curl -fsSL https://get.deskconn.com/install.sh | sh
 ```
 
@@ -52,7 +52,7 @@ curl -fsSL https://get.deskconn.com/install.sh | sh
 irm https://get.deskconn.com/install.ps1 | iex
 ```
 
-On macOS and Linux, this installs one binary, `deskconn`, to `~/.local/lib/exec`, with `desk` on your `PATH`
+On Linux, this installs one binary, `deskconn`, to `~/.local/lib/exec`, with `desk` on your `PATH`
 (`~/.local/bin/desk`) a symlink to it. It's the CLI, and `desk serve --mode user|standalone|root` runs the daemons:
 
 | Command                        | Role                                                                                      |
@@ -62,9 +62,11 @@ On macOS and Linux, this installs one binary, `deskconn`, to `~/.local/lib/exec`
 | `desk serve --mode standalone` | User daemon serving the machine directly, without the cloud (see below)                   |
 | `desk serve --mode root`       | Root helper (`deskconn-rootd`), started on demand with `sudo` as `deskconn-rootd.service` |
 
-On macOS, the user daemon runs as the `com.deskconn.deskconn-userd` launchd agent in your login session instead
-(logs in `~/Library/Logs/deskconn`), and there's no root helper (VPN serving is Linux-only for now).
-The installer asks you to give it Full Disk Access (System Settings > Privacy & Security > Full Disk Access):
+Prebuilt macOS releases are currently unavailable; Apple Silicon users can
+[build from source](docs/native-xconn.md). The user daemon runs as the
+`com.deskconn.deskconn-userd` launchd agent in your login session, with logs in
+`~/Library/Logs/deskconn`. The root helper and VPN serving are unavailable on macOS.
+Source installations need Full Disk Access (System Settings > Privacy & Security > Full Disk Access):
 without it, macOS asks separately the first time the daemon reads each protected folder (Desktop, Documents,
 Downloads, external drives, ...).
 
@@ -213,7 +215,8 @@ tells deskconn-userd which apps it serves. deskconn-userd lists them to clients 
 it's listed and enabled), owners and admins enable or disable them, and xconn exposes their procedures to the cloud
 and P2P.
 
-1. **Connect** to `~/.deskconn/deskconn.sock` (WAMP over a Unix socket, realm `io.xconn.deskconn.local`, anonymous).
+1. **Connect** to the local daemon with `appkit.Connect` (realm `io.xconn.deskconn.local`).
+   This uses a Unix socket, or authenticated loopback yamux on Windows.
    Reconnect when deskconn-userd restarts.
 2. **Register a key exchange.** deskconn only supports end-to-end encrypted apps: deskconn-userd refuses an app without one.
    Clients call it with their X25519 public key and get the app's; both sides derive their keys with HKDF-SHA256,
@@ -241,11 +244,11 @@ the machine's owner and admins only), and so are the app prefixes the cloud rout
 `io.xconn.remotecontrol.` and `io.xconn.media.`), so the key exchange and the app's procedures go under one of them.
 Everything else on the socket, such as `io.xconn.local.*`, stays local.
 
-In Go, the `github.com/xconnio/deskconn/appkit` package has what an app needs: the socket (`appkit.SocketURI`), the
+In Go, the `github.com/xconnio/deskconn/appkit` package has what an app needs: the connection (`appkit.Connect`), the
 procedures above, and `appkit.Encryption`, which does step 2:
 
 ```go
-session, err := xconn.ConnectAnonymous(ctx, appkit.SocketURI(cfgDirectory), appkit.LocalRealm)
+session, err := appkit.Connect(ctx, cfgDirectory)
 enc := appkit.NewEncryption()
 if err := enc.Register(session, "io.xconn.media.key.exchange"); err != nil {
     return err
@@ -254,7 +257,7 @@ handler := enc.Encrypted(func(ctx context.Context, req []byte) (any, error) {
     // req is the decrypted JSON request; the result is sent back as encrypted JSON.
     return map[string]string{"hello": "world"}, nil
 })
-resp := session.Register("io.xconn.media.hello", handler).Do()
+resp := session.Register("io.xconn.media.hello", handler).Execute()
 ```
 
 A client finds the app's key exchange in the apps list, then calls it before the app's procedures:
@@ -297,8 +300,14 @@ All credentials and configuration are stored under `~/.deskconn/`:
 | `standalone-users.db`   | Standalone mode's users added through its API, with their keys and salted password hashes |
 | `principals.json`       | Local CryptoSign principals (used by the local WAMP router)             |
 | `turn_credentials.json` | Cached TURN server credentials for WebRTC                               |
-| `deskconn.sock`         | Unix socket for local CLI–daemon communication                          |
+| `deskconn.sock`         | Local Unix socket, or private Windows endpoint credentials              |
 
 ## License
 
 See [LICENSE](LICENSE).
+
+## Native XConn build
+
+DeskConn uses the Rust-backed XConn Go binding. Building requires
+cgo and the native SDK; see [the local build instructions](docs/native-xconn.md).
+Releases include Linux amd64/arm64 and Windows amd64 binaries.

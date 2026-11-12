@@ -13,7 +13,6 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
 )
 
 type accountCommands struct {
@@ -68,11 +67,11 @@ func runLogin(cfgDirectory, username string) error {
 	if err := login(username); err != nil {
 		return err
 	}
-	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return session.Call(common.ProcedureLogin).Do().Err
+	return session.Call(common.ProcedureLogin).Execute().Err
 }
 
 // runLogout signs out and tells the local daemon.
@@ -80,11 +79,11 @@ func runLogout(cfgDirectory string) error {
 	if err := deskconn.Logout(cfgDirectory); err != nil {
 		return err
 	}
-	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return session.Call(common.ProcedureLogout).Do().Err
+	return session.Call(common.ProcedureLogout).Execute().Err
 }
 
 func whoami(cfgDirectory string) error {

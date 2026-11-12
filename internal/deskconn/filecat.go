@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"syscall"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // file.cat takes the path as an encrypted JSON string and streams the file as encrypted
@@ -76,47 +77,37 @@ func streamCat(session *xconn.Session, procedure string, out io.Writer, args []a
 		}
 	})
 
-	var (
-		receivedData bool
-		transferErr  error
-	)
+	call, err := session.Call(procedure).Args(args...).StreamContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer call.Close()
 
-	callResp := session.Call(procedure).
-		ProgressReceiver(func(progress *xconn.ProgressResult) {
-			if transferErr != nil {
-				return
-			}
-
-			chunk, err := progress.ArgBytes(0)
+	for {
+		result, err := call.Receive(ctx)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if result.Details["progress"] != true {
+			continue
+		}
+		chunk, err := result.ArgBytes(0)
+		if err != nil {
+			return fmt.Errorf("invalid message format: %w", err)
+		}
+		if receiveKey != nil {
+			chunk, err = common.DecryptPayload(chunk, receiveKey)
 			if err != nil {
-				transferErr = fmt.Errorf("invalid message format: %w", err)
-				cancel()
-				return
+				return fmt.Errorf("failed to decrypt chunk: %w", err)
 			}
-			if receiveKey != nil {
-				chunk, err = common.DecryptPayload(chunk, receiveKey)
-				if err != nil {
-					transferErr = fmt.Errorf("failed to decrypt chunk: %w", err)
-					cancel()
-					return
-				}
-			}
-
-			if _, err := out.Write(chunk); err != nil {
-				transferErr = err
-				cancel()
-				return
-			}
-			receivedData = true
-		}).Args(args...).DoContext(ctx)
-
-	if transferErr != nil {
-		return transferErr
+		}
+		if n, err := out.Write(chunk); err != nil {
+			return err
+		} else if n != len(chunk) {
+			return io.ErrShortWrite
+		}
 	}
-
-	if callResp.Err != nil && !receivedData {
-		return callResp.Err
-	}
-
-	return nil
 }

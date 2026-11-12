@@ -10,7 +10,6 @@ import (
 	"time"
 
 	pty "github.com/aymanbagabas/go-pty"
-	"github.com/pion/webrtc/v4"
 
 	"github.com/xconnio/deskconn/internal/common"
 )
@@ -38,21 +37,6 @@ func (t *quicShellTransport) writeOutput(plaintext []byte) error {
 }
 
 func (t *quicShellTransport) close() error { return t.stream.Close() }
-
-type p2pShellTransport struct {
-	channel common.MessageChannel
-	sendKey []byte
-}
-
-func (t *p2pShellTransport) writeOutput(plaintext []byte) error {
-	envelope, err := common.BuildShellEnvelope(common.ShellMsgData, plaintext, t.sendKey)
-	if err != nil {
-		return err
-	}
-	return t.channel.Send(envelope)
-}
-
-func (t *p2pShellTransport) close() error { return t.channel.Close() }
 
 // beginShellSession handles a connection's first control message: claims an
 // existing PTY via a valid migration token (ShellOpMigrate), or
@@ -115,14 +99,14 @@ func (d *Deskconn) beginShellSession(ctrl common.ShellControlMsg, transport shel
 	return d.shellSession.beginShellSession(ctrl, transport)
 }
 
-// handleQUICShellStream serves one shell over a raw QUIC stream: key
+// handleQUICShellStream serves one shell over an RPC byte stream: key
 // exchange, beginShellSession on the first control message, then a read
 // loop dispatching every further control/data envelope until it closes.
 func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 	defer stream.Close()
 
 	_ = stream.SetReadDeadline(time.Now().Add(common.ShellIdleTimeout))
-	sendKey, receiveKey, err := quicServerKeyExchange(stream)
+	sendKey, receiveKey, err := streamServerKeyExchange(stream)
 	if err != nil {
 		return
 	}
@@ -176,89 +160,6 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 			_, _ = ptmx.Write(plaintext)
 		}
 	}
-}
-
-// HandleShellChannel serves one shell over a raw WebRTC data channel,
-// mirroring handleQUICShellStream.
-func (d *Deskconn) HandleShellChannel(_ string, channel common.MessageChannel, firstMessage []byte) {
-	common.SafeGo(func() { d.serveShellChannel(channel, firstMessage) })
-}
-
-func (d *Deskconn) serveShellChannel(channel common.MessageChannel, firstMessage []byte) {
-	sendKey, receiveKey, err := P2PServerKeyExchange(channel, firstMessage)
-	if err != nil {
-		_ = channel.Close()
-		return
-	}
-
-	closed, _ := common.WebrtcBackpressure(channel)
-	msgCh := make(chan []byte, 8)
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		select {
-		case msgCh <- msg.Data:
-		case <-closed:
-		}
-	})
-
-	first, err := common.RecvPriority(msgCh, closed, common.P2PRequestTimeout)
-	if err != nil {
-		_ = channel.Close()
-		return
-	}
-	_, plaintext, err := common.DecryptEnvelope(first, receiveKey)
-	if err != nil {
-		_ = channel.Close()
-		return
-	}
-	var ctrl common.ShellControlMsg
-	if err := json.Unmarshal(plaintext, &ctrl); err != nil {
-		_ = channel.Close()
-		return
-	}
-
-	transport := &p2pShellTransport{channel: channel, sendKey: sendKey}
-	shellID, token, ptmx, startReader, err := d.beginShellSession(ctrl, transport)
-	ackMsg := common.ShellControlMsg{ShellID: shellID, Token: token}
-	if err != nil {
-		ackMsg = common.ShellControlMsg{Error: err.Error()}
-	}
-	_ = sendEncryptedJSONShell(channel, ackMsg, sendKey)
-	if err != nil {
-		_ = channel.Close()
-		return
-	}
-	startReader()
-
-	for {
-		data, err := common.RecvPriority(msgCh, closed, common.FileStreamSessionIdleTimeout)
-		if err != nil {
-			d.shellSession.endShellInput(shellID, transport)
-			return
-		}
-		kind, plaintext, err := common.DecryptEnvelope(data, receiveKey)
-		if err != nil {
-			continue
-		}
-		switch kind {
-		case common.ShellMsgControl:
-			var next common.ShellControlMsg
-			if json.Unmarshal(plaintext, &next) == nil && next.Op == common.ShellOpSize {
-				_ = ptmx.Resize(int(next.Cols), int(next.Rows))
-			}
-		case common.ShellMsgData:
-			_, _ = ptmx.Write(plaintext)
-		}
-	}
-}
-
-// sendEncryptedJSONShell mirrors SendEncryptedJSON with shell's own
-// kind byte.
-func sendEncryptedJSONShell(channel common.MessageChannel, v any, key []byte) error {
-	envelope, err := common.BuildShellEnvelope(common.ShellMsgControl, common.MustJSON(v), key)
-	if err != nil {
-		return err
-	}
-	return channel.Send(envelope)
 }
 
 // endShellInput cleans up the PTY if this transport still owns it (a real

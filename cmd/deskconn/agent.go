@@ -19,7 +19,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 type agentCommands struct {
@@ -168,8 +168,7 @@ func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, err
 		}
 		session, closeFn = p2pSess, func() { _ = p2pSess.Leave() }
 	default:
-		localSession, err := xconn.ConnectAnonymous(context.Background(),
-			common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock")), common.LocalRealm)
+		localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 		if err != nil {
 			return nil, fmt.Errorf("could not reach local daemon: %w", err)
 		}

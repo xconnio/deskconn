@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // agentInstalled reports whether the agent tool (claude, codex) is installed: whether the
@@ -41,12 +41,12 @@ func (d *Deskconn) agentApps() []*app {
 }
 
 func (d *Deskconn) handleAgentSessionList(tool string) xconn.InvocationHandler {
-	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 		return d.agentSessionList(tool, inv)
 	}
 }
 
-func (d *Deskconn) agentSessionList(tool string, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) agentSessionList(tool string, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult
@@ -57,12 +57,12 @@ func (d *Deskconn) agentSessionList(tool string, inv *xconn.Invocation) *xconn.I
 		return errResult
 	}
 	if args.Offset < 0 || args.Limit < 0 {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, "offset and limit can't be negative")
+		return xconn.NewResultError(common.ErrInvalidArgument, "offset and limit can't be negative")
 	}
 
 	sessions, err := agentLocalSessions(tool, args.Path)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	// Only the page's sessions are summarized: that reads each one's file.
@@ -74,12 +74,12 @@ func (d *Deskconn) agentSessionList(tool string, inv *xconn.Invocation) *xconn.I
 }
 
 func (d *Deskconn) handleAgentSessionPull(tool string) xconn.InvocationHandler {
-	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 		return d.agentSessionPull(tool, inv)
 	}
 }
 
-func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult
@@ -92,7 +92,7 @@ func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.I
 
 	sessions, err := agentLocalSessions(tool, args.Path)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 
 	if args.SessionID != "" {
@@ -104,9 +104,9 @@ func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.I
 		}
 		switch {
 		case len(matches) == 0:
-			return xconn.NewInvocationError(common.ErrOperationFailed, fmt.Sprintf("no session matching %q", args.SessionID))
+			return xconn.NewResultError(common.ErrOperationFailed, fmt.Sprintf("no session matching %q", args.SessionID))
 		case len(matches) > 1:
-			return xconn.NewInvocationError(common.ErrOperationFailed,
+			return xconn.NewResultError(common.ErrOperationFailed,
 				fmt.Sprintf("%q matches more than one session; use a longer prefix", args.SessionID))
 		}
 		sessions = matches
@@ -120,14 +120,14 @@ func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.I
 		byTool[s.Tool] = append(byTool[s.Tool], s)
 	}
 	if len(byTool) == 0 {
-		return xconn.NewInvocationError(common.ErrOperationFailed, "no local sessions found on this machine for this project")
+		return xconn.NewResultError(common.ErrOperationFailed, "no local sessions found on this machine for this project")
 	}
 
 	var bundles []common.AgentSessionBundle
 	for tool, files := range byTool {
 		tarball, err := BuildAgentTarball(files)
 		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
 		bundles = append(bundles, common.AgentSessionBundle{Tool: tool, Tarball: tarball})
 	}
@@ -136,12 +136,12 @@ func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.I
 }
 
 func (d *Deskconn) handleAgentProjectList(tool string) xconn.InvocationHandler {
-	return func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+	return func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 		return d.agentProjectList(tool, inv)
 	}
 }
 
-func (d *Deskconn) agentProjectList(tool string, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) agentProjectList(tool string, inv *xconn.Invocation) *xconn.Result {
 	enc, errResult := d.callerKeys(inv)
 	if errResult != nil {
 		return errResult
@@ -149,11 +149,11 @@ func (d *Deskconn) agentProjectList(tool string, inv *xconn.Invocation) *xconn.I
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	projects, err := common.DiscoverAgentProjects(tool, homeDir)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	return encryptResult(enc, projects)
 }

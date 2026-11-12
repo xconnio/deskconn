@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pion/webrtc/v4"
 	"github.com/stretchr/testify/require"
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -24,6 +23,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // fakeChannel hands packets the server sends to onSend.

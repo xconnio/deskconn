@@ -19,8 +19,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
-	xconnwebrtc "github.com/xconnio/xconn-webrtc-go"
+	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
 )
 
 // closeSessionWithTimeout closes session with a bound, since Leave()'s
@@ -320,8 +319,7 @@ func runVPNServe(cliCtx context.Context, cfgDirectory string) {
 		}
 	}()
 
-	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-	localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
+	localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -334,7 +332,7 @@ func runVPNServe(cliCtx context.Context, cfgDirectory string) {
 		return
 	}
 
-	resp := localSession.Call(common.ProcedureProxyVPNStart).Args(socketPath).DoContext(ctx)
+	resp := localSession.Call(common.ProcedureProxyVPNStart).Args(socketPath).ExecuteContext(ctx)
 	if resp.Err != nil {
 		fmt.Fprintln(os.Stderr, resp.Err)
 		return
@@ -367,12 +365,11 @@ func runVPNStop(ctx context.Context, cfgDirectory string) {
 }
 
 func disarmVPNServing(ctx context.Context, cfgDirectory string) error {
-	uri := fmt.Sprintf("unix://%s/deskconn.sock", cfgDirectory)
-	localSession, err := xconn.ConnectAnonymous(ctx, uri, common.LocalRealm)
+	localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = localSession.Leave() }()
 
-	return localSession.Call(common.ProcedureProxyVPNStop).DoContext(ctx).Err
+	return localSession.Call(common.ProcedureProxyVPNStop).ExecuteContext(ctx).Err
 }

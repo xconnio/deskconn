@@ -16,7 +16,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 type fileCommands struct {
@@ -184,16 +184,8 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 		if err != nil {
 			return err
 		}
-		return transferFiles(cfgDirectory, realm, mode, fileTransfer{
-			daemon: func(d *deskconn.DaemonStreams) error {
-				return deskconn.UploadFilesDaemon(d, src, dstPath, recursive, streams)
-			},
-			p2p: func(sess deskconn.ChannelOpener) error {
-				return deskconn.UploadFilesP2P(sess, src, dstPath, recursive, streams)
-			},
-			quic: func(sess xconn.MultiplexedSession) error {
-				return deskconn.UploadFilesQUIC(sess, realm, src, dstPath, recursive, streams)
-			},
+		return transferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
+			return deskconn.UploadFiles(session, src, dstPath, recursive, streams)
 		})
 
 	case srcRemote && !dstRemote:
@@ -202,16 +194,8 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 		if err != nil {
 			return err
 		}
-		return transferFiles(cfgDirectory, realm, mode, fileTransfer{
-			daemon: func(d *deskconn.DaemonStreams) error {
-				return deskconn.DownloadFilesDaemon(d, srcPath, dst, recursive, streams)
-			},
-			p2p: func(sess deskconn.ChannelOpener) error {
-				return deskconn.DownloadFilesP2P(sess, srcPath, dst, recursive, streams)
-			},
-			quic: func(sess xconn.MultiplexedSession) error {
-				return deskconn.DownloadFilesQUIC(sess, realm, srcPath, dst, recursive, streams)
-			},
+		return transferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
+			return deskconn.DownloadFiles(session, srcPath, dst, recursive, streams)
 		})
 
 	default:
@@ -219,16 +203,9 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 	}
 }
 
-// fileTransfer is one direction of a copy (upload or download) over each kind of connection.
-type fileTransfer struct {
-	daemon func(*deskconn.DaemonStreams) error
-	p2p    func(deskconn.ChannelOpener) error
-	quic   func(xconn.MultiplexedSession) error
-}
-
 // transferFiles runs transfer over mode's connection to realm. Without a mode it goes through
 // the local daemon, or when the daemon isn't running, over p2p, falling back to quic.
-func transferFiles(cfgDirectory, realm, mode string, transfer fileTransfer) error {
+func transferFiles(cfgDirectory, realm, mode string, transfer func(common.StreamSession) error) error {
 	ctx := context.Background()
 	viaQUIC := func() error {
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
@@ -236,7 +213,7 @@ func transferFiles(cfgDirectory, realm, mode string, transfer fileTransfer) erro
 			return err
 		}
 		defer quicSess.Close()
-		return transfer.quic(quicSess)
+		return transfer(quicSess)
 	}
 
 	switch mode {
@@ -248,7 +225,7 @@ func transferFiles(cfgDirectory, realm, mode string, transfer fileTransfer) erro
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return transfer.p2p(deskconn.P2PChannels(p2pSess))
+		return transfer(p2pSess)
 	}
 
 	daemon, err := deskconn.DialDaemonStreams(ctx, realm, cfgDirectory)
@@ -256,12 +233,13 @@ func transferFiles(cfgDirectory, realm, mode string, transfer fileTransfer) erro
 		if err != nil {
 			return err
 		}
-		return transfer.daemon(daemon)
+		defer daemon.Close()
+		return transfer(daemon)
 	}
 	p2pSess, err := deskconn.ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 	if err == nil {
 		defer func() { _ = p2pSess.Close() }()
-		return transfer.p2p(deskconn.P2PChannels(p2pSess))
+		return transfer(p2pSess)
 	}
 	fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 	return viaQUIC()
@@ -302,7 +280,7 @@ func catFile(cfgDirectory, target, mode string) error {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.CatFile(p2pSess, path)
 	default:
-		localSession, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+		localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -394,7 +372,7 @@ func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.ReadFile(p2pSess, path)
 	default:
-		localSession, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+		localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
@@ -421,11 +399,11 @@ func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload 
 		_, err = deskconn.CallFileOp(p2pSess, procedure, payload)
 		return err
 	default:
-		localSession, err := xconn.ConnectAnonymous(ctx, common.DaemonURI(cfgDirectory), common.LocalRealm)
+		localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
 		if err != nil {
 			return err
 		}
-		resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Do()
+		resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Execute()
 		return resp.Err
 	}
 }
@@ -484,14 +462,14 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	localSession, err := xconn.ConnectAnonymous(ctx, common.DaemonURI(cfgDirectory), common.LocalRealm)
+	localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		return nil
 	}
 	defer func() { _ = localSession.Leave() }()
 
 	if !machineHasPersistentSession(localSession, realm) {
-		_ = localSession.Call(common.ProcedureConnect).Args(realm).Do()
+		_ = localSession.Call(common.ProcedureConnect).Args(realm).Execute()
 		return nil
 	}
 
@@ -499,7 +477,7 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	if err != nil {
 		return nil
 	}
-	resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, common.ProcedureFileBrowse, browsePayload).Do()
+	resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, common.ProcedureFileBrowse, browsePayload).Execute()
 	if resp.Err != nil {
 		return nil
 	}
@@ -528,11 +506,11 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 }
 
 func machineHasPersistentSession(localSession *xconn.Session, realm string) bool {
-	resp := localSession.Call(common.ProcedureConnectedMachines).Do()
-	if resp.Err != nil || len(resp.Args()) == 0 {
+	resp := localSession.Call(common.ProcedureConnectedMachines).Execute()
+	if resp.Err != nil || len(resp.Args) == 0 {
 		return false
 	}
-	connected, ok := resp.Args()[0].(map[string]any)
+	connected, ok := resp.Args[0].(map[string]any)
 	if !ok {
 		return false
 	}

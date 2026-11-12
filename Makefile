@@ -2,22 +2,34 @@
 CLOUD_QUIC_ADDRESS ?=
 LDFLAGS := $(if $(CLOUD_QUIC_ADDRESS),-X github.com/xconnio/deskconn/internal/common.cloudQUICAddress=$(CLOUD_QUIC_ADDRESS))
 
-# export (rather than "CGO_ENABLED=0 go build ...") sets this on the recipe's environment
-# directly from make itself, so it works whichever shell runs the recipe - sh/bash here, but
-# cmd.exe on Windows when make can't find a sh.exe on PATH (e.g. invoked from PowerShell),
-# which doesn't understand that inline-assignment syntax.
-export CGO_ENABLED := 0
+# The SDK installer configures pkg-config; an explicit SDK directory is optional.
+ifdef XCONN_SDK_DIR
+export PKG_CONFIG_PATH := $(abspath $(XCONN_SDK_DIR))/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_CONFIG_PATH))
+endif
+export CGO_ENABLED := 1
+
+.PHONY: native-check native-sdk
+native-check:
+	@pkg-config --exists xconn || (echo "Run make native-sdk once; see docs/native-xconn.md"; exit 1)
+
+native-sdk:
+	@set -e; script=$$(mktemp); \
+	trap 'rm -f "$$script"' EXIT; \
+	curl -fLsS https://raw.githubusercontent.com/xconnio/xconn/v0.1.6/scripts/install-xconn-sdk.sh -o "$$script"; \
+	sh "$$script"
 
 # 'desk' is reserved by Windows for Display Settings (desk.cpl) and can't be safely
 # overridden (see install.ps1), so there's no 'desk' built on Windows - use the
 # 'deskconn' binary itself there.
+BIN_DIR ?= bin
+
 ifeq ($(OS),Windows_NT)
-DESKCONN_BIN := bin/deskconn.exe
+DESKCONN_BIN := $(BIN_DIR)/deskconn.exe
 else
-DESKCONN_BIN := bin/deskconn
+DESKCONN_BIN := $(BIN_DIR)/deskconn
 endif
 
-test:
+test: native-check
 	go test -count=1 ./... -v
 
 .PHONY: lint format
@@ -39,12 +51,13 @@ release-check:
 # root helper. desk is built as a copy (rather than symlinked) so this works under whichever
 # shell make ends up using, including cmd.exe on Windows. On Windows, it also fetches the Wintun
 # driver "deskconn vpn connect" needs next to the binary, as installs have it.
-build:
+build: native-check
 	go build -ldflags "$(LDFLAGS)" -o $(DESKCONN_BIN) github.com/xconnio/deskconn/cmd/deskconn
 ifneq ($(OS),Windows_NT)
-	go build -ldflags "$(LDFLAGS)" -o bin/desk github.com/xconnio/deskconn/cmd/deskconn
+	cp $(DESKCONN_BIN) $(BIN_DIR)/desk
 else
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-wintun.ps1 -Dest bin
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-wintun.ps1 -Dest "$(BIN_DIR)"
+
 endif
 
 run-userd:
@@ -61,3 +74,13 @@ else
 install:
 	sh install.sh
 endif
+
+# Fully static Linux executable; needs the host's static libc libraries.
+.PHONY: native-sdk-static build-static
+native-sdk-static: native-sdk
+
+build-static: native-check
+	@test "$$(uname -s)" = Linux || (echo "Fully static builds support Linux only"; exit 1)
+	@pkg-config --exists xconn-static || (echo "Run make native-sdk to install the static SDK"; exit 1)
+	go build -a -tags xconn_static,netgo,osusergo -ldflags "$(LDFLAGS) -linkmode external -extldflags '-static -Wl,--gc-sections'" -o $(DESKCONN_BIN) github.com/xconnio/deskconn/cmd/deskconn
+	cp $(DESKCONN_BIN) $(BIN_DIR)/desk

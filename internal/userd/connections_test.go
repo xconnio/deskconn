@@ -15,8 +15,8 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/userd"
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 const (
@@ -120,10 +120,10 @@ func (c *testCloud) machineOnline(legacy bool) (offline func()) {
 	var mu sync.Mutex
 	keys := map[uint64]*common.SessionKeys{} // by caller, from the machine's side
 	handlers := map[string]xconn.InvocationHandler{
-		ping: func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-			return xconn.NewInvocationResult()
+		ping: func(context.Context, *xconn.Invocation) *xconn.Result {
+			return xconn.NewResult()
 		},
-		common.ProcedureKeyExchange: func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		common.ProcedureKeyExchange: func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 			clientPublicKey, err := inv.ArgBytes(0)
 			require.NoError(c.t, err)
 			publicKey, sendKey, receiveKey, err := common.ServerKeyExchange(clientPublicKey)
@@ -132,13 +132,13 @@ func (c *testCloud) machineOnline(legacy bool) (offline func()) {
 			mu.Lock()
 			keys[inv.Caller()] = &common.SessionKeys{SendKey: sendKey, ReceiveKey: receiveKey}
 			mu.Unlock()
-			return xconn.NewInvocationResult(publicKey)
+			return xconn.NewResult(publicKey)
 		},
 		// As a machine's procedures can fail.
-		common.ProcedureMachineInfo: func(context.Context, *xconn.Invocation) *xconn.InvocationResult {
-			return xconn.NewInvocationError(common.ErrOperationFailed, "no info today")
+		common.ProcedureMachineInfo: func(context.Context, *xconn.Invocation) *xconn.Result {
+			return xconn.NewResultError(common.ErrOperationFailed, "no info today")
 		},
-		procedureTestEcho: func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+		procedureTestEcho: func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 			mu.Lock()
 			enc := keys[inv.Caller()]
 			mu.Unlock()
@@ -146,15 +146,15 @@ func (c *testCloud) machineOnline(legacy bool) (offline func()) {
 			require.NoError(c.t, err)
 			request, err := common.DecryptPayload(encrypted, enc.ReceiveKey)
 			if err != nil {
-				return xconn.NewInvocationError(common.ErrInvalidArgument, "failed to decrypt: "+err.Error())
+				return xconn.NewResultError(common.ErrInvalidArgument, "failed to decrypt: "+err.Error())
 			}
 			result, err := common.EncryptPayload(request, enc.SendKey)
 			require.NoError(c.t, err)
-			return xconn.NewInvocationResult(result)
+			return xconn.NewResult(result)
 		},
 	}
 	for procedure, handler := range handlers {
-		require.NoError(c.t, session.Register(procedure, handler).Do().Err, procedure)
+		require.NoError(c.t, session.Register(procedure, handler).Execute().Err, procedure)
 	}
 
 	var once sync.Once
@@ -223,7 +223,7 @@ func TestLostConnection(t *testing.T) {
 	// Not logged in, as after the daemon starts unless told: it isn't reconnected, but it
 	// isn't left looking connected either.
 	time.Sleep(time.Second) // the P2P upgrade fails (the test machine doesn't answer offers)
-	require.NoError(t, session.Leave())
+	require.NoError(t, session.Close())
 	require.Eventually(t, func() bool { return len(connectedRealms(sessions)) == 0 }, 5*time.Second,
 		20*time.Millisecond, "the lost connection is forgotten")
 
@@ -233,7 +233,7 @@ func TestLostConnection(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(time.Second)
 	offline()
-	require.NoError(t, session.Leave())
+	require.NoError(t, session.Close())
 	require.Eventually(t, func() bool { return len(connectedRealms(sessions)) == 0 }, 5*time.Second,
 		20*time.Millisecond)
 	require.Never(t, func() bool { return len(connectedRealms(sessions)) > 0 }, 3*time.Second,
@@ -274,7 +274,7 @@ func TestProxiedCallsAtOnce(t *testing.T) {
 	daemon, err := xconn.ConnectInMemory(local, common.LocalRealm)
 	require.NoError(t, err)
 	require.NoError(t, daemon.Register(common.ProcedureProxyFileOp,
-		userd.ProxyFileOpHandler(sessions, cloud.cfgDirectory)).Do().Err)
+		userd.ProxyFileOpHandler(sessions, cloud.cfgDirectory)).Execute().Err)
 	cli, err := xconn.ConnectInMemory(local, common.LocalRealm)
 	require.NoError(t, err)
 
@@ -285,7 +285,7 @@ func TestProxiedCallsAtOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp := cli.Call(common.ProcedureProxyFileOp).Args(cloudMachineRealm, procedureTestEcho, []byte("hi")).Do()
+			resp := cli.Call(common.ProcedureProxyFileOp).Args(cloudMachineRealm, procedureTestEcho, []byte("hi")).Execute()
 			require.NoError(t, resp.Err)
 			result, err := resp.ArgBytes(0)
 			require.NoError(t, err)
@@ -306,11 +306,11 @@ func TestFailedProxiedCallKeepsTheConnection(t *testing.T) {
 	daemon, err := xconn.ConnectInMemory(local, common.LocalRealm)
 	require.NoError(t, err)
 	require.NoError(t, daemon.Register(common.ProcedureProxyMachineInfo,
-		userd.ProxyMachineInfoHandler(sessions, cloud.cfgDirectory)).Do().Err)
+		userd.ProxyMachineInfoHandler(sessions, cloud.cfgDirectory)).Execute().Err)
 	cli, err := xconn.ConnectInMemory(local, common.LocalRealm)
 	require.NoError(t, err)
 
-	resp := cli.Call(common.ProcedureProxyMachineInfo).Args(cloudMachineRealm).Do()
+	resp := cli.Call(common.ProcedureProxyMachineInfo).Args(cloudMachineRealm).Execute()
 	require.ErrorContains(t, resp.Err, "no info today")
 	require.Equal(t, []string{cloudMachineRealm}, connectedRealms(sessions),
 		"the machine failing a call doesn't end the connection to it")

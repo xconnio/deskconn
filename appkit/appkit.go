@@ -5,14 +5,14 @@
 package appkit
 
 import (
+	"context"
 	"path/filepath"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
-// LocalRealm is the realm on deskconnd's local socket (see SocketURI), which apps join
-// anonymously to register their procedures.
+// LocalRealm is the local application realm joined by Connect.
 const LocalRealm = common.LocalRealm
 
 // ProcedureAppsRegister registers the apps a session serves, with a JSON list of
@@ -40,9 +40,14 @@ func CfgDirectory() (string, error) {
 	return common.CfgDirectory()
 }
 
-// SocketURI is the URI of deskconnd's local socket in cfgDirectory.
+// SocketURI is the Unix socket URI. Use Connect for a Windows-compatible connection.
 func SocketURI(cfgDirectory string) string {
 	return common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
+}
+
+// Connect joins deskconnd's local application realm on Unix or Windows.
+func Connect(ctx context.Context, cfgDirectory string) (*xconn.Session, error) {
+	return common.ConnectDaemon(ctx, cfgDirectory)
 }
 
 // Handler serves one of an app's procedures: req is the decrypted request, nil when there

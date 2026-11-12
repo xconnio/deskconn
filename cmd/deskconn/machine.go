@@ -19,7 +19,6 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn-go"
 )
 
 type machineCommands struct {
@@ -168,16 +167,16 @@ func dispatchMachineCommand(parsedCmd string, cmds *machineCommands, cfgDirector
 // listMachines prints the machines of your account and when each got connected, from the
 // cached list unless refresh is set or there isn't one.
 func listMachines(cfgDirectory string, refresh, detailed bool) error {
-	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	machinesCallResp := session.Call(common.ProcedureConnectedMachines).Do()
+	machinesCallResp := session.Call(common.ProcedureConnectedMachines).Execute()
 	if machinesCallResp.Err != nil {
 		return machinesCallResp.Err
 	}
-	connectedMachines, ok := machinesCallResp.Args()[0].(map[string]any)
+	connectedMachines, ok := machinesCallResp.Args[0].(map[string]any)
 	if !ok {
 		return errors.New("expected a map of strings")
 	}
@@ -239,7 +238,7 @@ func pingMachine(cfgDirectory, machine string, count int) error {
 	if err != nil {
 		return err
 	}
-	localSession, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+	localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -262,7 +261,7 @@ pingLoop:
 		default:
 		}
 
-		callResp := localSession.Call(common.ProcedureProxyPing).Args(realm).Do()
+		callResp := localSession.Call(common.ProcedureProxyPing).Args(realm).Execute()
 		sent++
 		if callResp.Err != nil {
 			fmt.Fprintf(os.Stderr, "seq=%d error: %v\n", seq, callResp.Err)
@@ -305,11 +304,11 @@ func connectMachine(cfgDirectory, machine string) error {
 	if err != nil {
 		return err
 	}
-	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		return err
 	}
-	if err := session.Call(common.ProcedureConnect).Args(realm).Do().Err; err != nil {
+	if err := session.Call(common.ProcedureConnect).Args(realm).Execute().Err; err != nil {
 		return err
 	}
 	fmt.Printf("connected to %s\n", machine)
@@ -317,12 +316,12 @@ func connectMachine(cfgDirectory, machine string) error {
 }
 
 func disconnectMachine(cfgDirectory, machine string, all bool) error {
-	session, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		return err
 	}
 	if all {
-		if err := session.Call(common.ProcedureDisconnectAll).Do().Err; err != nil {
+		if err := session.Call(common.ProcedureDisconnectAll).Execute().Err; err != nil {
 			return err
 		}
 		fmt.Println("disconnected all machines")
@@ -335,7 +334,7 @@ func disconnectMachine(cfgDirectory, machine string, all bool) error {
 	if err != nil {
 		return err
 	}
-	if err := session.Call(common.ProcedureDisconnect).Args(realm).Do().Err; err != nil {
+	if err := session.Call(common.ProcedureDisconnect).Args(realm).Execute().Err; err != nil {
 		return err
 	}
 	fmt.Printf("disconnected %s\n", machine)
@@ -376,11 +375,11 @@ func fetchMachineInfo(cfgDirectory, realm, mode string) ([]byte, error) {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.CallFileOp(p2pSess, common.ProcedureMachineInfo, nil)
 	default:
-		localSession, err := xconn.ConnectAnonymous(context.Background(), common.DaemonURI(cfgDirectory), common.LocalRealm)
+		localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
-		callResp := localSession.Call(common.ProcedureProxyMachineInfo).Args(realm).Do()
+		callResp := localSession.Call(common.ProcedureProxyMachineInfo).Args(realm).Execute()
 		if callResp.Err != nil {
 			return nil, callResp.Err
 		}

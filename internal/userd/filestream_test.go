@@ -12,53 +12,45 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/deskconn/internal/userd"
 )
 
 const testFileName = "file.txt"
 
-// newQUICTestStream returns the client end of a net.Pipe whose server end is
-// being served by HandleQUICStream, exercising the exact same dispatch and
-// handlers a real QUIC stream from sess.OpenStream() would hit -- net.Pipe
-// satisfies net.Conn, which is all HandleQUICStream requires.
-func newQUICTestStream(t *testing.T) net.Conn {
+func newRPCFileStream(t *testing.T, operation common.FSOp) net.Conn {
 	t.Helper()
-	client, server := net.Pipe()
-	var d userd.Deskconn
-	go func() {
-		op, err := userd.ReadStreamOp(server)
-		if err != nil {
-			return
-		}
-		d.DispatchQUICOp(op, server)
-	}()
-	t.Cleanup(func() { _ = client.Close() })
-	return client
+	caller, _ := newRPCFeatureSession(t)
+	procedure, input := common.ProcedureFileListStream, false
+	switch operation {
+	case common.FSOpRead:
+		procedure = common.ProcedureFileReadStream
+	case common.FSOpInit:
+		procedure, input = common.ProcedureFileInitStream, true
+	case common.FSOpWrite:
+		procedure, input = common.ProcedureFileWriteStream, true
+	}
+	stream, err := common.OpenRPCStream(t.Context(), caller, procedure, input)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = stream.Close() })
+	return stream
 }
 
-// sendReq writes req as a real client would: a leading RoutingFrame (which
-// HandleQUICStream always discards -- see its doc comment), then performs
-// the per-stream key exchange, then sends the real request encrypted.
-// Returns the derived keys so the caller can decrypt the response and any
-// data that follows on the stream.
+// sendReq performs the key exchange and sends the encrypted request.
 func sendReq(t *testing.T, conn net.Conn, req common.FSRequest) (sendKey, receiveKey []byte) {
 	t.Helper()
-	require.NoError(t, common.WriteMsg(conn,
-		common.RoutingFrame{Op: req.Op, Path: req.Path, Recursive: req.Recursive}))
 
-	sendKey, receiveKey, err := deskconn.QuicClientKeyExchange(conn)
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(conn)
 	require.NoError(t, err)
 
 	require.NoError(t, common.WriteEncryptedMsg(conn, req, sendKey))
 	return sendKey, receiveKey
 }
 
-func TestQUICHandleListSingleFile(t *testing.T) {
+func TestRPCHandleListSingleFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "hello.txt")
 	require.NoError(t, os.WriteFile(filePath, []byte("hello world"), 0644))
 
-	client := newQUICTestStream(t)
+	client := newRPCFileStream(t, common.FSOpList)
 	_, receiveKey := sendReq(t, client, common.FSRequest{Op: common.FSOpList, Path: filePath})
 
 	var resp common.FSResponse
@@ -70,13 +62,13 @@ func TestQUICHandleListSingleFile(t *testing.T) {
 	assert.False(t, resp.Entries[0].IsDir)
 }
 
-func TestQUICHandleListDirRecursive(t *testing.T) {
+func TestRPCHandleListDirRecursive(t *testing.T) {
 	root := t.TempDir()
 	srcDir := filepath.Join(root, "src")
 	require.NoError(t, os.Mkdir(srcDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("aaa"), 0644))
 
-	client := newQUICTestStream(t)
+	client := newRPCFileStream(t, common.FSOpList)
 	_, receiveKey := sendReq(t, client, common.FSRequest{Op: common.FSOpList, Path: srcDir, Recursive: true})
 
 	var resp common.FSResponse
@@ -85,10 +77,10 @@ func TestQUICHandleListDirRecursive(t *testing.T) {
 	require.Len(t, resp.Entries, 2)
 }
 
-func TestQUICHandleListDirWithoutRecursiveFails(t *testing.T) {
+func TestRPCHandleListDirWithoutRecursiveFails(t *testing.T) {
 	dir := t.TempDir()
 
-	client := newQUICTestStream(t)
+	client := newRPCFileStream(t, common.FSOpList)
 	_, receiveKey := sendReq(t, client, common.FSRequest{Op: common.FSOpList, Path: dir})
 
 	var resp common.FSResponse
@@ -97,8 +89,8 @@ func TestQUICHandleListDirWithoutRecursiveFails(t *testing.T) {
 	assert.Contains(t, resp.Err, "is a directory")
 }
 
-func TestQUICHandleListNonExistent(t *testing.T) {
-	client := newQUICTestStream(t)
+func TestRPCHandleListNonExistent(t *testing.T) {
+	client := newRPCFileStream(t, common.FSOpList)
 	_, receiveKey := sendReq(t, client,
 		common.FSRequest{Op: common.FSOpList, Path: filepath.Join(t.TempDir(), "nope")})
 
@@ -108,13 +100,13 @@ func TestQUICHandleListNonExistent(t *testing.T) {
 	assert.NotEmpty(t, resp.Err)
 }
 
-func TestQUICHandleReadRange(t *testing.T) {
+func TestRPCHandleReadRange(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "data.bin")
 	content := []byte("0123456789ABCDEF")
 	require.NoError(t, os.WriteFile(filePath, content, 0644))
 
-	client := newQUICTestStream(t)
+	client := newRPCFileStream(t, common.FSOpRead)
 	req := common.FSRequest{Op: common.FSOpRead, Path: filePath, RelPath: "data.bin", Offset: 3, Length: 5}
 	_, receiveKey := sendReq(t, client, req)
 
@@ -127,10 +119,10 @@ func TestQUICHandleReadRange(t *testing.T) {
 	assert.Equal(t, content[3:8], buf.Bytes())
 }
 
-func TestQUICHandleReadNonExistentFile(t *testing.T) {
+func TestRPCHandleReadNonExistentFile(t *testing.T) {
 	dir := t.TempDir()
 
-	client := newQUICTestStream(t)
+	client := newRPCFileStream(t, common.FSOpRead)
 	req := common.FSRequest{Op: common.FSOpRead, Path: dir, RelPath: "missing.txt", Offset: 0, Length: 1}
 	_, receiveKey := sendReq(t, client, req)
 
@@ -140,7 +132,7 @@ func TestQUICHandleReadNonExistentFile(t *testing.T) {
 	assert.NotEmpty(t, resp.Err)
 }
 
-func TestQUICHandleInitAndWrite(t *testing.T) {
+func TestRPCHandleInitAndWrite(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "dst")
 
@@ -148,7 +140,7 @@ func TestQUICHandleInitAndWrite(t *testing.T) {
 		{RelPath: testFileName, Size: 10, Mode: 0644},
 	}
 
-	initClient := newQUICTestStream(t)
+	initClient := newRPCFileStream(t, common.FSOpInit)
 	_, initReceiveKey := sendReq(t, initClient, common.FSRequest{
 		Op: common.FSOpInit, Path: dst, Entries: entries, TargetIsDirHint: true,
 	})
@@ -160,7 +152,7 @@ func TestQUICHandleInitAndWrite(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 10, fi.Size())
 
-	writeClient := newQUICTestStream(t)
+	writeClient := newRPCFileStream(t, common.FSOpWrite)
 	writeReq := common.FSRequest{
 		Op: common.FSOpWrite, Path: dst, RelPath: testFileName, Offset: 2, Length: 5, TargetIsDirHint: true,
 	}
@@ -183,11 +175,11 @@ func TestQUICHandleInitAndWrite(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
-func TestQUICHandleWriteBeforeInitFails(t *testing.T) {
+func TestRPCHandleWriteBeforeInitFails(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "dst")
 
-	client := newQUICTestStream(t)
+	client := newRPCFileStream(t, common.FSOpWrite)
 	req := common.FSRequest{
 		Op: common.FSOpWrite, Path: dst, RelPath: testFileName, Offset: 0, Length: 5, TargetIsDirHint: true,
 	}
@@ -199,7 +191,7 @@ func TestQUICHandleWriteBeforeInitFails(t *testing.T) {
 	assert.NotEmpty(t, resp.Err)
 }
 
-func TestQUICHandleInitSingleFileTarget(t *testing.T) {
+func TestRPCHandleInitSingleFileTarget(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "renamed.txt")
 
@@ -207,7 +199,7 @@ func TestQUICHandleInitSingleFileTarget(t *testing.T) {
 		{RelPath: "original.txt", Size: 4, Mode: 0644},
 	}
 
-	client := newQUICTestStream(t)
+	client := newRPCFileStream(t, common.FSOpInit)
 	_, receiveKey := sendReq(t, client, common.FSRequest{Op: common.FSOpInit, Path: dst, Entries: entries})
 
 	var resp common.FSResponse
@@ -218,4 +210,16 @@ func TestQUICHandleInitSingleFileTarget(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, fi.IsDir())
 	assert.EqualValues(t, 4, fi.Size())
+}
+
+func TestRPCFileStreamCannotSwitchToAnotherOperation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "must-not-exist")
+	stream := newRPCFileStream(t, common.FSOpList)
+	_, receiveKey := sendReq(t, stream, common.FSRequest{Op: common.FSOpInit, Path: path})
+	var response common.FSResponse
+	require.NoError(t, common.ReadEncryptedMsg(stream, &response, receiveKey))
+	require.False(t, response.OK)
+	require.Equal(t, "operation does not match RPC endpoint", response.Err)
+	_, err := os.Stat(path)
+	require.True(t, os.IsNotExist(err))
 }

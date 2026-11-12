@@ -14,10 +14,17 @@ builds:
     main: ./cmd/deskconn
     binary: deskconn
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
+      - CC={{ if eq .Arch "arm64" }}aarch64-linux-gnu-gcc{{ else }}gcc{{ end }}
+      - PKG_CONFIG_PATH={{ .Env.XCONN_RELEASE_SDK }}/{{ .Os }}_{{ .Arch }}/lib/pkgconfig
+    tags:
+      - xconn_static
+      - netgo
+      - osusergo
+    ldflags:
+      - -s -w -linkmode external -extldflags '-static -Wl,--gc-sections'
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
       - arm64
@@ -25,12 +32,23 @@ builds:
     main: ./cmd/deskconn
     binary: deskconn
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+      - PKG_CONFIG_PATH={{ .Env.XCONN_RELEASE_SDK }}/windows_amd64/lib/pkgconfig
+    tags:
+      - xconn_static
+      - netgo
+      - osusergo
+    ldflags:
+      - -s -w -linkmode external -extldflags '-static -Wl,--gc-sections'
     goos:
       - windows
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
     # No -H=windowsgui here: the same build also runs as the CLI, which needs its console.
     # desk serve detaches from the console at runtime instead (see detachConsole).
 
@@ -52,10 +70,8 @@ archives:
       - README*
       - LICENSE*
       - src: "build/wintun/bin/{{ .Arch }}/wintun.dll"
-        dst: wintun.dll
         strip_parent: true
-      - src: build/wintun/LICENSE.txt
-        dst: wintun-LICENSE.txt
+      - src: build/wintun/wintun-LICENSE.txt
         strip_parent: true
 
 checksum:

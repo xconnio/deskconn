@@ -22,12 +22,12 @@ func newTestAgentForwardDeskconn() *userd.Deskconn {
 }
 
 func TestAgentForwardStartSuccessAndDataRoundTrip(t *testing.T) {
-	client, server := net.Pipe()
+	caller, d := newRPCFeatureSession(t)
+	client, err := common.OpenRPCStream(t.Context(), caller, common.ProcedureAgentForwardStream, false)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
-	d := newTestAgentForwardDeskconn()
-	go d.HandleQUICAgentForwardStream(server)
 
-	sendKey, receiveKey, err := deskconn.QuicClientKeyExchange(client)
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 
 	require.NoError(t, sendPortEnvelope(client, common.AgentFwdMsgControl,
@@ -72,7 +72,7 @@ func TestAgentForwardStartFailureReportsError(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.HandleQUICAgentForwardStream(server)
 
-	sendKey, _, err := deskconn.QuicClientKeyExchange(client)
+	sendKey, _, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 
 	// A control message that isn't a "start" op is rejected instead of acked.
@@ -90,7 +90,7 @@ func TestAgentForwardSocketPathCompareAndDeleteOnCleanup(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.HandleQUICAgentForwardStream(server1)
 
-	sendKey1, receiveKey1, err := deskconn.QuicClientKeyExchange(client1)
+	sendKey1, receiveKey1, err := deskconn.StreamClientKeyExchange(client1)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client1, common.AgentFwdMsgControl,
 		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey1))
@@ -104,7 +104,7 @@ func TestAgentForwardSocketPathCompareAndDeleteOnCleanup(t *testing.T) {
 	t.Cleanup(func() { _ = client2.Close() })
 	go d.HandleQUICAgentForwardStream(server2)
 
-	sendKey2, receiveKey2, err := deskconn.QuicClientKeyExchange(client2)
+	sendKey2, receiveKey2, err := deskconn.StreamClientKeyExchange(client2)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client2, common.AgentFwdMsgControl,
 		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey2))
@@ -136,7 +136,7 @@ func TestAgentForwardIgnoresPing(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.HandleQUICAgentForwardStream(server)
 
-	sendKey, receiveKey, err := deskconn.QuicClientKeyExchange(client)
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client, common.AgentFwdMsgControl,
 		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey))
@@ -168,7 +168,7 @@ func TestAgentForwardConcurrentConnections(t *testing.T) {
 	d := newTestAgentForwardDeskconn()
 	go d.HandleQUICAgentForwardStream(server)
 
-	sendKey, receiveKey, err := deskconn.QuicClientKeyExchange(client)
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client, common.AgentFwdMsgControl,
 		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey))

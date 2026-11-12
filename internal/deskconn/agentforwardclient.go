@@ -11,11 +11,10 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
 )
 
 // RunAgentForward is the client entry point for `desk shell -A`. It
-// opens one session-level raw stream/channel, tells the machine to start
+// opens one RPC-associated duplex stream, tells the machine to start
 // forwarding, signals ready once the machine acks, and for every external
 // connection the machine reports, dials agentSock  and relays.
 func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock string, ready chan<- error) error {
@@ -34,17 +33,14 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return runAgentForwardP2P(ctx, P2PChannels(p2pSess), authID, agentSock, ready)
+		return runAgentForwardOnStream(ctx, p2pSess, authID, agentSock, ready)
 	case ModeRouted:
 		return runAgentForwardQUIC(ctx, realm, cfgDirectory, authID, agentSock, ready)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = daemon.Close() }()
-			if daemon.P2P() {
-				return runAgentForwardP2P(ctx, daemon, authID, agentSock, ready)
-			}
-			return runAgentForwardOnStream(ctx, daemon, realm, authID, agentSock, ready)
+			return runAgentForwardOnStream(ctx, daemon, authID, agentSock, ready)
 		}
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			ready <- err
@@ -53,7 +49,7 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
-			return runAgentForwardP2P(ctx, P2PChannels(p2pSess), authID, agentSock, ready)
+			return runAgentForwardOnStream(ctx, p2pSess, authID, agentSock, ready)
 		}
 		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 		return runAgentForwardQUIC(ctx, realm, cfgDirectory, authID, agentSock, ready)
@@ -67,28 +63,25 @@ func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, authID, agent
 		return err
 	}
 	defer func() { _ = quicSess.Connection().Close() }()
-	return runAgentForwardOnStream(ctx, quicSess, realm, authID, agentSock, ready)
+	return runAgentForwardOnStream(ctx, quicSess, authID, agentSock, ready)
 }
 
-// runAgentForwardOnStream runs the agent-forward session on a raw stream opened on sess.
-func runAgentForwardOnStream(ctx context.Context, sess xconn.MultiplexedSession,
-	realm, authID, agentSock string, ready chan<- error) error {
-	stream, err := sess.OpenStream()
+// runAgentForwardOnStream runs the agent-forward session on an RPC stream returned by sess.
+func runAgentForwardOnStream(ctx context.Context, sess common.StreamSession,
+	authID, agentSock string, ready chan<- error) error {
+	stream, err := common.OpenRPCStream(ctx, sess, common.ProcedureAgentForwardStream, false)
 	if err != nil {
 		ready <- err
 		return err
 	}
 	defer stream.Close()
-	if err := common.WriteMsg(stream, common.RoutingFrame{Realm: realm, Op: common.FSOpAgentForward}); err != nil {
-		ready <- err
-		return err
-	}
-	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
+
+	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
 	if err != nil {
 		ready <- err
 		return err
 	}
-	conn := &quicClientShellConn{stream: stream}
+	conn := &streamClientShellConn{stream: stream}
 	if err := startAgentForward(conn, sendKey, receiveKey, authID); err != nil {
 		ready <- err
 		return err
@@ -133,59 +126,6 @@ func runAgentForwardOnStream(ctx context.Context, sess xconn.MultiplexedSession,
 	return runAgentForwardClientLoop(ctx, readNext, writer, sendKey, agentSock)
 }
 
-func runAgentForwardP2P(ctx context.Context, p2pSess ChannelOpener,
-	authID, agentSock string, ready chan<- error) error {
-	channel, err := p2pSess.OpenMessageChannel(common.AgentForwardChannelLabel)
-	if err != nil {
-		ready <- err
-		return err
-	}
-	defer channel.Close()
-	closed, _ := common.WebrtcBackpressure(channel)
-	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
-	if err != nil {
-		ready <- err
-		return err
-	}
-	conn := newP2PClientShellConn(channel, closed)
-	if err := startAgentForward(conn, sendKey, receiveKey, authID); err != nil {
-		ready <- err
-		return err
-	}
-	ready <- nil
-
-	writer := &common.PortReverseWriter{Ch: make(chan []byte, 64), Done: closed}
-	common.SafeGo(func() {
-		for {
-			select {
-			case env := <-writer.Ch:
-				if err := channel.Send(env); err != nil {
-					_ = channel.Close()
-					return
-				}
-			case <-closed:
-				return
-			}
-		}
-	})
-	common.SafeGo(func() {
-		select {
-		case <-ctx.Done():
-			_ = channel.Close()
-		case <-closed:
-		}
-	})
-
-	readNext := func() (byte, []byte, error) {
-		frame, err := common.RecvPriority(conn.msgCh, closed, common.ShellIdleTimeout)
-		if err != nil {
-			return 0, nil, err
-		}
-		return common.DecryptEnvelope(frame, receiveKey)
-	}
-	return runAgentForwardClientLoop(ctx, readNext, writer, sendKey, agentSock)
-}
-
 // startAgentForward sends the initial "start forwarding" request and waits
 // for the machine's ack, returning an error if it can't proceed.
 func startAgentForward(conn shellConn, sendKey, receiveKey []byte, authID string) error {
@@ -216,7 +156,7 @@ func startAgentForward(conn shellConn, sendKey, receiveKey []byte, authID string
 }
 
 // runAgentForwardClientLoop is the transport-agnostic heart of both
-// runAgentForwardQUIC and runAgentForwardP2P: readNext blocks for the next
+// all connection types: readNext blocks for the next
 // decrypted envelope, writer is this session's single wire-write owner, and
 // sendKey encrypts what this loop sends back.
 func runAgentForwardClientLoop(ctx context.Context, readNext func() (byte, []byte, error),

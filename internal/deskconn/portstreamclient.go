@@ -16,12 +16,11 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
 )
 
 // RunPortForward is the client entry point for `desk port forward`. It
 // listens on localPort and, for each accepted local connection, opens a
-// fresh raw stream/channel and asks the machine to dial remotePort, then
+// fresh RPC-associated duplex stream and asks the machine to dial remotePort, then
 // relays. mode picks "routed"/"direct" itself, or "" uses userd's persistent
 // connection, falling back (without userd) to trying P2P first, then QUIC
 // -- matching file transfer's default-mode policy.
@@ -39,14 +38,14 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return acceptPortForwardLoopP2P(ctx, ln, P2PChannels(p2pSess), remotePort)
+		return acceptPortForwardLoopP2P(ctx, ln, p2pSess, remotePort)
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = quicSess.Connection().Close() }()
-		return acceptPortForwardLoopQUIC(ctx, ln, quicSess, realm, remotePort)
+		return acceptPortForwardLoopQUIC(ctx, ln, quicSess, remotePort)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
 		if err == nil {
@@ -54,7 +53,7 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 			if daemon.P2P() {
 				return acceptPortForwardLoopP2P(ctx, ln, daemon, remotePort)
 			}
-			return acceptPortForwardLoopQUIC(ctx, ln, daemon, realm, remotePort)
+			return acceptPortForwardLoopQUIC(ctx, ln, daemon, remotePort)
 		}
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			return err
@@ -62,7 +61,7 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
-			return acceptPortForwardLoopP2P(ctx, ln, P2PChannels(p2pSess), remotePort)
+			return acceptPortForwardLoopP2P(ctx, ln, p2pSess, remotePort)
 		}
 		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
@@ -70,19 +69,19 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 			return err
 		}
 		defer func() { _ = quicSess.Connection().Close() }()
-		return acceptPortForwardLoopQUIC(ctx, ln, quicSess, realm, remotePort)
+		return acceptPortForwardLoopQUIC(ctx, ln, quicSess, remotePort)
 	}
 }
 
-func acceptPortForwardLoopQUIC(ctx context.Context, ln net.Listener, quicSess xconn.MultiplexedSession,
-	realm, remotePort string) error {
+func acceptPortForwardLoopQUIC(ctx context.Context, ln net.Listener, quicSess common.StreamSession,
+	remotePort string) error {
 	closer, ok := quicSess.(interface{ Connection() io.Closer })
 	return acceptPortForwardConnections(ctx, ln, func() {
 		if ok {
 			_ = closer.Connection().Close()
 		}
 	}, func(conn net.Conn) {
-		forwardOneConnectionQUIC(quicSess, realm, conn, remotePort)
+		forwardOneConnectionQUIC(ctx, quicSess, conn, remotePort)
 	})
 }
 
@@ -105,24 +104,21 @@ func acceptPortForwardConnections(ctx context.Context, ln net.Listener,
 	}
 }
 
-func forwardOneConnectionQUIC(quicSess xconn.MultiplexedSession, realm string, localConn net.Conn, remotePort string) {
-	stream, err := quicSess.OpenStream()
+func forwardOneConnectionQUIC(ctx context.Context, quicSess common.StreamSession,
+	localConn net.Conn, remotePort string) {
+	stream, err := common.OpenRPCStream(ctx, quicSess, common.ProcedurePortForwardStream, false)
 	if err != nil {
 		_ = localConn.Close()
 		return
 	}
-	if err := common.WriteMsg(stream, common.RoutingFrame{Realm: realm, Op: common.FSOpPortForward}); err != nil {
-		_ = stream.Close()
-		_ = localConn.Close()
-		return
-	}
-	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
+
+	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
 	if err != nil {
 		_ = stream.Close()
 		_ = localConn.Close()
 		return
 	}
-	conn := &quicClientShellConn{stream: stream}
+	conn := &streamClientShellConn{stream: stream}
 	if !completePortForwardHandshake(conn, sendKey, receiveKey, remotePort) {
 		_ = stream.Close()
 		_ = localConn.Close()
@@ -131,37 +127,16 @@ func forwardOneConnectionQUIC(quicSess xconn.MultiplexedSession, realm string, l
 	common.RelayPortForwardQUIC(stream, localConn, sendKey, receiveKey)
 }
 
-func acceptPortForwardLoopP2P(ctx context.Context, ln net.Listener, p2pSess ChannelOpener, remotePort string) error {
+func acceptPortForwardLoopP2P(ctx context.Context, ln net.Listener,
+	p2pSess common.StreamSession, remotePort string) error {
 	closer, ok := p2pSess.(interface{ Close() error })
 	return acceptPortForwardConnections(ctx, ln, func() {
 		if ok {
 			_ = closer.Close()
 		}
 	}, func(conn net.Conn) {
-		forwardOneConnectionP2P(p2pSess, conn, remotePort)
+		forwardOneConnectionQUIC(ctx, p2pSess, conn, remotePort)
 	})
-}
-
-func forwardOneConnectionP2P(p2pSess ChannelOpener, localConn net.Conn, remotePort string) {
-	channel, err := p2pSess.OpenMessageChannel(common.PortForwardChannelLabel)
-	if err != nil {
-		_ = localConn.Close()
-		return
-	}
-	closed, _ := common.WebrtcBackpressure(channel)
-	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
-	if err != nil {
-		_ = channel.Close()
-		_ = localConn.Close()
-		return
-	}
-	conn := newP2PClientShellConn(channel, closed)
-	if !completePortForwardHandshake(conn, sendKey, receiveKey, remotePort) {
-		_ = channel.Close()
-		_ = localConn.Close()
-		return
-	}
-	common.RelayPortForwardP2P(channel, localConn, sendKey, receiveKey, conn.msgCh, closed)
 }
 
 // completePortForwardHandshake sends the "dial this port" request over conn
@@ -197,7 +172,7 @@ func completePortForwardHandshake(conn shellConn, sendKey, receiveKey []byte, re
 }
 
 // RunPortReverse is the client entry point for `desk port reverse`. It
-// opens one session-level raw stream/channel, asks the machine to listen on
+// opens one RPC-associated duplex stream, asks the machine to listen on
 // remotePort, and for every external connection the machine reports, dials
 // localhost:localPort and relays. Same mode/fallback policy as
 // RunPortForward.
@@ -209,17 +184,14 @@ func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return runPortReverseP2P(ctx, P2PChannels(p2pSess), remotePort, localPort)
+		return runPortReverseOnStream(ctx, p2pSess, remotePort, localPort)
 	case ModeRouted:
 		return runPortReverseQUIC(ctx, realm, cfgDirectory, remotePort, localPort)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = daemon.Close() }()
-			if daemon.P2P() {
-				return runPortReverseP2P(ctx, daemon, remotePort, localPort)
-			}
-			return runPortReverseOnStream(ctx, daemon, realm, remotePort, localPort)
+			return runPortReverseOnStream(ctx, daemon, remotePort, localPort)
 		}
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			return err
@@ -227,7 +199,7 @@ func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
-			return runPortReverseP2P(ctx, P2PChannels(p2pSess), remotePort, localPort)
+			return runPortReverseOnStream(ctx, p2pSess, remotePort, localPort)
 		}
 		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
 		return runPortReverseQUIC(ctx, realm, cfgDirectory, remotePort, localPort)
@@ -240,25 +212,23 @@ func runPortReverseQUIC(ctx context.Context, realm, cfgDirectory, remotePort, lo
 		return err
 	}
 	defer func() { _ = quicSess.Connection().Close() }()
-	return runPortReverseOnStream(ctx, quicSess, realm, remotePort, localPort)
+	return runPortReverseOnStream(ctx, quicSess, remotePort, localPort)
 }
 
-// runPortReverseOnStream runs the reverse-forward session on a raw stream opened on sess.
-func runPortReverseOnStream(ctx context.Context, sess xconn.MultiplexedSession,
-	realm, remotePort, localPort string) error {
-	stream, err := sess.OpenStream()
+// runPortReverseOnStream runs the reverse-forward session on an RPC stream returned by sess.
+func runPortReverseOnStream(ctx context.Context, sess common.StreamSession,
+	remotePort, localPort string) error {
+	stream, err := common.OpenRPCStream(ctx, sess, common.ProcedurePortReverseStream, false)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	if err := common.WriteMsg(stream, common.RoutingFrame{Realm: realm, Op: common.FSOpPortReverse}); err != nil {
-		return err
-	}
-	sendKey, receiveKey, err := QuicClientKeyExchange(stream)
+
+	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
 	if err != nil {
 		return err
 	}
-	conn := &quicClientShellConn{stream: stream}
+	conn := &streamClientShellConn{stream: stream}
 	if err := startPortReverseListen(conn, sendKey, receiveKey, remotePort); err != nil {
 		return err
 	}
@@ -301,54 +271,6 @@ func runPortReverseOnStream(ctx context.Context, sess xconn.MultiplexedSession,
 	return runPortReverseClientLoop(ctx, readNext, writer, sendKey, localPort)
 }
 
-func runPortReverseP2P(ctx context.Context, p2pSess ChannelOpener, remotePort, localPort string) error {
-	channel, err := p2pSess.OpenMessageChannel(common.PortReverseChannelLabel)
-	if err != nil {
-		return err
-	}
-	defer channel.Close()
-	closed, _ := common.WebrtcBackpressure(channel)
-	sendKey, receiveKey, err := p2pClientKeyExchange(channel, closed)
-	if err != nil {
-		return err
-	}
-	conn := newP2PClientShellConn(channel, closed)
-	if err := startPortReverseListen(conn, sendKey, receiveKey, remotePort); err != nil {
-		return err
-	}
-
-	writer := &common.PortReverseWriter{Ch: make(chan []byte, 64), Done: closed}
-	common.SafeGo(func() {
-		for {
-			select {
-			case env := <-writer.Ch:
-				if err := channel.Send(env); err != nil {
-					_ = channel.Close()
-					return
-				}
-			case <-closed:
-				return
-			}
-		}
-	})
-	common.SafeGo(func() {
-		select {
-		case <-ctx.Done():
-			_ = channel.Close()
-		case <-closed:
-		}
-	})
-
-	readNext := func() (byte, []byte, error) {
-		frame, err := common.RecvPriority(conn.msgCh, closed, common.ShellIdleTimeout)
-		if err != nil {
-			return 0, nil, err
-		}
-		return common.DecryptEnvelope(frame, receiveKey)
-	}
-	return runPortReverseClientLoop(ctx, readNext, writer, sendKey, localPort)
-}
-
 // startPortReverseListen sends the initial "listen on remotePort" request
 // and waits for the machine's ack, returning an error (including the
 // machine's own reported listen failure) if it can't proceed.
@@ -380,10 +302,10 @@ func startPortReverseListen(conn shellConn, sendKey, receiveKey []byte, remotePo
 }
 
 // runPortReverseClientLoop is the transport-agnostic heart of both
-// runPortReverseQUIC and runPortReverseP2P: readNext blocks for the next
+// runPortReverseQUIC and runPortReverseOnStream: readNext blocks for the next
 // decrypted envelope, writer is this session's single wire-write owner (see
 // PortReverseWriter), and sendKey encrypts what this loop sends back.
-// Mirrors handleQUICPortReverseStream/servePortReverseChannel's machine-side
+// Mirrors handleQUICPortReverseStream's machine-side
 // loop.
 func runPortReverseClientLoop(ctx context.Context, readNext func() (byte, []byte, error),
 	writer *common.PortReverseWriter, sendKey []byte, localPort string) error {

@@ -16,8 +16,8 @@ import (
 	berrors "go.etcd.io/bbolt/errors"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/wampproto-go/auth"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn-core/bindings/go/auth"
 )
 
 // StandaloneUser may connect in standalone mode with its password, any of its authorized
@@ -355,9 +355,9 @@ func checkStandaloneUser(user StandaloneUser) error {
 
 // standaloneUsersCall checks inv's caller may manage users, being one of the machine's admins,
 // or returns the error to reply with.
-func standaloneUsersCall(inv *xconn.Invocation) *xconn.InvocationResult {
+func standaloneUsersCall(inv *xconn.Invocation) *xconn.Result {
 	if inv.CallerAuthRole() != common.RoleAdmin {
-		return xconn.NewInvocationError(common.ErrNotAuthorized, "only the machine's admins may manage its users")
+		return xconn.NewResultError(common.ErrNotAuthorized, "only the machine's admins may manage its users")
 	}
 	return nil
 }
@@ -409,13 +409,13 @@ func standaloneKeysFrom(value any) ([]string, bool) {
 // handleStandaloneUsersList returns the machine's users, each a dict of its username,
 // authorized_keys, password (whether it logs in with one), role and config (whether it's
 // one of the config file's).
-func (d *Deskconn) handleStandaloneUsersList(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleStandaloneUsersList(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	if errResult := standaloneUsersCall(inv); errResult != nil {
 		return errResult
 	}
 	users, err := d.standaloneUsers.List()
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	result := make([]any, 0, len(users))
 	for _, user := range users {
@@ -428,12 +428,12 @@ func (d *Deskconn) handleStandaloneUsersList(_ context.Context, inv *xconn.Invoc
 			"role": user.Role, "config": user.Config,
 		})
 	}
-	return xconn.NewInvocationResult(result)
+	return xconn.NewResult(result)
 }
 
 // handleStandaloneUsersAdd adds the user its kwargs describe (see standaloneUserFrom), as a
 // member.
-func (d *Deskconn) handleStandaloneUsersAdd(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleStandaloneUsersAdd(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	if errResult := standaloneUsersCall(inv); errResult != nil {
 		return errResult
 	}
@@ -442,14 +442,14 @@ func (d *Deskconn) handleStandaloneUsersAdd(_ context.Context, inv *xconn.Invoca
 		err = d.standaloneUsers.Add(user)
 	}
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	log.Printf("standalone: %s added %s", inv.CallerAuthID(), user.Username)
-	return xconn.NewInvocationResult()
+	return xconn.NewResult()
 }
 
 // handleStandaloneUsersRemove removes the user its argument names.
-func (d *Deskconn) handleStandaloneUsersRemove(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleStandaloneUsersRemove(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	if errResult := standaloneUsersCall(inv); errResult != nil {
 		return errResult
 	}
@@ -458,8 +458,8 @@ func (d *Deskconn) handleStandaloneUsersRemove(_ context.Context, inv *xconn.Inv
 		err = d.standaloneUsers.Remove(username)
 	}
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	log.Printf("standalone: %s removed %s", inv.CallerAuthID(), username)
-	return xconn.NewInvocationResult()
+	return xconn.NewResult()
 }

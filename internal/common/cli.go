@@ -1,17 +1,26 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"os/user"
 	"path/filepath"
 	"time"
+
+	"github.com/xconnio/deskconn/internal/connectivity"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // These are helpers the CLI's commands share, desk top among them.
 
-// DaemonURI is the address of deskconn.sock, the local daemon's socket.
+// DaemonURI is the local Unix socket URI. Use ConnectDaemon on all platforms.
 func DaemonURI(cfgDirectory string) string {
 	return UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
+}
+
+// ConnectDaemon joins the current user's local daemon on each supported platform.
+func ConnectDaemon(ctx context.Context, cfgDirectory string) (*xconn.Session, error) {
+	return connectivity.ConnectApp(ctx, filepath.Join(cfgDirectory, "deskconn.sock"), LocalRealm)
 }
 
 // CurrentUsername is the authid a profile presents unless --authid says otherwise.

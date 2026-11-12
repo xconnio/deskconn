@@ -7,26 +7,26 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-core/bindings/go"
 )
 
 // handleAppsRegister lists the apps a process on the local socket serves, e.g. media-app's
 // Pictures, Videos and Documents, until its session leaves. Its argument is their JSON
 // list (see app). The process registers and serves the apps' procedures itself.
-func (d *Deskconn) handleAppsRegister(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+func (d *Deskconn) handleAppsRegister(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	payload, err := inv.ArgBytes(0)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	var apps []*app
 	if err := json.Unmarshal(payload, &apps); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	if err := d.capabilities.addExternal(inv.Caller(), apps); err != nil {
-		return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 	}
 	log.Printf("Registered apps from session %d", inv.Caller())
-	return xconn.NewInvocationResult()
+	return xconn.NewResult()
 }
 
 // handleAppUnregister drops the apps sessionID registered, if any, when it leaves.
