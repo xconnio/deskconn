@@ -42,14 +42,18 @@ the account service, and stores the private key in `~/.deskconn/id_ed25519`.
 
 ## Installation
 
-**macOS and Linux**
-
 ```bash
-curl -fsSL https://get.deskconn.com | sh
+# On macOS and Linux.
+curl -fsSL https://get.deskconn.com/install.sh | sh
 ```
 
-This installs one binary, `deskconn`, to `~/.local/lib/exec`, with `desk` on your `PATH` (`~/.local/bin/desk`) a
-symlink to it. It's the CLI, and `desk serve --mode user|standalone|root` runs the daemons:
+```powershell
+# On Windows.
+irm https://get.deskconn.com/install.ps1 | iex
+```
+
+On macOS and Linux, this installs one binary, `deskconn`, to `~/.local/lib/exec`, with `desk` on your `PATH`
+(`~/.local/bin/desk`) a symlink to it. It's the CLI, and `desk serve --mode user|standalone|root` runs the daemons:
 
 | Command                        | Role                                                                                      |
 |--------------------------------|-------------------------------------------------------------------------------------------|
@@ -64,14 +68,8 @@ The installer asks you to give it Full Disk Access (System Settings > Privacy & 
 without it, macOS asks separately the first time the daemon reads each protected folder (Desktop, Documents,
 Downloads, external drives, ...).
 
-On Windows, from PowerShell:
-
-```powershell
-irm https://get.deskconn.com/install.ps1 | iex
-```
-
-This installs the same binary to `%LOCALAPPDATA%\deskconn`, along with the [Wintun](https://www.wintun.net) driver
-that `deskconn vpn connect` uses, adds it to your `PATH`, and registers the user daemon as a scheduled task that
+On Windows, this installs the same binary to `%LOCALAPPDATA%\deskconn`, along with the [Wintun](https://www.wintun.net)
+driver that `deskconn vpn connect` uses, adds it to your `PATH`, and registers the user daemon as a scheduled task that
 starts at logon. Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
 (`desk.cpl`) and can't be safely overridden.
 
