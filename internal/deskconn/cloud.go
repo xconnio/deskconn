@@ -8,7 +8,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	xconnd "github.com/xconnio/deskconn/internal/connectivity"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // Cloud is what the CLI and daemon leave to the cloud's account backend: how users sign in

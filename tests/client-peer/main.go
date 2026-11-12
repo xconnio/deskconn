@@ -23,7 +23,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/userd"
-	api "github.com/xconnio/xconn-core/bindings/go"
+	api "github.com/xconnio/xconn/bindings/go"
 )
 
 func main() {

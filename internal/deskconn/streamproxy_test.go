@@ -13,8 +13,8 @@ import (
 	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/auth"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/auth"
 )
 
 func listenQUIC(t *testing.T, router *xconn.Router, authenticator auth.ServerAuthenticator) (string, string) {

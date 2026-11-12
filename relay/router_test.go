@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/auth"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/auth"
 )
 
 const (

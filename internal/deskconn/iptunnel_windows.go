@@ -15,7 +15,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/vpnwin"
-	"github.com/xconnio/xconn-core/bindings/go/webrtc"
+	"github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 // The same bounds as common.PumpTUNToChannel, which only reads from a file.

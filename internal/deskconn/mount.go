@@ -22,7 +22,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // mountCacheTimeout is how long the kernel (and mountFS's own readdir

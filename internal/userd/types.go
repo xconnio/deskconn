@@ -11,9 +11,9 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
-	xconnauth "github.com/xconnio/xconn-core/bindings/go/auth"
-	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
+	"github.com/xconnio/xconn/bindings/go"
+	xconnauth "github.com/xconnio/xconn/bindings/go/auth"
+	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 // quicConn is a machine's QUIC connection plus a count of the operations running on it.

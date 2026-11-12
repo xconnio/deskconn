@@ -25,8 +25,8 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/webrtc"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 // On Windows the exit node is a userspace NAT rather than the Linux TUN + iptables setup: a

@@ -13,9 +13,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
-	"github.com/xconnio/xconn-core/bindings/go"
-	auth "github.com/xconnio/xconn-core/bindings/go/auth"
-	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
+	"github.com/xconnio/xconn/bindings/go"
+	auth "github.com/xconnio/xconn/bindings/go/auth"
+	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 var ErrKeyExpired = errors.New("authentication key expired, please login again")

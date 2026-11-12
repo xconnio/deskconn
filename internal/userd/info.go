@@ -5,7 +5,7 @@ import (
 	"math"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 func (d *Deskconn) handleMachineInfo(_ context.Context, inv *xconn.Invocation) *xconn.Result {

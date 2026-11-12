@@ -22,7 +22,7 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/vpnwin"
-	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
+	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 const (

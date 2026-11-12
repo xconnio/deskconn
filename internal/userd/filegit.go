@@ -13,7 +13,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // GitStatusEntry Status is one of "untracked", "added", "modified", "ignored".

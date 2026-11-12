@@ -17,8 +17,8 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/protocol"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/protocol"
 )
 
 // app is one app of the web frontend. userd's own apps (see Deskconn.apps) come with

@@ -23,7 +23,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go/webrtc"
+	"github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 // fakeChannel hands packets the server sends to onSend.

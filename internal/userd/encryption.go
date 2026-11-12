@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // callerKeys returns the keys the caller set up with ProcedureKeyExchange, or the error

@@ -17,7 +17,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // A manifest app's UI is YAML that clients render (see https://github.com/xconnio/app-engine).

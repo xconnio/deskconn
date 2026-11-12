@@ -14,7 +14,7 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // readManifest returns the Remote Control example's YAML files.

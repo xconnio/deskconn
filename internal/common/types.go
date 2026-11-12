@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	auth "github.com/xconnio/xconn-core/bindings/go/auth"
+	auth "github.com/xconnio/xconn/bindings/go/auth"
 )
 
 type Organization struct {

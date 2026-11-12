@@ -13,8 +13,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
-	webrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
+	"github.com/xconnio/xconn/bindings/go"
+	webrtc "github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 // vpnServer tracks whether this Deskconn is currently willing to act as a

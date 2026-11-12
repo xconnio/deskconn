@@ -2,7 +2,7 @@ package userd
 
 import (
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // HandleDatagramChannel accepts the VPN's native unreliable channel. Reliable

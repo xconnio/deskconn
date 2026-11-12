@@ -9,8 +9,8 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/serializers"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/serializers"
 )
 
 // Only a machine's owners and admins may enable or disable apps. Remote callers reach

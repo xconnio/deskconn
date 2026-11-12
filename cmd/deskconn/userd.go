@@ -21,8 +21,8 @@ import (
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
 	"github.com/xconnio/deskconn/relay"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/serializers"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/serializers"
 )
 
 // streamCloseGrace is how long shutdown gives xconn to pass the closes of the streams

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // StreamSession is the ordinary fluent RPC API shared by native sessions and

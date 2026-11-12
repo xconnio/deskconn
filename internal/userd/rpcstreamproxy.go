@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // ProxyStreamHandler keeps CLI traffic on the daemon's authenticated machine

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 func agentProxyCall(localSession *xconn.Session, realm, procedure string, payload []byte) ([]byte, error) {
