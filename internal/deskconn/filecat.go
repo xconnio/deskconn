@@ -12,7 +12,7 @@ import (
 	"syscall"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // file.cat takes the path as an encrypted JSON string and streams the file as encrypted

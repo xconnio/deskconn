@@ -6,7 +6,7 @@ import (
 	"context"
 	"os"
 
-	api "github.com/xconnio/xconn-core/bindings/go"
+	api "github.com/xconnio/xconn/bindings/go"
 )
 
 func listenAppLayer(router *api.Router, path string) (*api.Listener, error) {

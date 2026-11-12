@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version=0.1.6
+version=0.6.0
 destination=${1:?Usage: prepare-release-sdk.sh DIRECTORY [linux_amd64|linux_arm64|windows_amd64]}
 mkdir -p "$destination"
 destination=$(cd "$destination" && pwd)
-base=https://github.com/xconnio/xconn-core/releases/download/v$version
+base=https://github.com/xconnio/xconn/releases/download/v$version
 
 for platform in ${2:-linux_amd64 linux_arm64 windows_amd64}; do
   case "$platform" in

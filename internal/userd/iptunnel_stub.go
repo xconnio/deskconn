@@ -6,7 +6,7 @@ import (
 	"context"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // vpnServer is a stub on non-Linux platforms: the VPN/iptunnel feature depends on TUN devices

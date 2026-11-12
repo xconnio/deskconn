@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // handleFileCat streams a file's contents. Its argument is the path as an encrypted JSON

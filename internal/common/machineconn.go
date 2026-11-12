@@ -8,8 +8,8 @@ import (
 	"net/url"
 
 	xconnd "github.com/xconnio/deskconn/internal/connectivity"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/auth"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/auth"
 )
 
 // Standalone URL schemes: quic://host:port, or https://host:port[/path] for WebTransport.

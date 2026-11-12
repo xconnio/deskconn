@@ -19,7 +19,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
+	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 // closeSessionWithTimeout closes session with a bound, since Leave()'s

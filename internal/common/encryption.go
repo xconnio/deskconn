@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	packetcrypto "github.com/xconnio/xconn-core/bindings/go/crypto"
+	packetcrypto "github.com/xconnio/xconn/bindings/go/crypto"
 )
 
 func CreateX25519KeyPair() (publicKey []byte, privateKey []byte, err error) {

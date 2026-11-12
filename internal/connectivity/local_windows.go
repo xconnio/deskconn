@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	api "github.com/xconnio/xconn-core/bindings/go"
+	api "github.com/xconnio/xconn/bindings/go"
 )
 
 func listenAppLayer(router *api.Router, path string) (*api.Listener, error) {

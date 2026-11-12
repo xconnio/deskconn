@@ -6,7 +6,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // AppHandler serves one of an app's procedures: req is the decrypted request, nil when

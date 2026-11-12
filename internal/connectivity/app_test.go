@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	app "github.com/xconnio/deskconn/internal/connectivity"
-	api "github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/serializers"
+	api "github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/serializers"
 )
 
 func TestBridgeIdentityPayloadAndCleanup(t *testing.T) {

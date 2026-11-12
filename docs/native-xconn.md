@@ -1,13 +1,13 @@
 # Building with XConn Core
 
-DeskConn uses `github.com/xconnio/xconn-core/bindings/go` for WAMP, QUIC,
+DeskConn uses `github.com/xconnio/xconn/bindings/go` for WAMP, QUIC,
 WebTransport and WebRTC. The former `xconn-go`, `wampproto-go`,
 `xconn-webrtc-go`, Pion and quic-go modules are no longer dependencies.
 File-cat and file search use encrypted progressive RPC results.
 File uploads, downloads, shell, ports, agent forwarding and logs use encrypted
 RPC-associated byte streams. VPN retains its native datagram channel.
 
-The app uses the published Core Go module and Native SDK `v0.1.6`. A sibling
+The app uses the published XConn Go module and Native SDK `v0.6.0`. A sibling
 Core checkout and Rust are not required.
 
 ## Build and test on Linux or Apple Silicon macOS
@@ -81,7 +81,7 @@ Unix applications may continue using `appkit.SocketURI` with a normal client.
 ## Shared connectivity
 
 RPC-associated streams, Rust bridge forwarding, Unix yamux application sessions
-and native WebRTC stream carriers use the published XConn 0.1.6 binding and SDK.
+and native WebRTC stream carriers use the published XConn 0.6.0 binding and SDK.
 No XConn source workspace is needed.
 
 The former raw-stream relay sockets and feature data-channel endpoints are

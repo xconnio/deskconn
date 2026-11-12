@@ -16,8 +16,8 @@ import (
 	berrors "go.etcd.io/bbolt/errors"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/auth"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/auth"
 )
 
 // StandaloneUser may connect in standalone mode with its password, any of its authorized

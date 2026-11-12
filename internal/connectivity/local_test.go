@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	app "github.com/xconnio/deskconn/internal/connectivity"
-	api "github.com/xconnio/xconn-core/bindings/go"
+	api "github.com/xconnio/xconn/bindings/go"
 )
 
 func TestLoopbackAppRequiresPrivateCredentialsAndCarriesStreams(t *testing.T) {

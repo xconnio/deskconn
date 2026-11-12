@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/auth"
-	xconnwebrtc "github.com/xconnio/xconn-core/bindings/go/webrtc"
+	"github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/auth"
+	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
 const ErrAuthenticationFailed = "wamp.error.authentication_failed"

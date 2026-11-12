@@ -11,7 +11,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	auth "github.com/xconnio/xconn-core/bindings/go/auth"
+	auth "github.com/xconnio/xconn/bindings/go/auth"
 )
 
 type profileCommands struct {

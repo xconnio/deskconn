@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	api "github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/auth"
-	"github.com/xconnio/xconn-core/bindings/go/protocol"
+	api "github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/auth"
+	"github.com/xconnio/xconn/bindings/go/protocol"
 )
 
 const cloudEventDetach = "detach"

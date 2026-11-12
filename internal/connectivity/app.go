@@ -5,9 +5,9 @@ import (
 	"context"
 	"fmt"
 
-	api "github.com/xconnio/xconn-core/bindings/go"
-	"github.com/xconnio/xconn-core/bindings/go/messages"
-	"github.com/xconnio/xconn-core/bindings/go/protocol"
+	api "github.com/xconnio/xconn/bindings/go"
+	"github.com/xconnio/xconn/bindings/go/messages"
+	"github.com/xconnio/xconn/bindings/go/protocol"
 )
 
 // App describes procedures served by local application sessions.

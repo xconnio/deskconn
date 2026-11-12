@@ -16,7 +16,7 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	connectivity "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 func TestEncryptedFileSearchStreamsThroughTheRustBridge(t *testing.T) {

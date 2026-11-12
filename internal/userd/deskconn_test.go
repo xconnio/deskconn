@@ -12,7 +12,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/xconn-core/bindings/go"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // goosWindows is runtime.GOOS's value on Windows, shared by tests that skip or branch on it.
