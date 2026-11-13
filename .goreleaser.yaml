@@ -22,7 +22,7 @@ builds:
       - netgo
       - osusergo
     ldflags:
-      - -s -w -linkmode external -extldflags '-static -Wl,--gc-sections'
+      - -s -w -X main.version={{.Version}} -linkmode external -extldflags '-static -Wl,--gc-sections'
     goos:
       - linux
     goarch:
@@ -40,7 +40,7 @@ builds:
       - netgo
       - osusergo
     ldflags:
-      - -s -w -linkmode external -extldflags '-static -Wl,--gc-sections'
+      - -s -w -X main.version={{.Version}} -linkmode external -extldflags '-static -Wl,--gc-sections'
     goos:
       - windows
     goarch:
