@@ -16,7 +16,7 @@ import (
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
-var version = "v0.1.0-alpha"
+var version = "v0.1.0-beta"
 
 const (
 	ModeRouted = deskconn.ModeRouted

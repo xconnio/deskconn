@@ -45,7 +45,7 @@ jobs:
         env:
           GIT_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          TAG_NAME="v0.1.0-alpha.${GIT_SHA:0:7}"
+          TAG_NAME="v0.1.0-beta.${GIT_SHA:0:7}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
