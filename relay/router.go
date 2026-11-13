@@ -212,18 +212,11 @@ func (r *Router) Serve(ctx context.Context) error {
 
 	if r.config.WebTransportAddress != "" {
 		tlsConfig := r.config.TLSConfig
+		var certHash []byte
 		if tlsConfig == nil {
-			var certHash []byte
 			var err error
 			if tlsConfig, certHash, err = xconn.GenerateWebTransportTLSConfig(); err != nil {
 				return err
-			}
-			if r.config.CertHashAddress != "" {
-				// Browsers trust a self-signed certificate through serverCertificateHashes,
-				// without installing a CA.
-				workers.Go(func() {
-					serveCertHash(ctx, r.config.CertHashAddress, base64.StdEncoding.EncodeToString(certHash))
-				})
 			}
 		}
 		listener, err := server.ListenWebTransport(ctx, r.config.WebTransportAddress, "/wamp", tlsConfig.Certificates[0])
@@ -232,6 +225,13 @@ func (r *Router) Serve(ctx context.Context) error {
 		}
 		defer listener.Close()
 		log.Printf("WebTransport listening on %s", r.config.WebTransportAddress)
+		// Browsers trust a self-signed certificate through serverCertificateHashes, without
+		// installing a CA. The hash is published only once the listener it describes is up.
+		if certHash != nil && r.config.CertHashAddress != "" {
+			workers.Go(func() {
+				serveCertHash(ctx, r.config.CertHashAddress, base64.StdEncoding.EncodeToString(certHash))
+			})
+		}
 	}
 
 	<-ctx.Done()
