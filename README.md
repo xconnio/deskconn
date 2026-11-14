@@ -1,335 +1,122 @@
-# Deskconn
+# DeskConn
 
-A split operating system where the runtime lives on your computer, the interface lives on any device, and applications
-can execute locally or in the cloud.
+DeskConn makes your computers accessible from a CLI, web browser, or mobile app.
+Open shells, manage files, forward ports, and use remote applications through
+one interface, whether your machines are nearby or on another network.
 
-It lets you control Linux desktops remotely (run shells, transfer files, forward ports and more) from any machine on your
-account. Connections are routed through the [Deskconn Hub](https://github.com/xconnio/deskconn-hub) and can
-transparently upgrade to direct connections for lower latency.
+Built on [XConn](https://github.com/xconnio/xconn), DeskConn automatically attempts
+a direct peer-to-peer connection to your machine, using the Hub's routed path
+while it connects or when a direct connection isn't available. Use the hosted
+service, self-host the stack, or run a machine in standalone mode without an
+account.
 
-## Components
+## Capabilities
 
-This repository contains the two pieces that run on the managed desktop, and the `relay` package the Hub is built on:
+- **Shells and commands:** open interactive terminals and run remote commands.
+- **Files:** browse, upload, download, and edit files on your machines.
+- **Networking:** forward ports and connect through VPN exit nodes.
+- **Machine tools:** inspect resources and logs, and manage agent sessions.
+- **Extensible apps:** connect separate application processes to the local daemon,
+  or provide YAML interfaces for existing procedures.
 
-| Component                                                                                                 | Role                                                                                                                       |
-|-----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|
-| [deskconn-userd](https://github.com/xconnio/deskconn)                                                     | Desktop daemon. Registers and exposes desktop APIs over WAMP. Runs as a systemd user service (launchd agent on macOS, scheduled task on Windows). |
-| [desk](https://github.com/xconnio/deskconn)                                                               | Control CLI. Attach desktops, manage files, open shells, forward ports, and more.                                          |
-| [deskconn-hub](https://github.com/xconnio/deskconn-hub)                                                   | Cloud WAMP router. Every component (CLI, daemon, management service, web app, mobile app) connects through it.             |
-| [deskconn-management](https://github.com/xconnio/deskconn-management)                                     | Management service. Manages user accounts, organizations, and per-machine CryptoSign principals.                           |
-| [deskconn-web](https://github.com/xconnio/deskconn-web) / [deskconn-mobile](https://github.com/xconnio/deskconn-mobile) | Web and mobile interfaces.                                                                                   |
-| [deskconn-app-engine](https://github.com/xconnio/deskconn-app-engine)                                     | Renders manifest apps' YAML UIs in the clients (see [Adding an app](#adding-an-app)).                                      |
+Feature availability varies by operating system; see the
+[platform and installation notes](docs/installation.md).
 
-### How a command reaches your desktop
+## How it works
 
+The daemon runs on each managed machine and exposes its tools to clients.
+Clients automatically attempt a direct connection, with the relay router
+providing a routed fallback.
+
+```mermaid
+flowchart LR
+    C["CLI / Web / Mobile"]
+    H["DeskConn Hub<br/>Relay router"]
+    D["Machine daemon"]
+    A["Local apps"]
+
+    C <-->|"Routed fallback"| H
+    H <--> D
+    C <-->|"Automatic direct connection"| D
+    D <-->|"Local connection"| A
 ```
-desk CLI
-    │  (local yamux — Unix socket or authenticated Windows loopback)
-    ▼
-deskconn-userd (local proxy)
-    │  (routed: QUIC through the Hub at api.deskconn.com:8081, or direct: WebRTC)
-    ▼
-deskconn-userd (target machine)
-```
 
-The local `deskconn-userd` maintains a persistent session to the Hub per target machine. The shell command starts
-over the routed path and migrates transparently to a direct WebRTC connection in the background once the direct
-handshake completes.
+Direct connections currently use WebRTC.
 
-### Authentication
-
-All cloud connections use CryptoSign (Ed25519). `desk account login` generates a keypair, registers the public key with
-the management service, and stores the private key in `~/.deskconn/id_ed25519`.
+This repository contains the `desk` CLI and machine daemon in one executable,
+plus the `appkit` and `relay` packages used by applications and the Hub.
+The [Hub](https://github.com/xconnio/deskconn-hub),
+[management service](https://github.com/xconnio/deskconn-management),
+[web client](https://github.com/xconnio/deskconn-web), and
+[mobile client](https://github.com/xconnio/deskconn-mobile) live in separate
+repositories.
 
 ## Installation
 
-```bash
-# On Linux.
+On macOS and Linux:
+
+```sh
 curl -fsSL https://get.deskconn.com/install.sh | sh
 ```
 
+On Windows, use PowerShell:
+
 ```powershell
-# On Windows.
 irm https://get.deskconn.com/install.ps1 | iex
 ```
 
-On Linux, this installs one binary, `deskconn`, to `~/.local/lib/exec`, with `desk` on your `PATH`
-(`~/.local/bin/desk`) a symlink to it. It's the CLI, and `desk serve --mode user|standalone|root` runs the daemons:
+On Windows, use `deskconn` in place of `desk` in the examples below.
 
-| Command                        | Role                                                                                      |
-|--------------------------------|-------------------------------------------------------------------------------------------|
-| `desk`                         | The CLI                                                                                   |
-| `desk serve --mode user`       | User daemon (`deskconn-userd`), run by the `deskconn-userd` systemd user service at login |
-| `desk serve --mode standalone` | User daemon serving the machine directly, without the cloud (see below)                   |
-| `desk serve --mode root`       | Root helper (`deskconn-rootd`), started on demand with `sudo` as `deskconn-rootd.service` |
-
-Releases include Linux amd64/arm64 and Windows amd64 binaries. Prebuilt macOS releases are currently unavailable; Apple Silicon users can
-[build from source](docs/native-xconn.md). The user daemon runs as the
-`com.deskconn.deskconn-userd` launchd agent in your login session, with logs in
-`~/Library/Logs/deskconn`. The root helper and VPN serving are unavailable on macOS.
-Source installations need Full Disk Access (System Settings > Privacy & Security > Full Disk Access):
-without it, macOS asks separately the first time the daemon reads each protected folder (Desktop, Documents,
-Downloads, external drives, ...).
-
-On Windows, this installs the same binary to `%LOCALAPPDATA%\deskconn`, along with the [Wintun](https://www.wintun.net)
-driver that `deskconn vpn connect` uses, adds it to your `PATH`, and registers the user daemon as a scheduled task that
-starts at logon. Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
-(`desk.cpl`) and can't be safely overridden.
-
-`deskconn vpn connect` brings up a UAC prompt, and while a tunnel is up Windows asks the tunnel's DNS resolvers first
-(a Linux exit node's own, or public resolvers through a Windows one), though its smart multi-homed name resolution may
-still send lookups to other adapters' resolvers too. `deskconn vpn serve` needs no prompt or driver: it runs inside the
-daemon, as a userspace NAT that carries TCP, UDP and ping.
+See [installation details](docs/installation.md) for service management, platform
+limitations, and configuration paths.
 
 ## Getting started
 
-1. Create an account at [deskconn.com](https://deskconn.com) or in the mobile app.
-2. Attach the desktop to it. This writes `~/.deskconn/credentials.json`, which the daemon picks up to connect to the
-   cloud:
+1. Create an account at [web.deskconn.com](https://web.deskconn.com) or in the mobile app.
+2. Attach the machine you want to access:
 
-   ```bash
+   ```sh
    desk machine attach --username <email>
    ```
 
-3. Log in from the CLI with the one-time password emailed to you. The key it creates is valid for 30 days:
+3. Log in from the CLI and complete email verification:
 
-   ```bash
-   desk account login --username <username>
+   ```sh
+   desk account login --username <email>
    ```
 
-4. Use your machines:
+4. Find your machines and open a shell:
 
-   ```bash
-   desk top               # your machines and profiles: resources, logs, shells, port forwards
+   ```sh
    desk ls
    desk shell <machine>
    ```
 
-Run `desk --help` for the other commands (files, ports, VPN, agents, ...) and `desk <command> --help` for any one of
-them.
+Use `desk top` for an interactive view of your machines, or `desk --help` to
+explore the other commands.
 
-## Standalone mode (no cloud)
+## Deployment and apps
 
-`desk serve --mode standalone` serves a machine directly, without an account or the Hub, to the users you
-list: with a password, or with a key from `desk keygen`. Shell, files, ports, agents, logs and direct
-connections work as usual.
-
-On the machine, write a config, add your users to it, and serve it. It logs the certificate's fingerprint for clients
-to pin:
-
-```bash
-desk serve init                   # writes ./deskconn.yaml, with every setting explained
-desk serve --config deskconn.yaml
-```
-
-On the client, save the machine as a profile and use it with `--profile`:
-
-```bash
-desk profile add office --url quic://203.0.113.5:18080 --cert-hash <fingerprint> --private-key <key>
-desk --profile office shell
-```
-
-Leave out `--private-key` to log in with a password instead (`--authid <username>`). `desk serve run --help` and
-`desk profile add --help` cover the rest, such as serving over WebTransport, using your own TLS certificate, and
-passing users as flags instead of a config file.
-
-Users can also be added and removed while the machine is served, by its admins: the config file's users with
-`role: admin`. They do it through the `io.xconn.deskconn.admin.users.list`, `.add` and `.remove` procedures. The
-users added are members, kept in `~/.deskconn/standalone-users.db` beside the config file's users, which only the
-config file changes.
-
-The procedures take plain arguments, so any WAMP client can call them. For clients that only speak WebSocket,
-standalone mode also serves `ws://127.0.0.1:18082/ws`: plain, without TLS, so only on localhost.
-
-## Self-hosting
-
-Run your own cloud (Hub, management service, web app and database) locally with the Docker Compose setup in
-[`docker/`](docker), then build `deskconn` pointed at it.
-
-### 1. Start the stack
-
-```bash
-cd docker
-make setup
-make run
-cd ..
-```
-
-### 2. Build the binaries against it
-
-```bash
-make build CLOUD_QUIC_ADDRESS=127.0.0.1:8081   # builds bin/deskconn and bin/desk
-```
-
-`CLOUD_QUIC_ADDRESS` is the Hub's QUIC address, baked in as the default. For a stack on another machine, use its
-`host:port`. Local addresses (`127.0.0.1`, `localhost`, `::1`) skip TLS verification, because the local Hub uses a
-self-signed certificate; any other host needs a Hub certificate the client trusts.
-
-Setting `DESKCONN_CLOUD_QUIC_ADDRESS` at runtime overrides the built-in address without rebuilding:
-
-```bash
-DESKCONN_CLOUD_QUIC_ADDRESS=127.0.0.1:8081 desk ls
-```
-
-WebRTC uses a public STUN server only. To also relay through your own TURN server, set it in the environment.
-`DESKCONN_TURN_URL` accepts a comma-separated list:
-
-```bash
-export DESKCONN_TURN_URL=turn:turn.example.com:3478 DESKCONN_TURN_USERNAME=<user> DESKCONN_TURN_PASSWORD=<password>
-```
-
-The deskconn-userd service doesn't inherit your shell's environment; add the variables to it with
-`systemctl --user edit deskconn-userd`:
-
-```ini
-[Service]
-Environment=DESKCONN_TURN_URL=turn:turn.example.com:3478
-Environment=DESKCONN_TURN_USERNAME=<user>
-Environment=DESKCONN_TURN_PASSWORD=<password>
-```
-
-### 3. Create an account and attach
-
-Sign up at http://localhost:3000/register. The stack prints one-time passwords to its logs instead of emailing them
-(the Compose service and images still use the old `account-service` name):
-
-```bash
-docker compose logs -f account-service   # in docker/
-```
-
-Then follow [Getting started](#getting-started) from step 2 with the binaries from `bin/`, and run the daemon in the
-foreground:
-
-```bash
-systemctl --user stop deskconn-userd   # if the official release is installed; it shares ~/.deskconn
-bin/desk machine attach --username <email>
-bin/desk serve
-```
-
-Don't run `desk self update` on these builds: it installs the official release, which connects to
-`api.deskconn.com`.
-
-## Adding an app
-
-Apps beyond deskconn-userd's own (Files, Terminal, Resource Monitor, Text Editor) run as their own processes, like
-[deskconn-media](https://github.com/xconnio/deskconn-media) and
-[deskconn-remote-control](https://github.com/xconnio/deskconn-remote-control).
-An app needs no code in deskconn: it connects to deskconn-userd's local socket, registers its procedures there, and
-tells deskconn-userd which apps it serves. deskconn-userd lists them to clients (the web app shows an app only while
-it's listed and enabled), owners and admins enable or disable them (`desk app enable|disable`), and xconn exposes
-their procedures over routed and direct connections.
-
-1. **Connect** to the local daemon with `appkit.Connect` (realm `io.xconn.deskconn.local`).
-   This uses a Unix socket, or authenticated loopback yamux on Windows.
-   Reconnect when deskconn-userd restarts.
-2. **Register a key exchange.** deskconn only supports end-to-end encrypted apps: deskconn-userd refuses an app without one.
-   Clients call it with their X25519 public key and get the app's; both sides derive their keys with HKDF-SHA256,
-   `frontendToBackend` for requests and `backendToFrontend` for results. Every other procedure takes its request as a
-   single encrypted JSON argument (nonce + ChaCha20-Poly1305 ciphertext, empty or absent when there is none) and returns
-   a single encrypted JSON result. Keys are per caller session.
-3. **Register the apps** by calling `io.xconn.local.apps.register` with a JSON list:
-
-   ```json
-   [{"id": "pictures", "name": "Pictures", "key_exchange": "io.xconn.media.key.exchange",
-     "requires": ["files"], "default_off": true}]
-   ```
-
-   `requires` are apps this one can't work without (it's disabled with them), and a `default_off` app stays disabled
-   until an owner or admin enables it. Ids must be unique on the machine. The apps are listed until the app's session
-   leaves.
-4. **Follow enabled apps.** Call `io.xconn.deskconn.capabilities.list` for every app's
-   `{"id", "name", "enabled", "key_exchange", "requires"}`, and subscribe to
-   `io.xconn.deskconn.capabilities.on_change`, published with the same list whenever an app is enabled or
-   disabled. Register an app's procedures while it's enabled and unregister them while it's disabled; keep the key
-   exchange registered.
-
-Procedures under `io.xconn.deskconn.` are reachable by remote clients (and `io.xconn.deskconn.admin.` by
-the machine's owner and admins only), and so are the app prefixes the Hub allows (`relay.AppPrefixes`:
-`io.xconn.remotecontrol.` and `io.xconn.media.`), so the key exchange and the app's procedures go under one of them.
-Everything else on the socket, such as `io.xconn.local.*`, stays local.
-
-In Go, the `github.com/xconnio/deskconn/appkit` package has what an app needs: the connection (`appkit.Connect`), the
-procedures above, and `appkit.Encryption`, which does step 2:
-
-```go
-session, err := appkit.Connect(ctx, cfgDirectory)
-enc := appkit.NewEncryption()
-if err := enc.Register(session, "io.xconn.media.key.exchange"); err != nil {
-    return err
-}
-handler := enc.Encrypted(func(ctx context.Context, req []byte) (any, error) {
-    // req is the decrypted JSON request; the result is sent back as encrypted JSON.
-    return map[string]string{"hello": "world"}, nil
-})
-resp := session.Register("io.xconn.media.hello", handler).Execute()
-```
-
-A client finds the app's key exchange in the apps list, then calls it before the app's procedures:
-
-```go
-keys, err := appkit.ClientKeyExchange(session, keyExchange)
-result, err := appkit.EncryptedCall(session, "io.xconn.media.hello", nil, keys)
-```
-
-### Manifest apps
-
-An app that only needs a UI over procedures other apps already serve can be a manifest app instead: a directory of
-YAML with an `app.yaml` at its root, which clients render with
-[deskconn-app-engine](https://github.com/xconnio/deskconn-app-engine). It runs no process of its own. Owners and admins
-register it on a machine, where it's stored in `~/.deskconn/manifests` and listed, enabled and disabled like any
-other app:
-
-```bash
-desk app register office ./remote-control
-desk app ls office
-desk app unregister office remote-control
-```
+- [Standalone mode](docs/standalone.md): serve a machine directly using configured
+  users, without an account or the Hub.
+- [Self-hosting](docs/self-hosting.md): run the Hub, management service, web app,
+  and database with Docker Compose.
+- [Adding an app](docs/apps.md): expose local application procedures and build
+  manifest-based interfaces.
 
 ## Development
 
-DeskConn uses the Rust-backed XConn Go binding, so building needs cgo, a C compiler, pkg-config and the XConn native
-SDK. Install the SDK once (it may ask for `sudo`); see [the local build instructions](docs/native-xconn.md) for details
-and custom SDK locations:
+Building requires Go, cgo, a C compiler, pkg-config, and the XConn native SDK.
+See [native build instructions](docs/native-xconn.md) for platform setup and
+custom SDK locations.
 
-```bash
+```sh
 make native-sdk
-```
-
-### Build
-
-```bash
-make build   # builds bin/deskconn and bin/desk
-```
-
-Override the Hub for local development (see [Self-hosting](#self-hosting)):
-
-```bash
-export DESKCONN_CLOUD_QUIC_ADDRESS=127.0.0.1:8081
-```
-
-### Test
-
-```bash
+make build
 make test
+make lint
 ```
 
-## Credential files
-
-All credentials and configuration are stored under `~/.deskconn/`:
-
-| File                    | Contents                                                                |
-|-------------------------|-------------------------------------------------------------------------|
-| `credentials.json`      | Machine attach credentials (realm, authid, keypair) used by `deskconn-userd` |
-| `id_ed25519`            | CLI private key, username, and key expiry                               |
-| `id_ed25519.pub`        | CLI public key, username, and account name                              |
-| `config.yml`            | Machine list and aliases, and standalone machine profiles (`desk profile add`) with their private keys |
-| `standalone-users.db`   | Standalone mode's users added through its API, with their keys and salted password hashes |
-| `principals.json`       | Local CryptoSign principals (used by the local WAMP router)             |
-| `capabilities.json`     | Which apps the machine's owner and admins have enabled or disabled      |
-| `manifests/`            | Registered manifest apps                                                |
-| `settings.db`           | Each user's frontend settings kept on the machine (open windows, dock)  |
-| `deskconn.sock`         | Local Unix socket, or private Windows endpoint credentials              |
-
-## License
-
-See [LICENSE](LICENSE).
+On Linux and macOS, `make build` produces `bin/deskconn` and `bin/desk`; on Windows,
+it produces `bin/deskconn.exe`. See the [self-hosting guide](docs/self-hosting.md)
+to build against a local Hub.
