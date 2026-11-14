@@ -280,6 +280,16 @@ func shellReadLoop(active *activeShellConn) error {
 	}
 }
 
+// resetShellTerminal clears modes that a remote terminal application may have left
+// enabled when its stream ended before it could restore them itself.
+func resetShellTerminal(output io.Writer) {
+	_, _ = io.WriteString(output,
+		"\x1b[?1000l\x1b[?1002l\x1b[?1003l"+ // Mouse event reporting.
+			"\x1b[?1005l\x1b[?1006l\x1b[?1015l"+ // Mouse encoding modes.
+			"\x1b[?1004l\x1b[?2004l"+ // Focus reporting and bracketed paste.
+			"\x1b[?1049l\x1b[?25h\x1b[0m") // Main screen, visible cursor and default attributes.
+}
+
 // runStreamCommand is the shared connect-and-run loop behind RunShell and
 // RunExec: ctrl seeds the initial control message (RunExec sets
 // Command/Args; RunShell leaves them empty for an interactive bash shell),
@@ -333,6 +343,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	active := &activeShellConn{}
 	active.set(primary)
 	defer active.cleanupCurrent()
+	defer resetShellTerminal(os.Stdout)
 
 	// The loops end with the session, the one reading stdin included: in desk top, the
 	// terminal goes back to it and a read left waiting would take its next key.
