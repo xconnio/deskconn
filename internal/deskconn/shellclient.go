@@ -47,11 +47,25 @@ type shellConn interface {
 	close() error
 }
 
-type streamClientShellConn struct{ stream net.Conn }
+type streamClientShellConn struct {
+	stream  net.Conn
+	writeMu sync.Mutex
+}
 
-func (c *streamClientShellConn) sendEnvelope(e []byte) error   { return common.WriteFrame(c.stream, e) }
-func (c *streamClientShellConn) recvEnvelope() ([]byte, error) { return common.ReadFrame(c.stream) }
-func (c *streamClientShellConn) close() error                  { return c.stream.Close() }
+func (c *streamClientShellConn) sendEnvelope(envelope []byte) error {
+	// A frame's length and payload must stay together across stdin, resize and ping writes.
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return common.WriteFrame(c.stream, envelope)
+}
+
+func (c *streamClientShellConn) recvEnvelope() ([]byte, error) {
+	return common.ReadFrame(c.stream)
+}
+
+func (c *streamClientShellConn) close() error {
+	return c.stream.Close()
+}
 
 func sendShellControl(conn shellConn, sendKey []byte, msg common.ShellControlMsg) error {
 	plaintext, err := json.Marshal(msg)
