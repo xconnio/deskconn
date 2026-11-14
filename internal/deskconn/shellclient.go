@@ -282,12 +282,13 @@ func shellReadLoop(active *activeShellConn) error {
 
 // resetShellTerminal clears modes that a remote terminal application may have left
 // enabled when its stream ended before it could restore them itself.
+// Leave screen buffers alone: switching to the main screen also restores a saved cursor.
 func resetShellTerminal(output io.Writer) {
 	_, _ = io.WriteString(output,
 		"\x1b[?1000l\x1b[?1002l\x1b[?1003l"+ // Mouse event reporting.
 			"\x1b[?1005l\x1b[?1006l\x1b[?1015l"+ // Mouse encoding modes.
 			"\x1b[?1004l\x1b[?2004l"+ // Focus reporting and bracketed paste.
-			"\x1b[?1049l\x1b[?25h\x1b[0m") // Main screen, visible cursor and default attributes.
+			"\x1b[?25h\x1b[0m") // Visible cursor and default attributes.
 }
 
 // runStreamCommand is the shared connect-and-run loop behind RunShell and
