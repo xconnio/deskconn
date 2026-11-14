@@ -33,8 +33,8 @@ their procedures over routed and direct connections.
    exchange registered.
 
 Procedures under `io.xconn.deskconn.` are reachable by remote clients (and `io.xconn.deskconn.admin.` by
-the machine's owner and admins only), and so are the app prefixes the Hub allows (`relay.AppPrefixes`:
-`io.xconn.remotecontrol.` and `io.xconn.media.`), so the key exchange and the app's procedures go under one of them.
+the machine's owner and admins only), and so are the app prefixes the Hub allows
+(`io.xconn.remotecontrol.` and `io.xconn.media.`), so the key exchange and the app's procedures go under one of them.
 Everything else on the socket, such as `io.xconn.local.*`, stays local.
 
 In Go, the `github.com/xconnio/deskconn/appkit` package has what an app needs: the connection (`appkit.Connect`), the

@@ -16,7 +16,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/deskconn/relay"
 	"github.com/xconnio/xconn/bindings/go"
 )
 
@@ -175,7 +174,7 @@ func resolveManifest(files map[string]string) (*manifestApp, error) {
 // checkReachable reports whether remote clients may call procedure: it must be under
 // ProcedurePrefix or an app prefix, and not for the machine's owner and admins only.
 func checkReachable(procedure string) error {
-	prefixes := append([]string{common.ProcedurePrefix}, relay.AppPrefixes()...)
+	prefixes := append([]string{common.ProcedurePrefix}, common.AppPrefixes()...)
 	if strings.HasPrefix(procedure, common.ProcedureAdminPrefix) {
 		return fmt.Errorf("%s is only for the machine's owner and admins", procedure)
 	}

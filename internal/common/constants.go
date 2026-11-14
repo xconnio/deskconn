@@ -413,3 +413,8 @@ const (
 )
 
 const VPNHelperBufSize = 64 * 1024
+
+// AppPrefixes are the external app procedures exposed through a machine connection.
+func AppPrefixes() []string {
+	return []string{"io.xconn.remotecontrol.", "io.xconn.media."}
+}

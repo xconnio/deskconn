@@ -16,7 +16,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/deskconn/relay"
 	"github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/protocol"
 )
@@ -234,7 +233,7 @@ func (c *capabilities) addExternal(sessionID uint64, apps []*app) error {
 		if a.KeyExchange == "" {
 			return fmt.Errorf("app %s has no key exchange: only end-to-end encrypted apps are supported", a.ID)
 		}
-		prefixes := append([]string{common.ProcedurePrefix}, relay.AppPrefixes()...)
+		prefixes := append([]string{common.ProcedurePrefix}, common.AppPrefixes()...)
 		if !slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(a.KeyExchange, prefix) }) {
 			return fmt.Errorf("app %s's key exchange must be under one of %s for clients to reach it", a.ID,
 				strings.Join(prefixes, ", "))

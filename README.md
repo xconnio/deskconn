@@ -44,7 +44,7 @@ flowchart LR
 Direct connections currently use WebRTC.
 
 This repository contains the `desk` CLI and machine daemon in one executable,
-plus the `appkit` and `relay` packages used by applications and the Hub.
+plus the `appkit` package used by external applications.
 The [Hub](https://github.com/xconnio/deskconn-hub),
 [management service](https://github.com/xconnio/deskconn-management),
 [web client](https://github.com/xconnio/deskconn-web), and

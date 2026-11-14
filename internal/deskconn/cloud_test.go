@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/deskconn/relay"
 	"github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/auth"
 )
@@ -35,7 +33,11 @@ type fakeCloud struct {
 	machines []common.Machine
 }
 
-func (f *fakeCloud) authenticate(request auth.Request) (auth.Response, error) {
+func (*fakeCloud) Methods() []auth.Method {
+	return []auth.Method{auth.MethodCryptoSign}
+}
+
+func (f *fakeCloud) Authenticate(request auth.Request) (auth.Response, error) {
 	cryptosign, ok := request.(*auth.RequestCryptoSign)
 	if !ok {
 		return nil, errors.New("only cryptosign")
@@ -102,27 +104,24 @@ func (f *fakeCloud) cloud() *deskconn.Cloud {
 	}
 }
 
-// startCloud serves a relay router authenticating with f over QUIC, and points this
+// startCloud serves a test router authenticating with f over QUIC, and points this
 // process's cloud at it, with a home of its own.
 func startCloud(t *testing.T, f *fakeCloud) {
 	t.Helper()
-	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	router, err := xconn.NewRouter(nil)
 	require.NoError(t, err)
-	address := conn.LocalAddr().String()
-	require.NoError(t, conn.Close())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	r, err := relay.New(ctx, relay.Config{
-		Authenticate: f.authenticate,
-		Roles:        []xconn.RealmRole{{Name: cloudUserRole}},
-		QUICAddress:  address,
-	})
+	t.Cleanup(router.Close)
+	require.NoError(t, router.AddRealm(common.CloudRealm, &xconn.RealmConfig{
+		AutoDiscloseCaller: true, Roles: []xconn.RealmRole{{Name: cloudUserRole}},
+	}))
+	server := xconn.NewServer(router, f, nil)
+	t.Cleanup(func() { _ = server.Close() })
+	listener, err := server.ListenQUIC(t.Context(), "127.0.0.1:0", nil)
 	require.NoError(t, err)
-	go func() { _ = r.Serve(ctx) }()
+	t.Cleanup(func() { _ = listener.Close() })
 
 	setTestHome(t)
-	t.Setenv("DESKCONN_CLOUD_QUIC_ADDRESS", address)
+	t.Setenv("DESKCONN_CLOUD_QUIC_ADDRESS", listener.Address)
 	deskconn.SetCloud(f.cloud())
 	t.Cleanup(func() { deskconn.SetCloud(nil) })
 }

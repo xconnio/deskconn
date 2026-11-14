@@ -3,7 +3,6 @@ package userd_test
 import (
 	"context"
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -14,9 +13,9 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/deskconn/relay"
 	"github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/auth"
+	"github.com/xconnio/xconn/bindings/go/protocol"
 )
 
 const (
@@ -35,18 +34,26 @@ type testCloud struct {
 	cfgDirectory string
 }
 
-func freeAddress(t *testing.T, network string) string {
-	t.Helper()
-	if network == "udp" {
-		conn, err := net.ListenPacket("udp", "127.0.0.1:0")
-		require.NoError(t, err)
-		defer conn.Close()
-		return conn.LocalAddr().String()
+type testCloudAuthenticator struct {
+	machinePublic string
+	userPublic    string
+}
+
+func (testCloudAuthenticator) Methods() []auth.Method {
+	return []auth.Method{auth.MethodCryptoSign}
+}
+
+func (a testCloudAuthenticator) Authenticate(request auth.Request) (auth.Response, error) {
+	cryptosign, ok := request.(*auth.RequestCryptoSign)
+	if ok {
+		switch {
+		case request.AuthID() == cloudMachineAuthID && cryptosign.PublicKey() == a.machinePublic:
+			return auth.NewResponse(cloudMachineAuthID, "machine", 0)
+		case request.AuthID() == cloudUserAuthID && cryptosign.PublicKey() == a.userPublic:
+			return auth.NewResponse(cloudUserAuthID, cloudUserRole, 0)
+		}
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer listener.Close()
-	return listener.Addr().String()
+	return nil, errors.New("unknown key")
 }
 
 func startTestCloud(t *testing.T) *testCloud {
@@ -56,37 +63,35 @@ func startTestCloud(t *testing.T) *testCloud {
 	userPublic, userPrivate, err := auth.GenerateCryptoSignKeyPair()
 	require.NoError(t, err)
 
-	quicAddress, rawSocketAddress := freeAddress(t, "udp"), freeAddress(t, "tcp")
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	router, err := relay.New(ctx, relay.Config{
-		Machines: func(context.Context) ([]relay.Machine, error) {
-			return []relay.Machine{{AuthID: cloudMachineAuthID, Realm: cloudMachineRealm}}, nil
-		},
-		Authenticate: func(request auth.Request) (auth.Response, error) {
-			cryptosign, ok := request.(*auth.RequestCryptoSign)
-			switch {
-			case !ok:
-			case request.AuthID() == cloudMachineAuthID && cryptosign.PublicKey() == machinePublic:
-				return auth.NewResponse(cloudMachineAuthID, relay.MachineAuthRole(cloudMachineAuthID), 0)
-			case request.AuthID() == cloudUserAuthID && cryptosign.PublicKey() == userPublic:
-				return auth.NewResponse(cloudUserAuthID, cloudUserRole, 0)
-			}
-			return nil, errors.New("unknown key")
-		},
-		UserRoles:        []xconn.RealmRole{{Name: cloudUserRole, Permissions: relay.MachineUserPermissions()}},
-		QUICAddress:      quicAddress,
-		RawSocketAddress: rawSocketAddress,
-	})
+	router, err := xconn.NewRouter(nil)
 	require.NoError(t, err)
-	go func() { _ = router.Serve(ctx) }()
-	t.Setenv("DESKCONN_CLOUD_QUIC_ADDRESS", quicAddress)
+	t.Cleanup(router.Close)
+	require.NoError(t, router.AddRealm(cloudMachineRealm, &xconn.RealmConfig{
+		AutoDiscloseCaller: true, Meta: true,
+		Roles: []xconn.RealmRole{
+			{Name: "machine", Permissions: []xconn.Permission{
+				{URI: common.ProcedurePrefix, MatchPolicy: protocol.MatchPrefix, AllowRegister: true},
+			}},
+			{Name: cloudUserRole, Permissions: []xconn.Permission{
+				{URI: common.ProcedurePrefix, MatchPolicy: protocol.MatchPrefix, AllowCall: true},
+			}},
+		},
+	}))
+	server := xconn.NewServer(router, testCloudAuthenticator{machinePublic: machinePublic, userPublic: userPublic}, nil)
+	t.Cleanup(func() { _ = server.Close() })
+	quic, err := server.ListenQUIC(t.Context(), "127.0.0.1:0", nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = quic.Close() })
+	raw, err := server.ListenAndServeRawSocket(xconn.NetworkTCP, "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = raw.Close() })
+	t.Setenv("DESKCONN_CLOUD_QUIC_ADDRESS", quic.Address)
 
 	cfgDirectory := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDirectory, "id_ed25519"),
 		[]byte(userPrivate+" "+cloudUserAuthID), 0o600))
 
-	cloud := &testCloud{t: t, rawSocketURI: "rs://" + rawSocketAddress, machineKey: machinePrivate,
+	cloud := &testCloud{t: t, rawSocketURI: "rs://" + raw.Addr().String(), machineKey: machinePrivate,
 		cfgDirectory: cfgDirectory}
 	require.Eventually(t, func() bool {
 		conn, err := common.ConnectMachineRealmQUIC(context.Background(), cloudMachineRealm, cfgDirectory)

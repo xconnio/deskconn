@@ -80,7 +80,7 @@ jobs:
           sdk="$(cygpath -u "$RUNNER_TEMP")/xconn-sdk"
           ci/prepare-release-sdk.sh "$sdk" windows_amd64
           export PKG_CONFIG_PATH="$(cygpath -m "$sdk/windows_amd64/lib/pkgconfig")"
-          go test -tags xconn_static ./internal/connectivity ./relay
+          go test -tags xconn_static ./internal/connectivity
           go build -tags xconn_static -ldflags "-linkmode external -extldflags '-static'" -o deskconn.exe ./cmd/deskconn
           if objdump -p deskconn.exe | grep -Ei 'DLL Name:.*(xconn_ffi|libgcc|libstdc|libwinpthread)'; then
             echo 'Release binary must not depend on XConn or MinGW runtime DLLs' >&2

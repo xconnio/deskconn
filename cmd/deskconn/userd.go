@@ -20,7 +20,6 @@ import (
 	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
-	"github.com/xconnio/deskconn/relay"
 	"github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/serializers"
 )
@@ -157,7 +156,7 @@ func runUserd(flags userdFlags, standalone bool) {
 			}
 			return xconn.NewSession(base, base.Serializer())
 		},
-		Prefixes:        append([]string{common.ProcedurePrefix, common.ProcedureAdminPrefix}, relay.AppPrefixes()...),
+		Prefixes:        append([]string{common.ProcedurePrefix, common.ProcedureAdminPrefix}, common.AppPrefixes()...),
 		DatagramChannel: deskconnApis.HandleDatagramChannel,
 	}
 	xconnDone := make(chan struct{})
