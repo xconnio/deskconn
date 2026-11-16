@@ -62,7 +62,7 @@ if [ ! -f "$TMP_DIR/deskconn" ]; then
     exit 1
 fi
 
-rm -f "$BIN_DIR/desk" "$BIN_DIR/deskconn" "$EXEC_DIR/deskconn-userd" "$EXEC_DIR/deskconn-rootd"
+rm -f "$BIN_DIR/desk"
 
 mv "$TMP_DIR/deskconn" "$EXEC_DIR/deskconn"
 chmod 755 "$EXEC_DIR/deskconn"
@@ -72,7 +72,6 @@ BASH_COMP_DIR="$HOME/.local/share/bash-completion/completions"
 ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
 
 mkdir -p "$BASH_COMP_DIR" "$ZSH_COMP_DIR"
-rm -f "$BASH_COMP_DIR/deskconn" "$ZSH_COMP_DIR/_deskconn"
 
 "$BIN_DIR/desk" --completion-script-bash > "$BASH_COMP_DIR/desk"
 
@@ -173,32 +172,6 @@ Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
     fi
 
     mkdir -p "$systemd_user_dir"
-
-    # deskconn-userd runs its connectivity (cloud, LAN, remote-client auth, QUIC/WebRTC streams)
-    # in-process, through xconn. Earlier installs ran it as a separate xlink service, and then
-    # the daemon as deskconnd: remove those, or they would compete with deskconn-userd for
-    # deskconn.sock.
-    for old_service in xlink deskconnd; do
-        if [ -f "$systemd_user_dir/$old_service.service" ]; then
-            echo "Removing the old $old_service service (now deskconn-userd)..."
-            systemctl --user stop "$old_service" 2>/dev/null || true
-            systemctl --user disable "$old_service" 2>/dev/null || true
-            rm -f "$systemd_user_dir/$old_service.service"
-        fi
-        rm -f "$EXEC_DIR/$old_service"
-    done
-    rm -f "$BIN_DIR/vpnd"
-
-    # Flags added with "systemctl --user edit deskconn-userd" override ExecStart in a drop-in,
-    # which still names the daemon's old path on older installs, and its old --standalone flag
-    # (now "--mode standalone").
-    for drop_in in "$systemd_user_dir/deskconn-userd.service.d"/*.conf; do
-        [ -f "$drop_in" ] || continue
-        sed -i -E \
-            -e "s|^ExecStart=$EXEC_DIR/deskconn-userd( \|\$)|ExecStart=$EXEC_DIR/deskconn serve --mode user\1|" \
-            -e '/^ExecStart=.* serve --mode user( .*)? --standalone( |$)/{s/ --standalone( |$)/\1/;s/ serve --mode user/ serve --mode standalone/}' \
-            "$drop_in"
-    done
 
     cat > "$systemd_user_dir/deskconn-userd.service" <<EOL
 [Unit]
