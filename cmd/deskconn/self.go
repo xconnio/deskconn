@@ -48,12 +48,9 @@ func dispatchSelfCommand(parsedCmd string, cmds *selfCommands, cfgDirectory stri
 	case cmds.version.FullCommand():
 		fmt.Printf("desk %s\n", version)
 	case cmds.update.FullCommand():
-		printErr(updateApp())
+		exitOnErr(updateApp())
 	case cmds.remove.FullCommand():
-		if err := removeApp(cfgDirectory, *cmds.removeYes); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+		exitOnErr(removeApp(cfgDirectory, *cmds.removeYes))
 	default:
 		return false
 	}

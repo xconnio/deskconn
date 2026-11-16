@@ -42,11 +42,11 @@ func registerAccountCommands(app *kingpin.Application) *accountCommands {
 func dispatchAccountCommand(parsedCmd string, cmds *accountCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.login.FullCommand():
-		printErr(runLogin(cfgDirectory, *cmds.loginUsername))
+		exitOnErr(runLogin(cfgDirectory, *cmds.loginUsername))
 	case cmds.whoami.FullCommand():
-		printErr(whoami(cfgDirectory))
+		exitOnErr(whoami(cfgDirectory))
 	case cmds.logout.FullCommand():
-		printErr(runLogout(cfgDirectory))
+		exitOnErr(runLogout(cfgDirectory))
 	default:
 		return false
 	}

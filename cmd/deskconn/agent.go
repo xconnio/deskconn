@@ -93,22 +93,15 @@ func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agent
 func dispatchAgentCommand(parsedCmd string, cmds *agentCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.ls.FullCommand():
-		if err := runAgentLs(cfgDirectory, *cmds.lsMachine, *cmds.lsMode); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
+		exitOnErr(runAgentLs(cfgDirectory, *cmds.lsMachine, *cmds.lsMode))
 	case cmds.pull.FullCommand():
-		if err := runAgentPull(cfgDirectory, *cmds.pullMachine, *cmds.pullMode, *cmds.pullSessionID); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
+		exitOnErr(runAgentPull(cfgDirectory, *cmds.pullMachine, *cmds.pullMode, *cmds.pullSessionID))
 	case cmds.resume.FullCommand():
 		if *cmds.resumeRemote != "" {
-			err := runAgentResumeRemote(cfgDirectory, *cmds.resumeRemote, *cmds.resumeAgent, *cmds.resumeSessionID,
-				*cmds.resumeMode)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		} else if err := runAgentResume(*cmds.resumeSessionID, *cmds.resumePrintOnly); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			exitOnErr(runAgentResumeRemote(cfgDirectory, *cmds.resumeRemote, *cmds.resumeAgent,
+				*cmds.resumeSessionID, *cmds.resumeMode))
+		} else {
+			exitOnErr(runAgentResume(*cmds.resumeSessionID, *cmds.resumePrintOnly))
 		}
 	default:
 		return false
@@ -371,7 +364,7 @@ func launch(tool, cmdName string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to launch %s: %w", cmdName, err)
 	}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		return syscall.Exec(path, append([]string{cmdName}, args...), os.Environ()) //nolint:gosec
 	}
 

@@ -45,3 +45,34 @@ func TestCleanupShellIDKillsProcessGroup(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond,
 		"sleep should actually be killed (and reaped) by cleanupShellID, not just have its ptmx closed")
 }
+
+// TestBeginShellSessionReportsExitStatus checks the command's exit status reaches the
+// transport, shell style for one killed by a signal.
+func TestBeginShellSessionReportsExitStatus(t *testing.T) {
+	for name, tc := range map[string]struct {
+		script string
+		code   int
+	}{
+		"success":  {"exit 0", 0},
+		"failure":  {"exit 3", 3},
+		"signaled": {"kill -TERM $$", 128 + int(syscall.SIGTERM)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := userd.NewInteractiveShellSession()
+			transport := &userd.FakeShellTransport{}
+			shellID, _, _, startReader, err := p.BeginShellSession(common.ShellControlMsg{
+				Op: common.ShellOpSize, Cols: 80, Rows: 24, Command: "sh", Args: []string{"-c", tc.script},
+			}, transport)
+			require.NoError(t, err)
+			startReader()
+			t.Cleanup(func() { p.CleanupShellID(shellID) })
+
+			require.Eventually(t, func() bool {
+				_, ok := transport.ExitCode()
+				return ok
+			}, 5*time.Second, 10*time.Millisecond, "exit status never reported")
+			code, _ := transport.ExitCode()
+			require.Equal(t, tc.code, code)
+		})
+	}
+}

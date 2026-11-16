@@ -2,8 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
-	"os"
 
 	"github.com/alecthomas/kingpin/v2"
 
@@ -28,9 +26,6 @@ func dispatchTopCommand(parsedCmd string, cmds *topCommands, cfgDirectory string
 	if !standaloneRequested() {
 		err = top.Run(cfgDirectory, version)
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	exitOnErr(err)
 	return true
 }

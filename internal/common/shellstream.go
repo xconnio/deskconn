@@ -22,6 +22,11 @@ type ShellControlMsg struct {
 	Token   string         `json:"token,omitempty"`    // migrate only: the token issued for OldID
 	ShellID string         `json:"shell_id,omitempty"` // server->client ack: the (possibly new) shell ID
 	Error   string         `json:"error,omitempty"`    // server->client ack: set instead of ShellID/Token on failure
+	// ReportsExit is set in the server->client ack by a machine that sends ShellOpExit
+	// once the command exits, so the client can tell a lost connection (no ShellOpExit)
+	// from an older machine that never sends one.
+	ReportsExit bool `json:"reports_exit,omitempty"`
+	ExitCode    *int `json:"exit_code,omitempty"` // exit only: the command's exit status
 }
 
 // BuildShellEnvelope encrypts plaintext and prepends kind, ready to hand to

@@ -127,9 +127,27 @@ func (p *interactiveShellSession) ExpireMigrationToken(shellID string) {
 // channel. Guarded by mu since writeOutput runs on the PTY output-reader
 // goroutine while tests read what was written from the main test goroutine.
 type FakeShellTransport struct {
-	mu      sync.Mutex
-	written [][]byte
-	closed  bool
+	mu       sync.Mutex
+	written  [][]byte
+	exitCode *int
+	closed   bool
+}
+
+func (t *FakeShellTransport) writeExit(code int) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.exitCode = &code
+	return nil
+}
+
+// ExitCode returns the exit status reported so far, if any.
+func (t *FakeShellTransport) ExitCode() (int, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.exitCode == nil {
+		return 0, false
+	}
+	return *t.exitCode, true
 }
 
 func (t *FakeShellTransport) writeOutput(plaintext []byte) error {

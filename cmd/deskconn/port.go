@@ -55,9 +55,9 @@ func registerPortCommands(app *kingpin.Application, cfgDirectory string) *portCo
 func dispatchPortCommand(parsedCmd string, cmds *portCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.forward.FullCommand():
-		printErr(forwardPort(cfgDirectory, *cmds.forwardMachine, *cmds.forwardPorts, *cmds.forwardMode))
+		exitOnErr(forwardPort(cfgDirectory, *cmds.forwardMachine, *cmds.forwardPorts, *cmds.forwardMode))
 	case cmds.reverse.FullCommand():
-		printErr(reversePort(cfgDirectory, *cmds.reverseMachine, *cmds.reversePorts, *cmds.reverseMode))
+		exitOnErr(reversePort(cfgDirectory, *cmds.reverseMachine, *cmds.reversePorts, *cmds.reverseMode))
 	default:
 		return false
 	}

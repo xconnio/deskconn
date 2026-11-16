@@ -248,9 +248,57 @@ func TestHandleQUICShellStreamIgnoresPing(t *testing.T) {
 	}
 }
 
+// TestHandleQUICShellStreamReportsExitStatus checks the machine says in its ack that
+// it reports the exit status, then sends the command's status after its output, as
+// the last message before closing.
+func TestHandleQUICShellStreamReportsExitStatus(t *testing.T) {
+	command, args := "sh", []string{"-c", "echo out; exit 3"}
+	if runtime.GOOS == goosWindows {
+		command, args = "cmd.exe", []string{"/c", "exit", "3"}
+	}
+
+	caller, _ := newRPCFeatureSession(t)
+	client, err := common.OpenRPCStream(t.Context(), caller, common.ProcedureShellStream, false)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
+	require.NoError(t, err)
+	require.NoError(t, sendQUICShellControl(client, sendKey, common.ShellControlMsg{
+		Op: common.ShellOpSize, Cols: 80, Rows: 24, Command: command, Args: args,
+	}))
+	ack, err := recvQUICShellEnvelope(client, receiveKey)
+	require.NoError(t, err)
+	require.True(t, ack.reportsExit, "the ack should say the exit status will be reported")
+
+	var output []byte
+	var exit *shellAck
+	for {
+		msg, err := recvQUICShellEnvelope(client, receiveKey)
+		if err != nil {
+			break
+		}
+		require.Nil(t, exit, "nothing should follow the exit status")
+		if msg.exitCode != nil {
+			exit = &msg
+		}
+		output = append(output, msg.data...)
+	}
+	require.NotNil(t, exit, "the stream closed without reporting the exit status")
+	assert.Equal(t, string(common.ShellOpExit), exit.op)
+	assert.Equal(t, 3, *exit.exitCode)
+	if runtime.GOOS != goosWindows {
+		assert.Contains(t, string(output), "out")
+	}
+}
+
 type shellAck struct {
-	ackShellID string
-	ackToken   string
+	ackShellID  string
+	ackToken    string
+	reportsExit bool
+	op          string
+	exitCode    *int
+	data        []byte
 }
 
 func sendQUICShellControl(conn net.Conn, sendKey []byte, msg common.ShellControlMsg) error {
@@ -279,11 +327,12 @@ func recvQUICShellEnvelope(conn net.Conn, receiveKey []byte) (shellAck, error) {
 		return shellAck{}, err
 	}
 	if kind != common.ShellMsgControl {
-		return shellAck{}, nil
+		return shellAck{data: plaintext}, nil
 	}
 	var msg common.ShellControlMsg
 	if err := json.Unmarshal(plaintext, &msg); err != nil {
 		return shellAck{}, err
 	}
-	return shellAck{ackShellID: msg.ShellID, ackToken: msg.Token}, nil
+	return shellAck{ackShellID: msg.ShellID, ackToken: msg.Token, reportsExit: msg.ReportsExit,
+		op: string(msg.Op), exitCode: msg.ExitCode}, nil
 }

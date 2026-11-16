@@ -114,19 +114,19 @@ func registerFileCommands(app *kingpin.Application, cfgDirectory string) *fileCo
 func dispatchFileCommand(parsedCmd string, cmds *fileCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.ls.FullCommand():
-		printErr(listFiles(cfgDirectory, *cmds.lsTarget, *cmds.lsMode))
+		exitOnErr(listFiles(cfgDirectory, *cmds.lsTarget, *cmds.lsMode))
 	case cmds.mv.FullCommand():
-		printErr(moveFile(cfgDirectory, *cmds.mvSrc, *cmds.mvDst, *cmds.mvMode))
+		exitOnErr(moveFile(cfgDirectory, *cmds.mvSrc, *cmds.mvDst, *cmds.mvMode))
 	case cmds.cp.FullCommand():
-		printErr(copyFiles(cfgDirectory, *cmds.cpSrc, *cmds.cpDst, *cmds.cpRecursive, *cmds.cpStreams, *cmds.cpMode))
+		exitOnErr(copyFiles(cfgDirectory, *cmds.cpSrc, *cmds.cpDst, *cmds.cpRecursive, *cmds.cpStreams, *cmds.cpMode))
 	case cmds.rm.FullCommand():
-		printErr(removeFile(cfgDirectory, *cmds.rmTarget, *cmds.rmMode))
+		exitOnErr(removeFile(cfgDirectory, *cmds.rmTarget, *cmds.rmMode))
 	case cmds.cat.FullCommand():
-		printErr(catFile(cfgDirectory, *cmds.catTarget, *cmds.catMode))
+		exitOnErr(catFile(cfgDirectory, *cmds.catTarget, *cmds.catMode))
 	case cmds.edit.FullCommand():
-		printErr(editFile(cfgDirectory, *cmds.editTarget, *cmds.editMode))
+		exitOnErr(editFile(cfgDirectory, *cmds.editTarget, *cmds.editMode))
 	case cmds.mount.FullCommand():
-		printErr(mountFiles(cfgDirectory, *cmds.mountTarget, *cmds.mountPoint, *cmds.mountMode,
+		exitOnErr(mountFiles(cfgDirectory, *cmds.mountTarget, *cmds.mountPoint, *cmds.mountMode,
 			*cmds.mountReadOnly, *cmds.mountDebug))
 	default:
 		return false

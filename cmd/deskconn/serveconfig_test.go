@@ -27,9 +27,6 @@ const (
 
 	testKeyA = "31f195e2b9f3b05d48fc4e4f7dde83bd97582f42d53e6174f66140a039594830"
 	testKeyB = "65160c38f1c3fa1d0e9cb1c0d8a7bc2f3b2a4fd4bd1bd2f6e2b9cfb1c3a4d5e6"
-
-	// goosWindows is runtime.GOOS's value on Windows, shared by tests that skip or branch on it.
-	goosWindows = "windows"
 )
 
 func TestLoadServeConfig(t *testing.T) {

@@ -4,6 +4,7 @@ package userd
 
 import (
 	"fmt"
+	"os"
 	"syscall"
 
 	pty "github.com/aymanbagabas/go-pty"
@@ -75,3 +76,11 @@ func foregroundPGIDDiffers(ptmx pty.Pty, pid int) (bool, error) {
 // unblocks on its own without this. See shell_windows.go for why ConPTY
 // needs the explicit close instead.
 func closePtyOnProcessExit(*ptySession, pty.Pty) {}
+
+// signaledExitCode is 128+N for a process killed by signal N, as shells report it.
+func signaledExitCode(state *os.ProcessState) int {
+	if status, ok := state.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+		return 128 + int(status.Signal())
+	}
+	return -1
+}

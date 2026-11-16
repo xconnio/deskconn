@@ -43,7 +43,7 @@ func dispatchShellCommand(parsedCmd string, cmds *shellCommands, cfgDirectory st
 	if parsedCmd != cmds.shell.FullCommand() {
 		return false
 	}
-	printErr(runShell(cfgDirectory, *cmds.machine, *cmds.command, *cmds.mode, *cmds.forwardAgent))
+	exitOnErr(runShell(cfgDirectory, *cmds.machine, *cmds.command, *cmds.mode, *cmds.forwardAgent))
 	return true
 }
 

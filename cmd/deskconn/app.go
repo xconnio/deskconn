@@ -62,15 +62,15 @@ func registerAppCommands(app *kingpin.Application, cfgDirectory string) *appComm
 func dispatchAppCommand(parsedCmd string, cmds *appCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.ls.FullCommand():
-		printErr(listApps(cfgDirectory, *cmds.lsMachine))
+		exitOnErr(listApps(cfgDirectory, *cmds.lsMachine))
 	case cmds.register.FullCommand():
-		printErr(registerApp(cfgDirectory, *cmds.registerMachine, *cmds.registerDirectory))
+		exitOnErr(registerApp(cfgDirectory, *cmds.registerMachine, *cmds.registerDirectory))
 	case cmds.unregister.FullCommand():
-		printErr(unregisterApp(cfgDirectory, *cmds.unregisterMachine, *cmds.unregisterID))
+		exitOnErr(unregisterApp(cfgDirectory, *cmds.unregisterMachine, *cmds.unregisterID))
 	case cmds.enable.FullCommand():
-		printErr(setAppEnabled(cfgDirectory, *cmds.enableMachine, *cmds.enableID, true))
+		exitOnErr(setAppEnabled(cfgDirectory, *cmds.enableMachine, *cmds.enableID, true))
 	case cmds.disable.FullCommand():
-		printErr(setAppEnabled(cfgDirectory, *cmds.disableMachine, *cmds.disableID, false))
+		exitOnErr(setAppEnabled(cfgDirectory, *cmds.disableMachine, *cmds.disableID, false))
 	default:
 		return false
 	}

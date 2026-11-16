@@ -136,27 +136,27 @@ func (c *machineCommands) accountOnly(parsedCmd string) bool {
 func dispatchMachineCommand(parsedCmd string, cmds *machineCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.ls.FullCommand(), cmds.lsShortcut.FullCommand():
-		printErr(listMachines(cfgDirectory, cmds.lsRefresh, cmds.lsDetailed))
+		exitOnErr(listMachines(cfgDirectory, cmds.lsRefresh, cmds.lsDetailed))
 	case cmds.attach.FullCommand():
-		printErr(attach(*cmds.attachUsername, *cmds.attachName))
+		exitOnErr(attach(*cmds.attachUsername, *cmds.attachName))
 	case cmds.detach.FullCommand():
-		printErr(detach(cfgDirectory))
+		exitOnErr(detach(cfgDirectory))
 	case cmds.alias.FullCommand():
 		if *cmds.aliasUnset == (*cmds.aliasName != "") {
-			printErr(errors.New("specify either an alias name or --unset"))
+			exitOnErr(&usageError{msg: "specify either an alias name or --unset"})
 		} else {
-			printErr(updateMachineAlias(cfgDirectory, *cmds.aliasMachine, *cmds.aliasName))
+			exitOnErr(updateMachineAlias(cfgDirectory, *cmds.aliasMachine, *cmds.aliasName))
 		}
 	case cmds.ping.FullCommand():
-		printErr(pingMachine(cfgDirectory, *cmds.pingMachine, *cmds.pingCount))
+		exitOnErr(pingMachine(cfgDirectory, *cmds.pingMachine, *cmds.pingCount))
 	case cmds.connect.FullCommand():
-		printErr(connectMachine(cfgDirectory, *cmds.connectMachine))
+		exitOnErr(connectMachine(cfgDirectory, *cmds.connectMachine))
 	case cmds.disconnect.FullCommand():
-		printErr(disconnectMachine(cfgDirectory, *cmds.disconnectMachine, *cmds.disconnectAll))
+		exitOnErr(disconnectMachine(cfgDirectory, *cmds.disconnectMachine, *cmds.disconnectAll))
 	case cmds.info.FullCommand():
-		printErr(showMachineInfo(cfgDirectory, *cmds.infoMachine, *cmds.infoMode))
+		exitOnErr(showMachineInfo(cfgDirectory, *cmds.infoMachine, *cmds.infoMode))
 	case cmds.logs.FullCommand():
-		printErr(streamMachineLogs(cfgDirectory, *cmds.logsMachine, *cmds.logsSource, *cmds.logsFollow,
+		exitOnErr(streamMachineLogs(cfgDirectory, *cmds.logsMachine, *cmds.logsSource, *cmds.logsFollow,
 			*cmds.logsTail, *cmds.logsSince, *cmds.logsMode))
 	default:
 		return false
@@ -295,6 +295,10 @@ pingLoop:
 	fmt.Printf("%d packets transmitted, %d received, %d%% packet loss\n", sent, received, loss)
 	if received > 0 {
 		fmt.Printf("rtt min/avg/max = %d/%d/%d ms\n", minMs, totalMs/int64(received), maxMs)
+	}
+	// Like ping(8), no reply at all is a failure; the statistics above say so already.
+	if sent > 0 && received == 0 {
+		return errAlreadyReported
 	}
 	return nil
 }

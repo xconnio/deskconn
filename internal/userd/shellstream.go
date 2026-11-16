@@ -36,6 +36,15 @@ func (t *quicShellTransport) writeOutput(plaintext []byte) error {
 	return common.WriteFrame(t.stream, envelope)
 }
 
+func (t *quicShellTransport) writeExit(code int) error {
+	msg := common.ShellControlMsg{Op: common.ShellOpExit, ExitCode: &code}
+	envelope, err := common.BuildShellEnvelope(common.ShellMsgControl, common.MustJSON(msg), t.sendKey)
+	if err != nil {
+		return err
+	}
+	return common.WriteFrame(t.stream, envelope)
+}
+
 func (t *quicShellTransport) close() error { return t.stream.Close() }
 
 // beginShellSession handles a connection's first control message: claims an
@@ -126,7 +135,7 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 
 	transport := &quicShellTransport{stream: stream, sendKey: sendKey}
 	shellID, token, ptmx, startReader, err := d.beginShellSession(ctrl, transport)
-	ackMsg := common.ShellControlMsg{ShellID: shellID, Token: token}
+	ackMsg := common.ShellControlMsg{ShellID: shellID, Token: token, ReportsExit: true}
 	if err != nil {
 		ackMsg = common.ShellControlMsg{Error: err.Error()}
 	}

@@ -25,7 +25,7 @@ type vpnCommands struct {
 
 func registerVPNCommands(app *kingpin.Application, cfgDirectory string) *vpnCommands {
 	vpnCmd := app.Command("vpn", "Route traffic through a machine or serve as an exit node")
-	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+	if runtime.GOOS != "linux" && runtime.GOOS != goosWindows {
 		vpnCmd.Hidden()
 	}
 	connectCmd := vpnCmd.Command("connect",
@@ -55,26 +55,22 @@ func dispatchVPNCommand(parsedCmd string, cmds *vpnCommands, cfgDirectory string
 	switch parsedCmd {
 	case cmds.connect.FullCommand():
 		routes, err := common.ParseVPNRoutes(*cmds.connectRoutes)
-		if err != nil {
-			printErr(err)
-			return true
-		}
+		exitOnErr(err)
 		realm, err := machineRealm(*cmds.connectMachine, cfgDirectory)
-		if err != nil {
-			printErr(err)
-			return true
-		}
+		exitOnErr(err)
 		ctx, cancel := context.WithCancel(context.Background())
-		runVPNConnect(ctx, cfgDirectory, realm, *cmds.connectMachine, routes, *cmds.connectTunnelChild)
+		err = runVPNConnect(ctx, cfgDirectory, realm, *cmds.connectMachine, routes, *cmds.connectTunnelChild)
 		cancel()
+		exitOnErr(err)
 	case cmds.disconnect.FullCommand():
-		runVPNDisconnect(context.Background(), cfgDirectory)
+		exitOnErr(runVPNDisconnect(context.Background(), cfgDirectory))
 	case cmds.serve.FullCommand():
 		ctx, cancel := context.WithCancel(context.Background())
-		runVPNServe(ctx, cfgDirectory)
+		err := runVPNServe(ctx, cfgDirectory)
 		cancel()
+		exitOnErr(err)
 	case cmds.stop.FullCommand():
-		runVPNStop(context.Background(), cfgDirectory)
+		exitOnErr(runVPNStop(context.Background(), cfgDirectory))
 	default:
 		return false
 	}

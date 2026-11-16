@@ -65,7 +65,7 @@ func dispatchProfileCommand(parsedCmd string, cmds *profileCommands, cfgDirector
 	var err error
 	switch parsedCmd {
 	case cmds.keygen.FullCommand():
-		printErr(printKeyPair())
+		exitOnErr(printKeyPair())
 		return true
 	case cmds.add.FullCommand():
 		err = addProfile(cfgDirectory, common.Profile{Name: *cmds.addName, URL: *cmds.addURL,
@@ -77,10 +77,7 @@ func dispatchProfileCommand(parsedCmd string, cmds *profileCommands, cfgDirector
 	default:
 		return false
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	exitOnErr(err)
 	return true
 }
 

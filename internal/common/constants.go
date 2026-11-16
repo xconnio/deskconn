@@ -347,6 +347,9 @@ const (
 	// idle, purely so the connection keeps producing traffic -- it needs no
 	// server-side handling beyond having been read (see ShellIdleTimeout).
 	ShellOpPing shellControlOp = "ping"
+	// ShellOpExit is the server's last message on a connection, sent after the
+	// command's last output: ExitCode carries its exit status.
+	ShellOpExit shellControlOp = "exit"
 )
 
 // ShellIdleTimeout bounds how long a shell/exec (or port-forward/reverse,

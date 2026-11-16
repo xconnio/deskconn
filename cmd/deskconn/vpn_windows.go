@@ -58,6 +58,7 @@ type shellExecuteInfo struct {
 
 func runRootd(_ rootdFlags) {
 	fmt.Fprintln(os.Stderr, "desk: the root helper is not supported on this platform")
+	os.Exit(exitFailure)
 }
 
 func callVPNProcedure(ctx context.Context, cfgDirectory, procedure string) error {
@@ -70,22 +71,22 @@ func callVPNProcedure(ctx context.Context, cfgDirectory, procedure string) error
 }
 
 // On Windows the exit node runs inside userd and needs no root helper: see userd/iptunnel_windows.go.
-func runVPNServe(ctx context.Context, cfgDirectory string) {
+func runVPNServe(ctx context.Context, cfgDirectory string) error {
 	if err := callVPNProcedure(ctx, cfgDirectory, common.ProcedureProxyVPNStart); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	fmt.Println("Serving in the background: this machine can now be used as a VPN exit node, " +
 		"one connection at a time.")
 	fmt.Println("Run \"desk vpn stop\" (from anywhere) to stop.")
+	return nil
 }
 
-func runVPNStop(ctx context.Context, cfgDirectory string) {
+func runVPNStop(ctx context.Context, cfgDirectory string) error {
 	if err := callVPNProcedure(ctx, cfgDirectory, common.ProcedureProxyVPNStop); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	fmt.Println("Stopped serving.")
+	return nil
 }
 
 // vpnEventNames names this user's two events. The launch event exists only while "vpn connect" is
@@ -131,43 +132,35 @@ func setEvent(name string) error {
 // this starts itself again through UAC, with tunnelChild set, and that process, which has no
 // console, runs the tunnel.
 func runVPNConnect(ctx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes,
-	tunnelChild bool) {
+	tunnelChild bool) error {
 	if !routes.Empty() {
-		fmt.Fprintln(os.Stderr, "vpn connect --route is not supported on Windows yet: leave it out to tunnel all traffic")
-		return
+		return errors.New("vpn connect --route is not supported on Windows yet: leave it out to tunnel all traffic")
 	}
 	launch, stop, _, err := vpnEventNames()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	if tunnelChild {
-		runVPNTunnel(ctx, cfgDirectory, realm, machine)
-		return
+		return runVPNTunnel(ctx, cfgDirectory, realm, machine)
 	}
 	if eventExists(launch) {
-		fmt.Fprintln(os.Stderr, "another \"vpn connect\" is already starting")
-		return
+		return errors.New("another \"vpn connect\" is already starting")
 	}
 
 	if eventExists(stop) {
-		fmt.Fprintln(os.Stderr, "already connected; run \"deskconn vpn disconnect\" first")
-		return
+		return errors.New("already connected; run \"deskconn vpn disconnect\" first")
 	}
 	if err := vpnwin.CheckDLL(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 
 	launchPtr, err := windows.UTF16PtrFromString(launch)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	ready, err := windows.CreateEvent(nil, 1, 0, launchPtr)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer func() { _ = windows.CloseHandle(ready) }()
 
@@ -183,8 +176,7 @@ func runVPNConnect(ctx context.Context, cfgDirectory, realm, machine string, rou
 	fmt.Println("Approve the Windows prompt to grant the tunnel the network access it needs.")
 	process, err := startElevated(append(append([]string{}, os.Args[1:]...), "--"+vpnTunnelChildFlag))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer func() { _ = windows.CloseHandle(process) }()
 	fmt.Printf("Connecting to %q...\n", machine)
@@ -196,8 +188,7 @@ func runVPNConnect(ctx context.Context, cfgDirectory, realm, machine string, rou
 	for {
 		event, err := windows.WaitForMultipleObjects(handles, false, uint32(vpnPollInterval.Milliseconds()))
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
+			return err
 		}
 		select {
 		case <-sigCh:
@@ -210,15 +201,14 @@ func runVPNConnect(ctx context.Context, cfgDirectory, realm, machine string, rou
 				// Up just as it was stopped: wait for its teardown rather than report it up.
 				_ = setEvent(stop)
 				_, _ = windows.WaitForSingleObject(process, uint32(vpnDisconnectTimeout.Milliseconds()))
-				fmt.Fprintln(os.Stderr, "interrupted")
-				return
+				return errors.New("interrupted")
 			}
 			fmt.Printf("Tunnel up: routing this machine's internet traffic through %q.\n", machine)
 			fmt.Println("Run \"deskconn vpn disconnect\" to stop.")
-			return
+			return nil
 		case windows.WAIT_OBJECT_0 + 1:
 			reportTunnelFailure(logPath)
-			return
+			return errAlreadyReported
 		}
 		if stopping {
 			_ = setEvent(stop)
@@ -306,7 +296,7 @@ func createStopEvent(stop, sid string) (windows.Handle, error) {
 
 // runVPNTunnel is the elevated process runVPNConnect starts. It logs to a file, having no console,
 // and only exits, closing the stop event, once its teardown is done.
-func runVPNTunnel(cliCtx context.Context, cfgDirectory, realm, machine string) {
+func runVPNTunnel(cliCtx context.Context, cfgDirectory, realm, machine string) error {
 	// Wintun's chatter, which goes here and would read as failures. Its errors are returned too.
 	stdlog.SetOutput(io.Discard)
 
@@ -319,13 +309,11 @@ func runVPNTunnel(cliCtx context.Context, cfgDirectory, realm, machine string) {
 
 	launch, stop, sid, err := vpnEventNames()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	launchEvent, err := openEvent(launch, windows.EVENT_MODIFY_STATE)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	launchOpen := true
 	closeLaunch := func() {
@@ -338,8 +326,7 @@ func runVPNTunnel(cliCtx context.Context, cfgDirectory, realm, machine string) {
 
 	stopEvent, err := createStopEvent(stop, sid)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer func() { _ = windows.CloseHandle(stopEvent) }()
 
@@ -354,8 +341,7 @@ func runVPNTunnel(cliCtx context.Context, cfgDirectory, realm, machine string) {
 
 	session, err := deskconn.ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer closeSessionWithTimeout(session)
 
@@ -365,10 +351,8 @@ func runVPNTunnel(cliCtx context.Context, cfgDirectory, realm, machine string) {
 		// Gone from now on, so the next "vpn connect" doesn't think one is still starting.
 		closeLaunch()
 	})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-	}
 	fmt.Println("Tunnel down")
+	return err
 }
 
 // closeSessionWithTimeout closes session with a bound, as closing is network I/O.
@@ -386,30 +370,27 @@ func closeSessionWithTimeout(session *xconnwebrtc.WebRTCSession) {
 }
 
 // runVPNDisconnect stops the tunnel "vpn connect" left running, and waits for its teardown.
-func runVPNDisconnect(_ context.Context, cfgDirectory string) {
+func runVPNDisconnect(_ context.Context, cfgDirectory string) error {
 	_, stop, _, err := vpnEventNames()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	if !eventExists(stop) {
-		fmt.Fprintln(os.Stderr, "not connected")
-		return
+		return errors.New("not connected")
 	}
 	if err := setEvent(stop); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	fmt.Println("Disconnecting...")
 
 	deadline := time.Now().Add(vpnDisconnectTimeout)
 	for eventExists(stop) {
 		if time.Now().After(deadline) {
-			fmt.Fprintf(os.Stderr, "timed out waiting for the tunnel to stop, see %s\n",
+			return fmt.Errorf("timed out waiting for the tunnel to stop, see %s",
 				filepath.Join(cfgDirectory, vpnConnectLogName))
-			return
 		}
 		time.Sleep(vpnPollInterval)
 	}
 	fmt.Println("Disconnected.")
+	return nil
 }

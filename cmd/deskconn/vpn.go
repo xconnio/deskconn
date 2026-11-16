@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,21 +62,18 @@ const (
 // runVPNConnectChild) with the same terminal, so the sudo and any password
 // prompt still work, and exits once that child reports the tunnel is up or
 // exits itself. The child detaches from the terminal from then on.
-func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes, _ bool) {
+func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes, _ bool) error {
 	if os.Getenv(vpnConnectChildEnv) != "" {
-		runVPNConnectChild(cliCtx, cfgDirectory, realm, machine, routes)
-		return
+		return runVPNConnectChild(cliCtx, cfgDirectory, realm, machine, routes)
 	}
 
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	readyR, readyW, err := os.Pipe()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer func() { _ = readyR.Close() }()
 
@@ -94,15 +92,15 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, 
 
 	if err := cmd.Start(); err != nil {
 		_ = readyW.Close()
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	_ = readyW.Close()
 
 	if n, _ := readyR.Read(make([]byte, 1)); n == 1 {
-		return
+		return nil
 	}
-	_ = cmd.Wait()
+	// The child has reported why it failed, and its exit status says so.
+	return cmd.Wait()
 }
 
 // runVPNConnectChild runs the tunnel for runVPNConnect until it drops,
@@ -110,13 +108,12 @@ func runVPNConnect(cliCtx context.Context, cfgDirectory, realm, machine string, 
 // own teardown to finish before exiting. This process also launches
 // deskconn-rootd (see deskconn.LaunchVPNHelper), since it's the one with a
 // terminal for sudo to prompt on, and waits for it to exit.
-func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes) {
+func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine string, routes common.VPNRoutes) error {
 	ready := os.NewFile(3, "vpn-ready")
 
 	release, err := claimVPNConnectPID(cfgDirectory)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer release()
 
@@ -131,15 +128,13 @@ func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine str
 
 	session, err := deskconn.ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer closeSessionWithTimeout(session)
 
 	socketPath, waitHelper, err := deskconn.LaunchVPNHelper(ctx, cfgDirectory, deskconn.VPNConnectUnit)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer func() {
 		if err := waitHelper(); err != nil {
@@ -149,8 +144,7 @@ func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine str
 
 	helper, err := common.DialVPNHelper(socketPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer func() { _ = helper.Close() }()
 
@@ -175,19 +169,15 @@ func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine str
 	case <-sigCh:
 		cancel()
 	case err := <-errCh:
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
 		fmt.Println("Tunnel down")
-		return
+		return err
 	}
 
 	// Stopped: wait for the goroutine above to actually finish (its own
 	// teardown included) before letting the process exit.
-	if err := <-errCh; err != nil {
-		fmt.Fprintln(os.Stderr, err)
-	}
+	err = <-errCh
 	fmt.Println("Tunnel down")
+	return err
 }
 
 // detachFromTerminal moves this process into its own session, off the
@@ -259,24 +249,21 @@ func vpnConnectPID(cfgDirectory string) (int, bool) {
 // runVPNDisconnect stops the tunnel "desk vpn connect" left running, and
 // waits for its teardown to finish. Stopping deskconn-rootd's unit directly
 // is only the fallback for one whose tunnel process is already gone.
-func runVPNDisconnect(ctx context.Context, cfgDirectory string) {
+func runVPNDisconnect(ctx context.Context, cfgDirectory string) error {
 	pid, ok := vpnConnectPID(cfgDirectory)
 	if !ok {
 		if !deskconn.VPNHelperActive(deskconn.VPNConnectUnit) {
-			fmt.Fprintln(os.Stderr, "not connected")
-			return
+			return errors.New("not connected")
 		}
 		if err := deskconn.StopVPNHelper(ctx, deskconn.VPNConnectUnit); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
+			return err
 		}
 		fmt.Println("Disconnected.")
-		return
+		return nil
 	}
 
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	fmt.Println("Disconnecting...")
 
@@ -286,13 +273,12 @@ func runVPNDisconnect(ctx context.Context, cfgDirectory string) {
 	for {
 		if _, ok := vpnConnectPID(cfgDirectory); !ok {
 			fmt.Println("Disconnected.")
-			return
+			return nil
 		}
 		select {
 		case <-deadline:
-			fmt.Fprintf(os.Stderr, "timed out waiting for the tunnel (pid %d) to stop, see %s\n",
+			return fmt.Errorf("timed out waiting for the tunnel (pid %d) to stop, see %s",
 				pid, filepath.Join(cfgDirectory, vpnConnectLogName))
-			return
 		case <-ticker.C:
 		}
 	}
@@ -306,7 +292,7 @@ func runVPNDisconnect(ctx context.Context, cfgDirectory string) {
 // (the only blocking part, briefly, for the sudo prompt) and hands
 // userd its socket. systemd owns deskconn-rootd from there; it exits once
 // userd closes its connection.
-func runVPNServe(cliCtx context.Context, cfgDirectory string) {
+func runVPNServe(cliCtx context.Context, cfgDirectory string) error {
 	ctx, cancel := context.WithCancel(cliCtx)
 	defer cancel()
 
@@ -321,26 +307,24 @@ func runVPNServe(cliCtx context.Context, cfgDirectory string) {
 
 	localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	defer func() { _ = localSession.Leave() }()
 
 	socketPath, _, err := deskconn.LaunchVPNHelper(ctx, cfgDirectory, deskconn.VPNServeUnit)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 
 	resp := localSession.Call(common.ProcedureProxyVPNStart).Args(socketPath).ExecuteContext(ctx)
 	if resp.Err != nil {
-		fmt.Fprintln(os.Stderr, resp.Err)
-		return
+		return resp.Err
 	}
 
 	fmt.Println("Serving in the background: this machine can now be used as a VPN exit node, " +
 		"one connection at a time.")
 	fmt.Println("Run \"desk vpn stop\" (from anywhere) to stop.")
+	return nil
 }
 
 // runVPNStop tells this machine's own userd to stop serving as a
@@ -348,20 +332,19 @@ func runVPNServe(cliCtx context.Context, cfgDirectory string) {
 // userd's connection to deskconn-rootd, which makes it exit without needing
 // sudo; stopping the unit directly is only the fallback for a deskconn-rootd that
 // userd no longer knows about (e.g. userd isn't running).
-func runVPNStop(ctx context.Context, cfgDirectory string) {
+func runVPNStop(ctx context.Context, cfgDirectory string) error {
 	if err := disarmVPNServing(ctx, cfgDirectory); err == nil {
 		fmt.Println("Stopped serving.")
-		return
+		return nil
 	} else if !deskconn.VPNHelperActive(deskconn.VPNServeUnit) {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 
 	if err := deskconn.StopVPNHelper(ctx, deskconn.VPNServeUnit); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
+		return err
 	}
 	fmt.Println("Stopped serving.")
+	return nil
 }
 
 func disarmVPNServing(ctx context.Context, cfgDirectory string) error {

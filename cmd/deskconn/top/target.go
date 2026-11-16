@@ -3,6 +3,7 @@ package top
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -124,7 +125,13 @@ func (s *topShell) SetStderr(io.Writer)   {}
 func (s *topShell) Run() error {
 	// A clear screen, the shell's own output starting at the top.
 	_, _ = fmt.Fprintf(s.stdout, "\x1b[2J\x1b[HConnecting to %s…\r\n", s.target.name)
-	return deskconn.RunShell(context.Background(), s.mode, s.target.realm, s.cfgDirectory)
+	err := deskconn.RunShell(context.Background(), s.mode, s.target.realm, s.cfgDirectory)
+	// An interactive shell exits with its last command's status, which isn't the shell failing.
+	var exited *deskconn.ExitError
+	if errors.As(err, &exited) {
+		return nil
+	}
+	return err
 }
 
 // Remote is what desk top does on machines, each named by its realm.

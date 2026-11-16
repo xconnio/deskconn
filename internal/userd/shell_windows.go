@@ -62,3 +62,6 @@ func closePtyOnProcessExit(ps *ptySession, ptmx pty.Pty) {
 	time.Sleep(ptyDrainDelay)
 	ps.closePty(ptmx)
 }
+
+// signaledExitCode is never needed here: a Windows process always has an exit code.
+func signaledExitCode(*os.ProcessState) int { return -1 }

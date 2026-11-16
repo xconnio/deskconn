@@ -23,6 +23,9 @@ const (
 	ModeDirect = deskconn.ModeDirect
 
 	jsonFieldPath = "path"
+
+	// goosWindows is runtime.GOOS's value on Windows.
+	goosWindows = "windows"
 )
 
 func main() {
@@ -55,15 +58,17 @@ func main() {
 		app.Usage(nil)
 		return
 	}
+	// A command given without the subcommand or machine it needs gets its usage, as
+	// an invalid command line.
 	if len(os.Args) == 2 {
 		if os.Args[1] == "shell" && !standaloneRequested() {
 			app.Usage(os.Args[1:])
-			return
+			os.Exit(exitUsage)
 		}
 		for _, command := range app.Model().Commands {
 			if command.Name == os.Args[1] && len(command.Commands) > 0 && !hasDefaultCommand(command) {
 				app.Usage(os.Args[1:])
-				return
+				os.Exit(exitUsage)
 			}
 		}
 	}
@@ -80,7 +85,7 @@ func main() {
 		} else {
 			app.Usage(os.Args[1:])
 		}
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	if cfgErr != nil && parsedCmd != serveCmds.run.FullCommand() {
@@ -88,14 +93,10 @@ func main() {
 	}
 
 	if *profileName != "" {
-		if err := useProfile(cfgDirectory, *profileName); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+		exitOnErr(useProfile(cfgDirectory, *profileName))
 		if machineCmds.accountOnly(parsedCmd) {
-			fmt.Fprintf(os.Stderr, "%s is not available with --profile (it works on machines of your account)\n",
-				parsedCmd)
-			os.Exit(1)
+			exitOnErr(&usageError{msg: fmt.Sprintf(
+				"%s is not available with --profile (it works on machines of your account)", parsedCmd)})
 		}
 	}
 
@@ -122,13 +123,6 @@ func hasDefaultCommand(command *kingpin.CmdModel) bool {
 		}
 	}
 	return false
-}
-
-// printErr reports a failed command on stderr. Most commands still exit 0 after.
-func printErr(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-	}
 }
 
 // runUntilInterrupted runs run until it returns, or until Ctrl+C/SIGTERM, which prints

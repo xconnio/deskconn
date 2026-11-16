@@ -96,20 +96,28 @@ func recvShellAck(conn shellConn, receiveKey []byte) (common.ShellControlMsg, er
 		return common.ShellControlMsg{}, err
 	}
 	if msg.Error != "" {
-		return common.ShellControlMsg{}, errors.New(msg.Error)
+		return common.ShellControlMsg{}, &shellRejectedError{msg: msg.Error}
 	}
 	return msg, nil
 }
 
+// shellRejectedError is the machine refusing to start or migrate a shell, as opposed
+// to the connection to it failing.
+type shellRejectedError struct{ msg string }
+
+func (e *shellRejectedError) Error() string { return e.msg }
+
 // shellHandshakeResult is what dialing and completing the initial
 // size/migrate handshake on a shell connection produces. token is only set
 // for a brand-new session (ShellOpSize) -- the migration token this
-// connection can later be handed off from. cleanup releases the underlying
-// QUIC connection or PeerConnection and must be called exactly once.
+// connection can later be handed off from. reportsExit is whether the machine
+// sends ShellOpExit at the end. cleanup releases the underlying QUIC connection
+// or PeerConnection and must be called exactly once.
 type shellHandshakeResult struct {
 	conn                shellConn
 	sendKey, receiveKey []byte
 	shellID, token      string
+	reportsExit         bool
 	cleanup             func()
 }
 
@@ -150,7 +158,7 @@ func shellHandshakeOnStream(ctx context.Context, sess common.StreamSession, ctrl
 	}
 	return &shellHandshakeResult{
 		conn: conn, sendKey: sendKey, receiveKey: receiveKey,
-		shellID: ack.ShellID, token: ack.Token, cleanup: cleanup,
+		shellID: ack.ShellID, token: ack.Token, reportsExit: ack.ReportsExit, cleanup: cleanup,
 	}, nil
 }
 
@@ -254,11 +262,11 @@ func shellPingLoop(active *activeShellConn, done <-chan struct{}) {
 	}
 }
 
-// shellReadLoop writes decrypted PTY output to stdout until the active
-// connection ends. A migration swapping active out from under it isn't
-// treated as the session ending -- it switches to the new connection
-// instead.
-func shellReadLoop(active *activeShellConn) error {
+// shellReadLoop writes decrypted PTY output to stdout until the machine reports
+// the command's exit status, which it returns, or the active connection ends.
+// A migration swapping active out from under it isn't treated as the session
+// ending -- it switches to the new connection instead.
+func shellReadLoop(active *activeShellConn) (exitCode int, exited bool, err error) {
 	conn, _, receiveKey := active.get()
 	for {
 		envelope, err := conn.recvEnvelope()
@@ -268,14 +276,20 @@ func shellReadLoop(active *activeShellConn) error {
 				conn, receiveKey = newConn, newReceiveKey
 				continue
 			}
-			return err
+			return 0, false, err
 		}
 		kind, plaintext, err := common.DecryptEnvelope(envelope, receiveKey)
 		if err != nil {
 			continue
 		}
-		if kind == common.ShellMsgData {
+		switch kind {
+		case common.ShellMsgData:
 			_, _ = os.Stdout.Write(plaintext)
+		case common.ShellMsgControl:
+			var msg common.ShellControlMsg
+			if json.Unmarshal(plaintext, &msg) == nil && msg.Op == common.ShellOpExit && msg.ExitCode != nil {
+				return *msg.ExitCode, true, nil
+			}
 		}
 	}
 }
@@ -301,13 +315,20 @@ func resetShellTerminal(output io.Writer) {
 //     otherwise QUIC, migrating the running PTY to P2P once the connection
 //     upgrades. Without userd, fast-start on a QUIC connection of its own
 //     and migrate to P2P in the background the same way.
+//
+// It returns an *ExitError if the command exits nonzero, and a *ConnectionError if
+// the machine can't be reached or the connection drops before the command exits.
 func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctrl common.ShellControlMsg) error {
+	// Without a terminal (a script piping in or out), there's no raw mode to set, and
+	// the PTY on the machine keeps its default size.
 	fd := int(os.Stdin.Fd()) // #nosec
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return fmt.Errorf("failed to set raw mode: %w", err)
+	if term.IsTerminal(fd) {
+		oldState, err := term.MakeRaw(fd)
+		if err != nil {
+			return fmt.Errorf("failed to set raw mode: %w", err)
+		}
+		defer func() { _ = term.Restore(fd, oldState) }()
 	}
-	defer func() { _ = term.Restore(fd, oldState) }()
 
 	// Terminal dimensions are a property of the screen, not the keyboard: querying them
 	// needs stdout's fd, not stdin's. On Unix either works (both ends of the same tty
@@ -315,12 +336,16 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	// answers GetConsoleScreenBufferInfo -- stdin's handle fails it with "the handle is
 	// invalid", breaking every shell/exec invocation.
 	sizeFd := int(os.Stdout.Fd()) // #nosec
-	cols, rows, err := term.GetSize(sizeFd)
-	if err != nil {
-		return fmt.Errorf("failed to get terminal size: %w", err)
+	cols, rows := defaultCols, defaultRows
+	if term.IsTerminal(sizeFd) {
+		var err error
+		if cols, rows, err = term.GetSize(sizeFd); err != nil {
+			return fmt.Errorf("failed to get terminal size: %w", err)
+		}
 	}
 	ctrl.Op, ctrl.Cols, ctrl.Rows = common.ShellOpSize, clampUint16(cols), clampUint16(rows)
 
+	var err error
 	var primary *shellHandshakeResult
 	var daemon *DaemonStreams
 	switch mode {
@@ -338,23 +363,33 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 		}
 	}
 	if err != nil {
-		return err
+		var rejected *shellRejectedError
+		if errors.As(err, &rejected) {
+			return err
+		}
+		return &ConnectionError{Err: err}
 	}
 
 	active := &activeShellConn{}
 	active.set(primary)
 	defer active.cleanupCurrent()
-	defer resetShellTerminal(os.Stdout)
+	if term.IsTerminal(sizeFd) {
+		defer resetShellTerminal(os.Stdout)
+	}
 
 	// The loops end with the session, the one reading stdin included: in desk top, the
-	// terminal goes back to it and a read left waiting would take its next key.
+	// terminal goes back to it and a read left waiting would take its next key. Stdin
+	// that can't be watched that way (/dev/null, a regular file) isn't a terminal, so
+	// nothing else reads it after.
 	done := make(chan struct{})
 	defer close(done)
-	stdin, err := cancelreader.NewReader(os.Stdin)
-	if err != nil {
+	var stdin io.Reader = os.Stdin
+	if cancelable, err := cancelreader.NewReader(os.Stdin); err == nil {
+		defer func() { cancelable.Cancel(); _ = cancelable.Close() }()
+		stdin = cancelable
+	} else if term.IsTerminal(fd) {
 		return err
 	}
-	defer func() { stdin.Cancel(); _ = stdin.Close() }()
 	go shellStdinLoop(active, stdin)
 	go shellResizeLoop(active, sizeFd, done)
 	go shellPingLoop(active, done)
@@ -377,11 +412,19 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 		})
 	}
 
-	// shellReadLoop's error just means the connection closed, which is the
-	// normal way a session ends (the machine closes it once the PTY exits) --
-	// not a failure worth surfacing.
-	_ = shellReadLoop(active)
-	return nil
+	code, exited, err := shellReadLoop(active)
+	switch {
+	case exited && code != 0:
+		return &ExitError{Code: code}
+	case exited:
+		return nil
+	case primary.reportsExit:
+		return &ConnectionError{Err: fmt.Errorf("connection to the machine lost before the command finished: %w", err)}
+	default:
+		// A machine too old to report the exit status just closes the connection
+		// once the PTY exits, which can't be told apart from losing it.
+		return nil
+	}
 }
 
 // migrateShell moves the running session from primary onto the P2P connection dial

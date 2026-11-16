@@ -37,14 +37,45 @@ type migrationToken struct {
 type shellTransport interface {
 	// writeOutput encrypts and delivers one chunk of PTY output.
 	writeOutput(plaintext []byte) error
+	// writeExit reports the command's exit status, after its last output.
+	writeExit(code int) error
 	// close signals end-of-output on this transport.
 	close() error
 }
+
+// exitWaitTimeout bounds how long the output reader, having seen the PTY close, waits
+// for the command's exit status before giving up on reporting it.
+const exitWaitTimeout = 2 * time.Second
 
 type ptySession struct {
 	mu        sync.Mutex
 	transport shellTransport
 	closeOnce sync.Once
+
+	exited   chan struct{} // closed once the command has exited and exitCode is set
+	exitCode int           // -1 if the exit status couldn't be determined
+}
+
+// waitExit waits up to timeout for the command to exit, returning its exit status.
+func (ps *ptySession) waitExit(timeout time.Duration) (int, bool) {
+	select {
+	case <-ps.exited:
+		return ps.exitCode, ps.exitCode >= 0
+	case <-time.After(timeout):
+		return 0, false
+	}
+}
+
+// processExitCode is state's exit status, shell style: 128+N for a command killed
+// by signal N. -1 if there is no state to tell.
+func processExitCode(state *os.ProcessState) int {
+	if state == nil {
+		return -1
+	}
+	if code := state.ExitCode(); code >= 0 {
+		return code
+	}
+	return signaledExitCode(state)
 }
 
 // closePty closes ptmx at most once, however many of startOutputReader's own
@@ -247,7 +278,7 @@ func (p *interactiveShellSession) startPtySession(transport shellTransport, shel
 		_ = ptmx.Close()
 		return nil, nil, fmt.Errorf("failed to start PTY: %w", err)
 	}
-	ps := &ptySession{transport: transport}
+	ps := &ptySession{transport: transport, exited: make(chan struct{})}
 	// Nothing else calls Wait, so without this the process stays a zombie
 	// (invisible to killShellProcessGroup, but still a process-table entry)
 	// forever after it exits, however that happens. closePtyOnProcessExit
@@ -255,6 +286,8 @@ func (p *interactiveShellSession) startPtySession(transport shellTransport, shel
 	// pty doesn't signal that on its own -- see its doc comment.
 	common.SafeGo(func() {
 		_ = cmd.Wait()
+		ps.exitCode = processExitCode(cmd.ProcessState)
+		close(ps.exited)
 		closePtyOnProcessExit(ps, ptmx)
 	})
 	// go-pty keeps its own slave fd open for the pty's lifetime; without closing
@@ -305,8 +338,27 @@ func (p *interactiveShellSession) startOutputReader(ptmx pty.Pty, ps *ptySession
 			}
 		}
 		if err != nil {
+			p.reportExit(ps, transport, shellID)
 			_ = transport.close()
 			return
 		}
 	}
+}
+
+// reportExit sends the command's exit status on transport once its output has ended.
+// A command whose output ended while it keeps running (it closed the terminal but
+// didn't exit) is killed, as the cleanup after this would do anyway, and that is
+// what gets reported.
+func (p *interactiveShellSession) reportExit(ps *ptySession, transport shellTransport, shellID string) {
+	code, ok := ps.waitExit(exitWaitTimeout)
+	if !ok {
+		p.Lock()
+		pid := p.pids[shellID]
+		p.Unlock()
+		killShellProcessGroup(pid)
+		if code, ok = ps.waitExit(exitWaitTimeout); !ok {
+			return
+		}
+	}
+	_ = transport.writeExit(code)
 }
