@@ -2,7 +2,9 @@ package deskconn_test
 
 import (
 	"bytes"
+	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -54,5 +56,46 @@ func TestShellConcurrentFrames(t *testing.T) {
 	}
 	for _, count := range counts {
 		require.Equal(t, frames, count)
+	}
+}
+
+func TestShellStdinEOF(t *testing.T) {
+	const line = "abc\n"
+	key := bytes.Repeat([]byte{7}, 32)
+	tests := []struct {
+		name       string
+		input      string
+		forwardEOF bool
+		want       string
+	}{
+		{"complete line", line, true, line + "\x04"},
+		{"partial line", "abc", true, "abc\x04\x04"},
+		{"empty", "", true, "\x04"},
+		{"terminal", line, false, line},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, server := net.Pipe()
+			t.Cleanup(func() { _ = server.Close() })
+			require.NoError(t, server.SetDeadline(time.Now().Add(5*time.Second)))
+			go func() {
+				deskconn.RunShellStdin(client, key, strings.NewReader(tt.input), tt.forwardEOF)
+				_ = client.Close()
+			}()
+
+			var got []byte
+			for {
+				frame, err := common.ReadFrame(server)
+				if err != nil {
+					require.ErrorIs(t, err, io.EOF)
+					break
+				}
+				kind, plaintext, err := common.DecryptEnvelope(frame, key)
+				require.NoError(t, err)
+				require.Equal(t, common.ShellMsgData, kind)
+				got = append(got, plaintext...)
+			}
+			require.Equal(t, tt.want, string(got))
+		})
 	}
 }

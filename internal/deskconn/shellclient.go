@@ -208,19 +208,42 @@ func (a *activeShellConn) cleanupCurrent() {
 	}
 }
 
-func shellStdinLoop(active *activeShellConn, stdin io.Reader) {
-	buf := make([]byte, 1024)
-	for {
-		n, err := stdin.Read(buf)
+// ptyEOF is the end-of-file character of the machine's PTY: a command reading it sees end
+// of input once it arrives at the start of a line.
+const ptyEOF = 0x04
+
+// shellStdinLoop forwards stdin to the machine's PTY. When stdin isn't a terminal, its end
+// (a pipe closing, the end of a file, /dev/null) is passed on as ptyEOF, so a command
+// reading it finishes instead of waiting for more; after a partial last line it's sent
+// twice, as the first only completes the line.
+func shellStdinLoop(active *activeShellConn, stdin io.Reader, forwardEOF bool) {
+	send := func(data []byte) {
+		conn, sendKey, _ := active.get()
+		envelope, err := common.BuildShellEnvelope(common.ShellMsgData, data, sendKey)
 		if err != nil {
 			return
 		}
-		conn, sendKey, _ := active.get()
-		envelope, err := common.BuildShellEnvelope(common.ShellMsgData, buf[:n], sendKey)
-		if err != nil {
-			continue
-		}
 		_ = conn.sendEnvelope(envelope)
+	}
+	buf := make([]byte, 1024)
+	lineStart := true
+	for {
+		n, err := stdin.Read(buf)
+		if data := buf[:n]; len(data) > 0 {
+			send(data)
+			last := data[len(data)-1]
+			lineStart = last == '\n' || last == '\r'
+		}
+		if err != nil {
+			if forwardEOF && !errors.Is(err, cancelreader.ErrCanceled) {
+				if lineStart {
+					send([]byte{ptyEOF})
+				} else {
+					send([]byte{ptyEOF, ptyEOF})
+				}
+			}
+			return
+		}
 	}
 }
 
@@ -390,8 +413,10 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	} else if term.IsTerminal(fd) {
 		return err
 	}
-	go shellStdinLoop(active, stdin)
-	go shellResizeLoop(active, sizeFd, done)
+	go shellStdinLoop(active, stdin, !term.IsTerminal(fd))
+	if term.IsTerminal(sizeFd) {
+		go shellResizeLoop(active, sizeFd, done)
+	}
 	go shellPingLoop(active, done)
 
 	migrateCtrl := common.ShellControlMsg{
