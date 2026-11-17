@@ -3,7 +3,9 @@
 $ErrorActionPreference = 'Stop'
 
 $Repo        = 'xconnio/deskconn'
-$ServiceName = 'deskconn-userd'
+$ServiceName = 'DeskConn'
+# The scheduled task the daemon ran as before; installs from then move to $ServiceName.
+$LegacyServiceName = 'deskconn-userd'
 $InstallDir  = "$env:LOCALAPPDATA\deskconn"
 $BinDir      = "$InstallDir\bin"
 $ExecDir     = "$InstallDir\exec"
@@ -58,9 +60,13 @@ try {
     # be overwritten. (Stop-ScheduledTask doesn't kill the process; the task's registered
     # action just re-launches the exe, so the running instance is what actually holds the
     # file open.)
-    if (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue) {
-        Write-Host "Stopping existing $ServiceName task before upgrade..."
-        Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+    $existingTasks = @($ServiceName, $LegacyServiceName) |
+        Where-Object { Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue }
+    if ($existingTasks) {
+        foreach ($task in $existingTasks) {
+            Write-Host "Stopping existing $task task before upgrade..."
+            Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+        }
         Get-Process -Name deskconn -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
     }
@@ -120,11 +126,34 @@ if (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue) {
     Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
 }
 
-Register-ScheduledTask -TaskName $ServiceName -Action $Action -Trigger $Trigger `
-    -Principal $Principal -Settings $Settings -Force | Out-Null
+# Both tasks run the daemon, which can't run twice: the old one is turned off first, and only
+# removed once the new one has started, to go back to if it doesn't.
+$migrating = [bool](Get-ScheduledTask -TaskName $LegacyServiceName -ErrorAction SilentlyContinue)
+if ($migrating) {
+    Write-Host "Renaming the $LegacyServiceName task to $ServiceName..."
+    Stop-ScheduledTask -TaskName $LegacyServiceName -ErrorAction SilentlyContinue
+    Disable-ScheduledTask -TaskName $LegacyServiceName | Out-Null
+}
 
-# The trigger only fires on future logons; start it now so the daemon is running
-# immediately after install, in this same logon session.
-Start-ScheduledTask -TaskName $ServiceName
+try {
+    Register-ScheduledTask -TaskName $ServiceName -Action $Action -Trigger $Trigger `
+        -Principal $Principal -Settings $Settings -Force | Out-Null
 
-Write-Host "Scheduled task $ServiceName installed and started - deskconn-userd will run in your session at logon!"
+    # The trigger only fires on future logons; start it now so the daemon is running
+    # immediately after install, in this same logon session.
+    Start-ScheduledTask -TaskName $ServiceName
+} catch {
+    if ($migrating) {
+        Write-Host "The $ServiceName task didn't start, so $LegacyServiceName was kept."
+        Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false -ErrorAction SilentlyContinue
+        Enable-ScheduledTask -TaskName $LegacyServiceName | Out-Null
+        Start-ScheduledTask -TaskName $LegacyServiceName -ErrorAction SilentlyContinue
+    }
+    throw
+}
+
+if ($migrating) {
+    Unregister-ScheduledTask -TaskName $LegacyServiceName -Confirm:$false
+}
+
+Write-Host "Scheduled task $ServiceName installed and started - deskconn will run in your session at logon!"

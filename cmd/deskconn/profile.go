@@ -38,7 +38,7 @@ func registerProfileCommands(app *kingpin.Application, cfgDirectory string) *pro
 	addURL := addCmd.Flag("url", "The machine's URL: quic://host:port, or https://host:port "+
 		"for WebTransport").Required().String()
 	addCertHash := addCmd.Flag("cert-hash", "SHA-256 fingerprint of the machine's certificate, "+
-		"as deskconn-userd prints it, to trust it even if self-signed (default: verify against trusted CAs)").String()
+		"as the deskconn daemon prints it, to trust it even if self-signed (default: verify against trusted CAs)").String()
 	addKey := addCmd.Flag("private-key", "Private key (hex) to authenticate with; see `desk keygen`. "+
 		"Without it, a password is asked for on each use").String()
 	addAuthID := addCmd.Flag("authid", "Authid (username) to present (default: current user)").String()

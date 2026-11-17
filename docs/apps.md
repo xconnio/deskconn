@@ -1,17 +1,17 @@
 # Adding an app
 
-Apps beyond deskconn-userd's own (Files, Terminal, Resource Monitor, Text Editor) run as their own processes, like
+Apps beyond the daemon's own (Files, Terminal, Resource Monitor, Text Editor) run as their own processes, like
 [deskconn-media](https://github.com/xconnio/deskconn-media) and
 [deskconn-remote-control](https://github.com/xconnio/deskconn-remote-control).
-An app needs no code in deskconn: it connects to deskconn-userd's local socket, registers its procedures there, and
-tells deskconn-userd which apps it serves. deskconn-userd lists them to clients (the web app shows an app only while
+An app needs no code in deskconn: it connects to the daemon's local socket, registers its procedures there, and
+tells the daemon which apps it serves. The daemon lists them to clients (the web app shows an app only while
 it's listed and enabled), owners and admins enable or disable them (`desk app enable|disable`), and xconn exposes
 their procedures over routed and direct connections.
 
 1. **Connect** to the local daemon with `appkit.Connect` (realm `io.xconn.deskconn.local`).
    This uses a Unix socket, or authenticated loopback yamux on Windows.
-   Reconnect when deskconn-userd restarts.
-2. **Register a key exchange.** deskconn only supports end-to-end encrypted apps: deskconn-userd refuses an app without one.
+   Reconnect when the daemon restarts.
+2. **Register a key exchange.** deskconn only supports end-to-end encrypted apps: the daemon refuses an app without one.
    Clients call it with their X25519 public key and get the app's; both sides derive their keys with HKDF-SHA256,
    `frontendToBackend` for requests and `backendToFrontend` for results. Every other procedure takes its request as a
    single encrypted JSON argument (nonce + ChaCha20-Poly1305 ciphertext, empty or absent when there is none) and returns

@@ -9,7 +9,7 @@ import (
 	"github.com/xconnio/xconn/bindings/go"
 )
 
-var ErrDaemonUnavailable = errors.New("deskconn-userd unavailable")
+var ErrDaemonUnavailable = errors.New("deskconn daemon unavailable")
 
 // DaemonStreams uses the daemon's cached machine session through ordinary RPCs.
 // Each forwarded stream pins its connection until it finishes.

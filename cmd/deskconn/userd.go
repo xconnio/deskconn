@@ -28,10 +28,6 @@ import (
 // still open on to their clients before its connections go down.
 const streamCloseGrace = 500 * time.Millisecond
 
-// userdService is the service the user daemon runs as: a systemd user service on Linux,
-// a scheduled task on Windows.
-const userdService = "deskconn-userd"
-
 // standaloneUsersFile is the database of the users added in standalone mode, in the config
 // directory.
 const standaloneUsersFile = "standalone-users.db"
@@ -43,6 +39,7 @@ const standaloneWebSocketAddress = "127.0.0.1:18082"
 // runUserd is the user daemon: the machine's APIs and its connectivity (xconn).
 func runUserd(flags userdFlags, standalone bool) {
 	detachConsole()
+	migrateServiceOnStart()
 
 	fixedUsers, err := standaloneAuth(flags, standalone)
 	if err != nil {

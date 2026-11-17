@@ -56,31 +56,28 @@ func dispatchSelfCommand(parsedCmd string, cmds *selfCommands, cfgDirectory stri
 }
 
 // The installed layout: the deskconn binary lives in ~/.local/lib/exec, desk on the PATH
-// is a symlink to it, and the deskconn-userd service runs it as "deskconn serve --mode user".
+// is a symlink to it, and the deskconn service runs it as "deskconn serve --mode user".
 const (
 	binaryName = "deskconn"
 	cliName    = "desk"
 )
 
-// launchdLabel is the launchd agent install.sh runs deskconn-userd as on macOS.
-const launchdLabel = "com.deskconn." + userdService
-
-// launchdTarget is the deskconn-userd agent in the current user's GUI session.
-func launchdTarget() string {
-	return fmt.Sprintf("gui/%d/%s", os.Getuid(), launchdLabel)
+// launchdTarget is the label launchd agent in the current user's GUI session.
+func launchdTarget(label string) string {
+	return fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
 }
 
-// launchdAgentLoaded reports whether the deskconn-userd launchd agent is loaded.
-func launchdAgentLoaded() bool {
-	return exec.Command("launchctl", "print", launchdTarget()).Run() == nil // nolint: gosec
+// launchdAgentLoaded reports whether the label launchd agent is loaded.
+func launchdAgentLoaded(label string) bool {
+	return exec.Command("launchctl", "print", launchdTarget(label)).Run() == nil // nolint: gosec
 }
 
-// launchdPlist is where install.sh writes the deskconn-userd agent's plist.
-func launchdPlist(homeDir string) string {
-	return filepath.Join(homeDir, "Library", "LaunchAgents", launchdLabel+".plist")
+// launchdPlist is where install.sh writes the label agent's plist.
+func launchdPlist(homeDir, label string) string {
+	return filepath.Join(homeDir, "Library", "LaunchAgents", label+".plist")
 }
 
-// launchdLogDir is where install.sh has launchd write the deskconn-userd agent's output.
+// launchdLogDir is where install.sh has launchd write the deskconn agent's output.
 func launchdLogDir(homeDir string) string {
 	return filepath.Join(homeDir, "Library", "Logs", "deskconn")
 }
@@ -115,35 +112,51 @@ func updateApp() error {
 		return err
 	}
 
-	if err := restartUserd(); err != nil {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home dir: %w", err)
+	}
+	// Moving the service from deskconn-userd starts it with the new binary already.
+	migrated, err := migrateService(homeDir)
+	if err != nil {
 		return err
+	}
+	if !migrated {
+		if err := restartUserd(); err != nil {
+			return err
+		}
 	}
 
 	fmt.Printf("Updated desk from version %s to %s.\n", version, updateResp.LatestVersion)
 	return nil
 }
 
-// restartUserd restarts the deskconn-userd service so it runs the updated binary. On macOS
-// it's only restarted when it runs as the launchd agent install.sh sets up; started any
-// other way, it's left for the user to restart.
+// restartUserd restarts the deskconn service so it runs the updated binary. On macOS it's
+// only restarted when it runs as the launchd agent install.sh sets up; started any other
+// way, it's left for the user to restart. An agent still named as before the rename is
+// restarted as it is: install.sh renames it.
 func restartUserd() error {
-	cmd := exec.Command("systemctl", "--user", "restart", userdService) // nolint: gosec
+	cmd := exec.Command("systemctl", "--user", "restart", serviceName) // nolint: gosec
 	if runtime.GOOS == "darwin" {
-		if !launchdAgentLoaded() {
+		label := launchdLabel
+		if !launchdAgentLoaded(label) && launchdAgentLoaded(legacyLaunchdLabel) {
+			label = legacyLaunchdLabel
+		}
+		if !launchdAgentLoaded(label) {
 			fmt.Printf("%s isn't running as the %s launchd agent, so it wasn't restarted.\n",
-				userdService, launchdLabel)
+				serviceName, launchdLabel)
 			fmt.Println("Restart it yourself to run the new version.")
 			return nil
 		}
-		cmd = exec.Command("launchctl", "kickstart", "-k", launchdTarget()) // nolint: gosec
+		cmd = exec.Command("launchctl", "kickstart", "-k", launchdTarget(label)) // nolint: gosec
 		forgetFullDiskAccess()
 	}
 
-	fmt.Printf("Restarting %s service...\n", userdService)
+	fmt.Printf("Restarting %s service...\n", serviceName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to restart %s: %w", userdService, err)
+		return fmt.Errorf("failed to restart %s: %w", serviceName, err)
 	}
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		reportFullDiskAccess(homeDir)
@@ -233,11 +246,16 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		return fmt.Errorf("failed to get user home dir: %w", err)
 	}
 
-	serviceFile := filepath.Join(homeDir, ".config", "systemd", "user", userdService+".service")
-	if _, err := os.Stat(serviceFile); err == nil {
-		fmt.Printf("Stopping %s service...\n", userdService)
-		_ = exec.Command("systemctl", "--user", "stop", userdService).Run()    // nolint: gosec
-		_ = exec.Command("systemctl", "--user", "disable", userdService).Run() // nolint: gosec
+	// The service may still be deskconn-userd, as before the rename, or be both midway through
+	// it.
+	for _, name := range []string{serviceName, legacyServiceName} {
+		serviceFile := filepath.Join(homeDir, ".config", "systemd", "user", name+".service")
+		if _, err := os.Stat(serviceFile); err != nil {
+			continue
+		}
+		fmt.Printf("Stopping %s service...\n", name)
+		_ = exec.Command("systemctl", "--user", "stop", name).Run()    // nolint: gosec
+		_ = exec.Command("systemctl", "--user", "disable", name).Run() // nolint: gosec
 		if err := os.Remove(serviceFile); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove service file: %w", err)
 		}
@@ -245,10 +263,13 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 	}
 
 	if runtime.GOOS == "darwin" {
-		plist := launchdPlist(homeDir)
-		if _, err := os.Stat(plist); err == nil {
-			fmt.Printf("Stopping %s service...\n", userdService)
-			_ = exec.Command("launchctl", "bootout", launchdTarget()).Run() // nolint: gosec
+		for _, label := range []string{launchdLabel, legacyLaunchdLabel} {
+			plist := launchdPlist(homeDir, label)
+			if _, err := os.Stat(plist); err != nil {
+				continue
+			}
+			fmt.Printf("Stopping %s service...\n", label)
+			_ = exec.Command("launchctl", "bootout", launchdTarget(label)).Run() // nolint: gosec
 			if err := os.Remove(plist); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("failed to remove launchd plist: %w", err)
 			}

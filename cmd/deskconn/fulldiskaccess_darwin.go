@@ -69,7 +69,7 @@ func reportFullDiskAccess(homeDir string) {
 				fmt.Println("update it has to be added again: in System Settings > Privacy & Security > Full Disk Access,")
 				fmt.Println("remove any old deskconn entry and add:")
 				fmt.Printf("  %s\n", filepath.Join(execDir, "deskconn"))
-				fmt.Printf("Then restart it with:  launchctl kickstart -k %s\n", launchdTarget())
+				fmt.Printf("Then restart it with:  launchctl kickstart -k %s\n", launchdTarget(launchdLabel))
 			}
 			return
 		}

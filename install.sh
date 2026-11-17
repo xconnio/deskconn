@@ -135,10 +135,10 @@ install_service_linux() {
     local systemd_user_dir="$HOME/.config/systemd/user"
 
     # systemd --user services don't reliably inherit DISPLAY/WAYLAND_DISPLAY from
-    # the desktop session, so deskconn-userd can't tell a desktop from a headless
+    # the desktop session, so the daemon can't tell a desktop from a headless
     # server apart without them being exported explicitly. Capture them from the
     # installer's own environment: on a real desktop session they'll be set here;
-    # on a headless server they won't, and deskconn-userd will register server-only
+    # on a headless server they won't, and the daemon will register server-only
     # APIs (no wallpaper/display RPCs).
     local userd_env_lines="Environment=TERM=xterm-256color"
     if [ -n "${DISPLAY:-}" ]; then
@@ -173,7 +173,58 @@ Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 
     mkdir -p "$systemd_user_dir"
 
-    cat > "$systemd_user_dir/deskconn-userd.service" <<EOL
+    local unit_file="$systemd_user_dir/deskconn.service"
+    local drop_ins="$systemd_user_dir/deskconn.service.d"
+    local legacy_unit_file="$systemd_user_dir/deskconn-userd.service"
+    local legacy_drop_ins="$systemd_user_dir/deskconn-userd.service.d"
+
+    # The daemon ran as deskconn-userd before. Keep what that service had: the environment
+    # captured when it was installed (a desktop's DISPLAY, say, while this runs over ssh), and
+    # its drop-ins, with the flags and variables added to it. Its unit stays until deskconn
+    # runs, to go back to if it doesn't.
+    #
+    # Both run the daemon, which can't run twice, so deskconn-userd must stop before deskconn
+    # starts. Stopping it here would also stop this script when it runs in a desk shell on this
+    # machine (it's in deskconn-userd's cgroup then), leaving neither running. Instead, a
+    # drop-in makes deskconn conflict with deskconn-userd, so the one start below stops it first,
+    # which systemd carries out even if this script is stopped along the way; the daemon then
+    # removes deskconn-userd's leftovers itself.
+    local migrating=""
+    if [ -f "$legacy_unit_file" ]; then
+        migrating=1
+        echo "Renaming the deskconn-userd service to deskconn..."
+        local line name
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+                Environment=*)
+                    name="${line#Environment=}"
+                    name="${name#\"}"
+                    name="${name%%=*}"
+                    case "$userd_env_lines" in
+                        *"Environment=$name="*) ;;
+                        *) userd_env_lines="$userd_env_lines
+$line" ;;
+                    esac
+                    ;;
+            esac
+        done < "$legacy_unit_file"
+        if [ -d "$legacy_drop_ins" ]; then
+            mkdir -p "$drop_ins"
+            # A drop-in that's a symlink (to a dotfiles repository, say) stays one: -P.
+            for drop_in in "$legacy_drop_ins"/*; do
+                local dest
+                dest="$drop_ins/$(basename "$drop_in")"
+                if { [ -f "$drop_in" ] || [ -L "$drop_in" ]; } && [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
+                    cp -P "$drop_in" "$dest"
+                fi
+            done
+        fi
+        mkdir -p "$drop_ins"
+        printf '[Unit]\nConflicts=deskconn-userd.service\nAfter=deskconn-userd.service\n' \
+            > "$drop_ins/50-migrate-from-deskconn-userd.conf"
+    fi
+
+    cat > "$unit_file" <<EOL
 [Unit]
 Description=deskconn user daemon (connectivity, shell, files, VPN control, ...)
 After=network.target
@@ -190,23 +241,41 @@ EOL
 
     systemctl --user daemon-reload
 
-    if systemctl --user is-enabled --quiet deskconn-userd; then
-        echo "Service deskconn-userd exists. Restarting..."
-        systemctl --user restart deskconn-userd
+    if [ -n "$migrating" ]; then
+        systemctl --user disable deskconn-userd 2>/dev/null || true
+        if ! systemctl --user enable deskconn || ! systemctl --user restart deskconn; then
+            echo "The deskconn service didn't start, so deskconn-userd was kept." >&2
+            systemctl --user stop deskconn 2>/dev/null || true
+            systemctl --user disable deskconn 2>/dev/null || true
+            rm -f "$unit_file" "$drop_ins/50-migrate-from-deskconn-userd.conf"
+            systemctl --user daemon-reload
+            systemctl --user enable deskconn-userd 2>/dev/null || true
+            systemctl --user start deskconn-userd 2>/dev/null || true
+            exit 1
+        fi
+        rm -f "$legacy_unit_file" "$drop_ins/50-migrate-from-deskconn-userd.conf"
+        rm -rf "$legacy_drop_ins"
+        systemctl --user daemon-reload
+        systemctl --user reset-failed deskconn-userd 2>/dev/null || true
+    elif systemctl --user is-enabled --quiet deskconn; then
+        echo "Service deskconn exists. Restarting..."
+        systemctl --user restart deskconn
     else
-        echo "Enabling and starting deskconn-userd..."
-        systemctl --user enable deskconn-userd
-        systemctl --user start deskconn-userd
+        echo "Enabling and starting deskconn..."
+        systemctl --user enable deskconn
+        systemctl --user start deskconn
     fi
-    echo "Systemd service deskconn-userd installed and started!"
+    echo "Systemd service deskconn installed and started!"
 }
 
 # The user daemon runs as a per-user launchd agent in the GUI session - the macOS
 # equivalent of "systemctl --user" on Linux and the logon scheduled task on Windows.
 install_service_darwin() {
-    local label="com.deskconn.deskconn-userd"
+    local label="com.deskconn.deskconn"
+    local legacy_label="com.deskconn.deskconn-userd"
     local domain="gui/$(id -u)"
     local plist_file="$HOME/Library/LaunchAgents/$label.plist"
+    local legacy_plist_file="$HOME/Library/LaunchAgents/$legacy_label.plist"
     local log_dir="$HOME/Library/Logs/deskconn"
 
     echo "Setting up launchd agent $label..."
@@ -241,14 +310,31 @@ install_service_darwin() {
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>$log_dir/deskconn-userd.log</string>
+    <string>$log_dir/deskconn.log</string>
     <key>StandardErrorPath</key>
-    <string>$log_dir/deskconn-userd.log</string>
+    <string>$log_dir/deskconn.log</string>
 </dict>
 </plist>
 EOL
 
+    # The agent was $legacy_label before. Keep the variables added to it; its plist stays
+    # until $label loads, to go back to if it doesn't.
+    local migrating=""
+    if [ -f "$legacy_plist_file" ]; then
+        migrating=1
+        echo "Renaming the $legacy_label agent to $label..."
+        local legacy_env
+        legacy_env="$(mktemp)"
+        if plutil -extract EnvironmentVariables xml1 -o "$legacy_env" "$legacy_plist_file" 2>/dev/null; then
+            # Adds only the variables the new plist doesn't set itself.
+            /usr/libexec/PlistBuddy -c "Merge $legacy_env :EnvironmentVariables" "$plist_file" >/dev/null 2>&1 || true
+        fi
+        rm -f "$legacy_env"
+    fi
+
     if ! launchctl print "$domain" >/dev/null 2>&1; then
+        # Not loaded now, so nothing to stop: only one of them may load at next login.
+        rm -f "$legacy_plist_file"
         echo "No GUI session for $(id -un), so the agent wasn't loaded now. It will start at next login."
         echo "Start the daemon manually with:  $EXEC_DIR/deskconn serve --mode user"
         return
@@ -257,16 +343,19 @@ EOL
     # Unload a running agent first so the rewritten plist (and the new binary) are what
     # gets loaded; bootout returns before the agent is fully gone, and bootstrapping it
     # again before then fails.
-    if launchctl print "$domain/$label" >/dev/null 2>&1; then
-        echo "Agent $label exists. Restarting..."
-        launchctl bootout "$domain/$label" 2>/dev/null || true
-        for _ in 1 2 3 4 5 6 7 8 9 10; do
-            launchctl print "$domain/$label" >/dev/null 2>&1 || break
-            sleep 0.5
-        done
-    else
-        echo "Enabling and starting $label..."
-    fi
+    # The old agent too, as both run the daemon, which can't run twice.
+    local running
+    for running in "$label" "$legacy_label"; do
+        if launchctl print "$domain/$running" >/dev/null 2>&1; then
+            echo "Agent $running exists. Stopping it..."
+            launchctl bootout "$domain/$running" 2>/dev/null || true
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                launchctl print "$domain/$running" >/dev/null 2>&1 || break
+                sleep 0.5
+            done
+        fi
+    done
+    echo "Enabling and starting $label..."
     rm -f "$FULL_DISK_ACCESS_FILE"
     launchctl enable "$domain/$label"
     local loaded=""
@@ -277,22 +366,33 @@ EOL
         fi
         sleep 1
     done
+    if [ -z "$loaded" ] && [ -n "$migrating" ]; then
+        echo "Couldn't load $label, so $legacy_label was kept." >&2
+        rm -f "$plist_file"
+        launchctl enable "$domain/$legacy_label" 2>/dev/null || true
+        launchctl bootstrap "$domain" "$legacy_plist_file" 2>/dev/null || true
+        exit 1
+    fi
     if [ -z "$loaded" ]; then
         echo "Couldn't load $label (the old agent may still be exiting). It will start at next login."
         echo "Start it now with:  launchctl bootstrap $domain $plist_file"
         return
     fi
-    echo "launchd agent $label installed and started - deskconn-userd will run in your session at login!"
+    if [ -n "$migrating" ]; then
+        launchctl disable "$domain/$legacy_label" 2>/dev/null || true
+        rm -f "$legacy_plist_file"
+    fi
+    echo "launchd agent $label installed and started - deskconn will run in your session at login!"
 
     request_full_disk_access "$domain/$label"
 }
 
-# deskconn-userd records here, at startup, whether it has Full Disk Access ("granted" or
+# The daemon records here, at startup, whether it has Full Disk Access ("granted" or
 # "missing"). Only it can tell: macOS decides that for the process asking, so checking from
 # this script would test the terminal's access instead.
 FULL_DISK_ACCESS_FILE="$HOME/.deskconn/full-disk-access"
 
-# full_disk_access_status waits for deskconn-userd to (re)write FULL_DISK_ACCESS_FILE, then
+# full_disk_access_status waits for the daemon to (re)write FULL_DISK_ACCESS_FILE, then
 # prints its status, or "unknown" if the daemon didn't get that far.
 full_disk_access_status() {
     for _ in $(seq 1 20); do
@@ -305,7 +405,7 @@ full_disk_access_status() {
     echo unknown
 }
 
-# Without Full Disk Access, macOS asks separately the first time deskconn-userd reads each
+# Without Full Disk Access, macOS asks separately the first time the daemon reads each
 # protected place (Desktop, Documents, Downloads, external and network volumes, other apps'
 # data), and a command-line tool can't ask for those up front. One Full Disk Access grant
 # covers them all, but only the user can switch it on, in System Settings: open it at the

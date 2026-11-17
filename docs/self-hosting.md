@@ -35,8 +35,8 @@ WebRTC uses a public STUN server only. To also relay through your own TURN serve
 export DESKCONN_TURN_URL=turn:turn.example.com:3478 DESKCONN_TURN_USERNAME=<user> DESKCONN_TURN_PASSWORD=<password>
 ```
 
-The deskconn-userd service doesn't inherit your shell's environment; add the variables to it with
-`systemctl --user edit deskconn-userd`:
+The deskconn service doesn't inherit your shell's environment; add the variables to it with
+`systemctl --user edit deskconn`:
 
 ```ini
 [Service]
@@ -58,7 +58,7 @@ Then follow [Getting started](../README.md#getting-started) from step 2 with the
 foreground:
 
 ```bash
-systemctl --user stop deskconn-userd   # if the official release is installed; it shares ~/.deskconn
+systemctl --user stop deskconn   # if the official release is installed; it shares ~/.deskconn
 bin/desk machine attach --username <email>
 bin/desk serve
 ```

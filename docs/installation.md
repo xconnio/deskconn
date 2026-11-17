@@ -16,21 +16,25 @@ On Linux, this installs one binary, `deskconn`, to `~/.local/lib/exec`, with `de
 | Command                        | Role                                                                                      |
 |--------------------------------|-------------------------------------------------------------------------------------------|
 | `desk`                         | The CLI                                                                                   |
-| `desk serve --mode user`       | User daemon (`deskconn-userd`), run by the `deskconn-userd` systemd user service at login |
+| `desk serve --mode user`       | User daemon, run by the `deskconn` systemd user service at login                          |
 | `desk serve --mode standalone` | User daemon serving the machine directly, without the cloud (see below)                   |
 | `desk serve --mode root`       | Root helper (`deskconn-rootd`), started on demand with `sudo` as `deskconn-rootd.service` |
 
 On macOS, the user daemon runs as the
-`com.deskconn.deskconn-userd` launchd agent in your login session, with logs in
-`~/Library/Logs/deskconn`. The root helper and VPN serving are unavailable on macOS.
+`com.deskconn.deskconn` launchd agent in your login session, with logs in
+`~/Library/Logs/deskconn/deskconn.log`. The root helper and VPN serving are unavailable on macOS.
 DeskConn needs Full Disk Access (System Settings > Privacy & Security > Full Disk Access):
 without it, macOS asks separately the first time the daemon reads each protected folder (Desktop, Documents,
 Downloads, external drives, ...).
 
 On Windows, this installs the same binary to `%LOCALAPPDATA%\deskconn`, along with the [Wintun](https://www.wintun.net)
-driver that `deskconn vpn connect` uses, adds it to your `PATH`, and registers the user daemon as a scheduled task that
-starts at logon. Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
+driver that `deskconn vpn connect` uses, adds it to your `PATH`, and registers the user daemon as the `DeskConn` scheduled
+task, which starts at logon. Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
 (`desk.cpl`) and can't be safely overridden.
+
+On Linux, the daemon's logs are in the journal: `journalctl --user -u deskconn`. Before, the daemon ran as `deskconn-userd`
+(`com.deskconn.deskconn-userd` on macOS). Installing, updating with `desk self update`, or the daemon's first start
+after an update renames it, keeping its environment and the overrides added with `systemctl --user edit`.
 
 `deskconn vpn connect` brings up a UAC prompt, and while a tunnel is up Windows asks the tunnel's DNS resolvers first
 (a Linux exit node's own, or public resolvers through a Windows one), though its smart multi-homed name resolution may
@@ -49,7 +53,7 @@ All credentials and configuration are stored under `~/.deskconn/`:
 
 | File                    | Contents                                                                |
 |-------------------------|-------------------------------------------------------------------------|
-| `credentials.json`      | Machine attach credentials (realm, authid, keypair) used by `deskconn-userd` |
+| `credentials.json`      | Machine attach credentials (realm, authid, keypair) used by the daemon  |
 | `id_ed25519`            | CLI private key, username, and key expiry                               |
 | `id_ed25519.pub`        | CLI public key, username, and account name                              |
 | `config.yml`            | Machine list and aliases, and standalone machine profiles (`desk profile add`) with their private keys |
