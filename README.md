@@ -53,7 +53,7 @@ repositories.
 
 ## Installation
 
-On macOS and Linux:
+On Apple Silicon macOS and Linux:
 
 ```sh
 curl -fsSL https://get.deskconn.com/install.sh | sh

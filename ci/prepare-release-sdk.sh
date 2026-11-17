@@ -2,7 +2,7 @@
 set -euo pipefail
 
 version=0.6.0
-destination=${1:?Usage: prepare-release-sdk.sh DIRECTORY [linux_amd64|linux_arm64|windows_amd64]}
+destination=${1:?Usage: prepare-release-sdk.sh DIRECTORY [linux_amd64|linux_arm64|windows_amd64|darwin_arm64]}
 mkdir -p "$destination"
 destination=$(cd "$destination" && pwd)
 base=https://github.com/xconnio/xconn/releases/download/v$version
@@ -12,6 +12,7 @@ for platform in ${2:-linux_amd64 linux_arm64 windows_amd64}; do
     linux_amd64) target=x86_64-unknown-linux-gnu ;;
     linux_arm64) target=aarch64-unknown-linux-gnu ;;
     windows_amd64) target=x86_64-pc-windows-gnu ;;
+    darwin_arm64) target=aarch64-apple-darwin ;;
     *) echo "Unsupported platform: $platform" >&2; exit 1 ;;
   esac
   name=xconn-native-$version-$target-static
@@ -19,7 +20,11 @@ for platform in ${2:-linux_amd64 linux_arm64 windows_amd64}; do
   trap 'rm -rf "$temporary"' EXIT
   curl -fLsS "$base/$name.tar.gz" -o "$temporary/$name.tar.gz"
   curl -fLsS "$base/$name.tar.gz.sha256" -o "$temporary/$name.tar.gz.sha256"
-  (cd "$temporary" && sha256sum --check "$name.tar.gz.sha256")
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$temporary" && sha256sum --check "$name.tar.gz.sha256")
+  else
+    (cd "$temporary" && shasum -a 256 --check "$name.tar.gz.sha256")
+  fi
   tar -xzf "$temporary/$name.tar.gz" -C "$temporary"
   mkdir -p "$destination/$platform"
   cp -R "$temporary/$name/." "$destination/$platform/"

@@ -86,3 +86,26 @@ jobs:
             echo 'Release binary must not depend on XConn or MinGW runtime DLLs' >&2
             exit 1
           fi
+
+  macos:
+    name: macOS ARM64
+    runs-on: macos-latest
+    env:
+      CGO_ENABLED: '1'
+      CC: clang
+      # macOS temp paths plus Go test names can exceed Unix socket limits.
+      TMPDIR: /tmp
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install pkg-config
+        run: brew install pkgconf
+      - name: Test macOS native integration
+        run: |
+          ci/prepare-release-sdk.sh "$RUNNER_TEMP/xconn-sdk" darwin_arm64
+          export PKG_CONFIG_PATH="$RUNNER_TEMP/xconn-sdk/darwin_arm64/lib/pkgconfig"
+          go test -tags xconn_static -timeout=180s ./internal/common ./internal/connectivity ./internal/userd ./cmd/deskconn
+          XCONN_RELEASE_SDK="$RUNNER_TEMP/xconn-sdk" ci/build-macos-release.sh "$RUNNER_TEMP/macos-release"

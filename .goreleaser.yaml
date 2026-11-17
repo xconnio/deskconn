@@ -74,8 +74,15 @@ archives:
       - src: build/wintun/wintun-LICENSE.txt
         strip_parent: true
 
+# Built on Apple Silicon, then published with the other platforms in one release.
+release:
+  extra_files:
+    - glob: build/macos-release/*.tar.gz
+
 checksum:
   name_template: checksums.txt
+  extra_files:
+    - glob: build/macos-release/*.tar.gz
 
 changelog:
   sort: asc

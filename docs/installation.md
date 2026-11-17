@@ -1,7 +1,7 @@
 # Installation and local configuration
 
 ```bash
-# On macOS and Linux.
+# On Apple Silicon macOS and Linux.
 curl -fsSL https://get.deskconn.com/install.sh | sh
 ```
 

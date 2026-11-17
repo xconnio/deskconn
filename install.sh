@@ -10,9 +10,7 @@ case "$(uname -s)" in
         OS="linux"
         ;;
     Darwin)
-        echo "Prebuilt macOS releases are not currently available." >&2
-        echo "For source builds, see https://github.com/xconnio/deskconn/blob/main/docs/native-xconn.md" >&2
-        exit 1
+        OS="darwin"
         ;;
     *)
         echo "Unsupported OS: $(uname -s). For Windows, use install.ps1 instead."
@@ -36,6 +34,11 @@ case "$ARCH" in
         exit 1
         ;;
 esac
+
+if [ "$OS" = "darwin" ] && [ "$GO_ARCH" != "arm64" ]; then
+    echo "Prebuilt macOS releases support Apple Silicon (arm64) only." >&2
+    exit 1
+fi
 
 echo "Resolving latest release..."
 VERSION="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')"

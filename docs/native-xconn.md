@@ -53,7 +53,7 @@ build uses the `xconn_static`, `netgo`, and `osusergo` Go tags and external stat
 linking. Linux glibc runtime facilities may still load system modules; this does
 not promise a hermetic executable on every Linux distribution.
 
-## Releases and Windows
+## Releases
 
 Releases build Linux amd64/arm64 and Windows amd64 using the matching published
 static SDKs. GoReleaser enables Cgo and selects GCC, ARM64 GCC or MinGW-w64 GCC.
@@ -61,8 +61,11 @@ static SDKs. GoReleaser enables Cgo and selects GCC, ARM64 GCC or MinGW-w64 GCC.
 workflow installs these toolchains before building. Windows arm64 is excluded
 because XConn does not support it yet.
 
-Prebuilt macOS releases are disabled for now. macOS source support is retained;
-the published native SDK supports source builds on Apple Silicon.
+Apple Silicon macOS releases build natively on a macOS ARM64 runner using the
+published static SDK. The resulting archive is published alongside Linux and
+Windows in the same release and checksum list. It needs no separate XConn library
+or Homebrew runtime libraries; macOS system libraries remain dynamically linked.
+Intel macOS releases are not provided.
 
 For a local Windows build, use an MSYS2 MinGW64 shell with Go, GCC and pkg-config:
 

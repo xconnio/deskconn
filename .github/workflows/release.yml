@@ -13,8 +13,38 @@ on:
       - 'v*'
 
 jobs:
+  macos:
+    name: Build macOS ARM64 archive
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install pkg-config
+        run: brew install pkgconf
+      - name: Build and check macOS release
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+        run: |
+          ci/prepare-release-sdk.sh "$RUNNER_TEMP/xconn-sdk" darwin_arm64
+          XCONN_RELEASE_SDK="$RUNNER_TEMP/xconn-sdk" ci/build-macos-release.sh build/macos-release "$RELEASE_TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-release
+          path: build/macos-release/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
   release-main:
     name: Tag and release main build
+    needs: macos
     if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -39,6 +69,11 @@ jobs:
         run: |
           ci/prepare-release-sdk.sh "$RUNNER_TEMP/xconn-sdk"
           echo "XCONN_RELEASE_SDK=$RUNNER_TEMP/xconn-sdk" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64-release
+          path: build/macos-release
 
       - name: Create and push release tag
         if: github.event_name == 'workflow_run'
