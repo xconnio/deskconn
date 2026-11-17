@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
 
   router:
-    image: xconnio/deskconn-router:latest
+    image: xconnio/deskconn-hub:latest
     environment:
       DESKCONN_POSTGRES_URL: "postgres://${ROUTER_DB_USER:-router}:${ROUTER_DB_PASSWORD:-router-password}@postgres:5432/deskconn_account_service?sslmode=disable&search_path=deskconn"
       DESKCONN_ROUTER_WT_HASH_ADDRESS: 0.0.0.0:8083

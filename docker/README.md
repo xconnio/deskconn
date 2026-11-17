@@ -6,7 +6,7 @@ Runs the full Deskconn stack locally from the published Docker Hub images (`late
 |-------------------|-------------------------------------------|-------------------------------------------------|
 | `postgres-init`   | `xconnio/deskconn-account-service:latest` | — (copies the Postgres init script, then exits) |
 | `postgres`        | `postgres:16`                             | —                                               |
-| `router`          | `xconnio/deskconn-router:latest`          | 8081/udp, 8082/udp, 8083, 8084                  |
+| `router`          | `xconnio/deskconn-hub:latest`             | 8081/udp, 8082/udp, 8083, 8084                  |
 | `migrate`         | `xconnio/deskconn-account-service:latest` | — (runs migrations once, then exits)            |
 | `account-service` | `xconnio/deskconn-account-service:latest` | —                                               |
 | `web-app`         | `xconnio/deskconn-web-app:latest`         | 3000                                            |
