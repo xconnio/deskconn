@@ -94,13 +94,13 @@ func TestDaemonStreamsTransferFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(src, content, 0600))
 
 	uploaded := filepath.Join(t.TempDir(), "uploaded.bin")
-	require.NoError(t, deskconn.UploadFiles(daemon, src, uploaded, false, 0))
+	require.NoError(t, deskconn.UploadFiles(daemon, src, uploaded, false, 0, nil))
 	got, err := os.ReadFile(uploaded)
 	require.NoError(t, err)
 	require.Equal(t, content, got)
 
 	downloaded := filepath.Join(t.TempDir(), "downloaded.bin")
-	require.NoError(t, deskconn.DownloadFiles(daemon, uploaded, downloaded, false, 0))
+	require.NoError(t, deskconn.DownloadFiles(daemon, uploaded, downloaded, false, 0, nil))
 	got, err = os.ReadFile(downloaded)
 	require.NoError(t, err)
 	require.Equal(t, content, got)
@@ -114,7 +114,7 @@ func TestDaemonStreamsReusesPersistentConnection(t *testing.T) {
 	require.NoError(t, err)
 	src := filepath.Join(t.TempDir(), "a.txt")
 	require.NoError(t, os.WriteFile(src, []byte("hello"), 0600))
-	require.NoError(t, deskconn.UploadFiles(daemon, src, filepath.Join(t.TempDir(), "b.txt"), false, 0))
+	require.NoError(t, deskconn.UploadFiles(daemon, src, filepath.Join(t.TempDir(), "b.txt"), false, 0, nil))
 
 	require.Equal(t, before, clientSessions.MachineSessions(), "the proxy must not replace the persistent connection")
 }

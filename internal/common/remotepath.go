@@ -2,11 +2,13 @@ package common
 
 import (
 	"fmt"
-	"os"
+	"io"
 	"time"
 )
 
-func PrintProgress(name string, received, total int64, elapsed time.Duration) {
+// PrintProgress redraws the progress line on w: it starts with a carriage return, so w
+// should be a terminal.
+func PrintProgress(w io.Writer, name string, received, total int64, elapsed time.Duration) {
 	const nameWidth = 40
 	runes := []rune(name)
 	display := name
@@ -15,7 +17,7 @@ func PrintProgress(name string, received, total int64, elapsed time.Duration) {
 	}
 
 	if total <= 0 {
-		fmt.Fprintf(os.Stderr, "\r%-*s   --%%  %s", nameWidth, display, formatBytes(received))
+		fmt.Fprintf(w, "\r%-*s   --%%  %s", nameWidth, display, formatBytes(received))
 		return
 	}
 
@@ -38,7 +40,7 @@ func PrintProgress(name string, received, total int64, elapsed time.Duration) {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "\r%-*s %3d%% %9s  %-12s  %s",
+	fmt.Fprintf(w, "\r%-*s %3d%% %9s  %-12s  %s",
 		nameWidth, display, pct, formatBytes(received), rateStr, etaStr)
 }
 

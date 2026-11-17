@@ -187,10 +187,11 @@ func quicWriteOneChunk(stream net.Conn, sendKey, receiveKey []byte, rootArg stri
 }
 
 // DownloadFiles downloads a file or directory using parallel encrypted RPC streams.
-// A nonpositive worker count selects the default.
+// A nonpositive worker count selects the default. Progress is printed to progress, a
+// terminal, or not at all if it's nil.
 func DownloadFiles(sess common.StreamSession, remotePath, localPath string,
-	recursive bool, numWorkers int) error {
-	return downloadFiles(remotePath, localPath, recursive, numWorkers,
+	recursive bool, numWorkers int, progress io.Writer) error {
+	return downloadFiles(remotePath, localPath, recursive, numWorkers, progress,
 		func(req common.FSRequest) (*common.FSResponse, error) { return streamRequest(sess, req) },
 		func(sourceRoot string, localIsDir bool, progress *common.TransferProgress) func(jobs <-chan transferChunk) error {
 			return func(jobs <-chan transferChunk) error {
@@ -201,11 +202,11 @@ func DownloadFiles(sess common.StreamSession, remotePath, localPath string,
 }
 
 // UploadFiles uploads a file or directory using parallel encrypted RPC streams.
-// A nonpositive worker count selects the default.
+// A nonpositive worker count selects the default. Progress is printed as DownloadFiles does.
 func UploadFiles(sess common.StreamSession, localPath, remotePath string,
-	recursive bool, numWorkers int) error {
+	recursive bool, numWorkers int, progress io.Writer) error {
 	localBase := filepath.Dir(localPath)
-	return uploadFiles(localPath, remotePath, recursive, numWorkers,
+	return uploadFiles(localPath, remotePath, recursive, numWorkers, progress,
 		func(req common.FSRequest) (*common.FSResponse, error) { return streamRequest(sess, req) },
 		func(sourceIsDir, targetIsDirHint bool, progress *common.TransferProgress) func(jobs <-chan transferChunk) error {
 			return func(jobs <-chan transferChunk) error {

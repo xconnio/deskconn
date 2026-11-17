@@ -215,8 +215,9 @@ func RecvPriority[T any](ch <-chan T, closed <-chan struct{}, timeout time.Durat
 }
 
 // TransferProgress aggregates byte counts reported by parallel workers into
-// a single combined progress line, printed at most every progressPrintInterval.
+// a single combined progress line, printed to Out at most every progressPrintInterval.
 type TransferProgress struct {
+	Out       io.Writer
 	Name      string
 	Total     int64
 	Start     time.Time
@@ -235,16 +236,20 @@ func (p *TransferProgress) Add(n int64) {
 	if !p.LastPrint.CompareAndSwap(last, now) {
 		return // another goroutine just printed; don't fight over the line
 	}
-	PrintProgress(p.Name, done, p.Total, time.Since(p.Start))
+	PrintProgress(p.Out, p.Name, done, p.Total, time.Since(p.Start))
 }
 
 // finish prints the closing progress line: the full total on success, or
 // the actual bytes completed on failure rather than claiming 100%.
+// A nil p, a transfer without progress, prints nothing.
 func (p *TransferProgress) Finish(err error) {
+	if p == nil {
+		return
+	}
 	done := p.Total
 	if err != nil {
 		done = p.Done.Load()
 	}
-	PrintProgress(p.Name, done, p.Total, time.Since(p.Start))
-	fmt.Fprintln(os.Stderr)
+	PrintProgress(p.Out, p.Name, done, p.Total, time.Since(p.Start))
+	fmt.Fprintln(p.Out)
 }
