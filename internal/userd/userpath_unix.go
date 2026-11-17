@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -39,13 +40,23 @@ func userShellArgs(shell, posixScript, fishScript string, args ...string) []stri
 // instead of the shell starting and printing "command not found".
 func userCommand(command string, args []string) (string, []string, []string) {
 	if resolved, err := exec.LookPath(command); err == nil {
-		return resolved, args, nil
-	}
-	if !userHasCommand(command) {
+		command = resolved
+	} else if userHasCommand(command) {
+		shell := userShell()
+		args = userShellArgs(shell, `exec "$@"`, `exec $argv`, append([]string{command}, args...)...)
+		command = shell
+	} else {
 		return command, args, nil
 	}
-	shell := userShell()
-	return shell, userShellArgs(shell, `exec "$@"`, `exec $argv`, append([]string{command}, args...)...), nil
+
+	// macOS can discard unread PTY output when the child exits. Opening its
+	// controlling terminal makes exit wait for the output to drain. exec keeps
+	// the command's PID, arguments and exit status intact.
+	if runtime.GOOS == "darwin" {
+		args = append([]string{"-c", `exec "$@" 0<>/dev/tty`, "deskconn", command}, args...)
+		command = "/bin/sh"
+	}
+	return command, args, nil
 }
 
 // userHasCommand reports whether userd's own PATH or the user's login shell finds command.
