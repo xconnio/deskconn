@@ -27,7 +27,7 @@ func DialDaemonStreams(ctx context.Context, realm, directory string) (*DaemonStr
 	result := session.Call(common.ProcedureProxyStream).Args(realm, "").ExecuteContext(ctx)
 	if result.Err != nil {
 		_ = session.Close()
-		return nil, result.Err
+		return nil, fmt.Errorf("probe local daemon RPC %s for realm %q: %w", common.ProcedureProxyStream, realm, result.Err)
 	}
 	return &DaemonStreams{session: session, realm: realm, direct: result.ArgBoolOr(0, false)}, nil
 }
