@@ -61,24 +61,13 @@ func (t *quicShellTransport) close() error { return t.stream.Close() }
 // for) the ack itself. Migrating a session returns a no-op startReader,
 // since its output reader is already running from before. Shared by both
 // transports.
-func (p *interactiveShellSession) beginShellSession(ctrl common.ShellControlMsg, transport shellTransport) (
-	shellID, migrationToken string, ptmx pty.Pty, startReader func(), err error) {
+func (p *interactiveShellSession) beginShellSession(owner string, ctrl common.ShellControlMsg,
+	transport shellTransport) (shellID, migrationToken string, ptmx pty.Pty, startReader func(), err error) {
 	if ctrl.Op == common.ShellOpMigrate {
-		p.Lock()
-		expected, tokenOK := p.migrationTokens[ctrl.OldID]
-		ps, psOK := p.sessions[ctrl.OldID]
-		existingPtmx, ptmxOK := p.ptmx[ctrl.OldID]
-		p.Unlock()
-
-		valid := tokenOK && psOK && ptmxOK && time.Since(expected.issuedAt) <= migrationTokenTTL &&
-			subtle.ConstantTimeCompare([]byte(ctrl.Token), []byte(expected.value)) == 1
-		if !valid {
+		ps, existingPtmx, ok := p.claimMigration(owner, ctrl.OldID, ctrl.Token)
+		if !ok {
 			return "", "", nil, nil, fmt.Errorf("invalid or expired migration token")
 		}
-
-		p.Lock()
-		delete(p.migrationTokens, ctrl.OldID)
-		p.Unlock()
 		ps.mu.Lock()
 		ps.transport = transport
 		ps.mu.Unlock()
@@ -96,22 +85,42 @@ func (p *interactiveShellSession) beginShellSession(ctrl common.ShellControlMsg,
 	if err != nil {
 		return "", "", nil, nil, err
 	}
-	return shellID, p.issueMigrationToken(shellID), newPt, startReader, nil
+	return shellID, p.issueMigrationToken(shellID, owner), newPt, startReader, nil
 }
 
-// beginShellSession starts a shell session unless the terminal app is disabled.
-func (d *Deskconn) beginShellSession(ctrl common.ShellControlMsg, transport shellTransport) (
+// claimMigration uses up shellID's migration token if token matches it, hasn't expired and
+// owner is the caller that opened the shell, returning the shell to move. Checking and
+// removing the token is one step, so a token moves a shell once even when requests race.
+func (p *interactiveShellSession) claimMigration(owner, shellID, token string) (*ptySession, pty.Pty, bool) {
+	p.Lock()
+	defer p.Unlock()
+	expected, tokenOK := p.migrationTokens[shellID]
+	ps, psOK := p.sessions[shellID]
+	existingPtmx, ptmxOK := p.ptmx[shellID]
+	valid := tokenOK && psOK && ptmxOK && time.Since(expected.issuedAt) <= migrationTokenTTL &&
+		subtle.ConstantTimeCompare([]byte(token), []byte(expected.value)) == 1 &&
+		subtle.ConstantTimeCompare([]byte(owner), []byte(expected.owner)) == 1
+	if !valid {
+		return nil, nil, false
+	}
+	delete(p.migrationTokens, shellID)
+	return ps, existingPtmx, true
+}
+
+// beginShellSession starts a shell session for owner, the authenticated caller, unless the
+// terminal app is disabled.
+func (d *Deskconn) beginShellSession(owner string, ctrl common.ShellControlMsg, transport shellTransport) (
 	shellID, token string, ptmx pty.Pty, startReader func(), err error) {
 	if err := d.capabilities.check(terminalAppID); err != nil {
 		return "", "", nil, nil, err
 	}
-	return d.shellSession.beginShellSession(ctrl, transport)
+	return d.shellSession.beginShellSession(owner, ctrl, transport)
 }
 
 // handleQUICShellStream serves one shell over an RPC byte stream: key
 // exchange, beginShellSession on the first control message, then a read
 // loop dispatching every further control/data envelope until it closes.
-func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
+func (d *Deskconn) handleQUICShellStream(stream net.Conn, caller string) {
 	defer stream.Close()
 
 	_ = stream.SetReadDeadline(time.Now().Add(common.ShellIdleTimeout))
@@ -134,7 +143,7 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn) {
 	}
 
 	transport := &quicShellTransport{stream: stream, sendKey: sendKey}
-	shellID, token, ptmx, startReader, err := d.beginShellSession(ctrl, transport)
+	shellID, token, ptmx, startReader, err := d.beginShellSession(caller, ctrl, transport)
 	ackMsg := common.ShellControlMsg{ShellID: shellID, Token: token, ReportsExit: true}
 	if err != nil {
 		ackMsg = common.ShellControlMsg{Error: err.Error()}

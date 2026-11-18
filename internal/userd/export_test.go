@@ -67,7 +67,13 @@ var NewInteractiveShellSession = newInteractiveShellSession
 
 func (p *interactiveShellSession) BeginShellSession(ctrl common.ShellControlMsg, transport shellTransport) (
 	shellID, migrationToken string, ptmx pty.Pty, startReader func(), err error) {
-	return p.beginShellSession(ctrl, transport)
+	return p.beginShellSession("", ctrl, transport)
+}
+
+// BeginShellSessionAs is BeginShellSession for a caller authenticated as owner.
+func (p *interactiveShellSession) BeginShellSessionAs(owner string, ctrl common.ShellControlMsg,
+	transport shellTransport) (shellID, migrationToken string, ptmx pty.Pty, startReader func(), err error) {
+	return p.beginShellSession(owner, ctrl, transport)
 }
 
 func (p *interactiveShellSession) CleanupShellID(shellID string) { p.cleanupShellID(shellID) }

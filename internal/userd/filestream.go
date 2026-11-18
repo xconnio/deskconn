@@ -11,13 +11,14 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 )
 
-// serveStreamOperation handles encrypted feature messages for one authorized RPC.
-func (d *Deskconn) serveStreamOperation(op common.FSOp, stream net.Conn) {
+// serveStreamOperation handles encrypted feature messages for one authorized RPC, made by
+// caller, the authenticated identity of its session.
+func (d *Deskconn) serveStreamOperation(op common.FSOp, stream net.Conn, caller string) {
 	defer stream.Close()
 
 	switch op {
 	case common.FSOpShell:
-		d.handleQUICShellStream(stream)
+		d.handleQUICShellStream(stream, caller)
 		return
 	case common.FSOpPortForward:
 		d.handleQUICPortForwardStream(stream)

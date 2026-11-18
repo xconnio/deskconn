@@ -27,8 +27,11 @@ type encryptionKeys struct {
 // so a captured ciphertext blob can't be replayed indefinitely.
 const migrationTokenTTL = 30 * time.Second
 
+// A migration token belongs to the caller that opened the shell: only that caller may move
+// the shell to another transport.
 type migrationToken struct {
 	value    string
+	owner    string
 	issuedAt time.Time
 }
 
@@ -109,9 +112,9 @@ func newInteractiveShellSession() *interactiveShellSession {
 }
 
 // issueMigrationToken generates and stores a fresh migration token for
-// shellID, returning it for the caller to deliver however its transport
-// does control messages.
-func (p *interactiveShellSession) issueMigrationToken(shellID string) string {
+// shellID, owned by owner, returning it for the caller to deliver however its
+// transport does control messages.
+func (p *interactiveShellSession) issueMigrationToken(shellID, owner string) string {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return ""
@@ -119,7 +122,7 @@ func (p *interactiveShellSession) issueMigrationToken(shellID string) string {
 	token := hex.EncodeToString(tokenBytes)
 
 	p.Lock()
-	p.migrationTokens[shellID] = migrationToken{value: token, issuedAt: time.Now()}
+	p.migrationTokens[shellID] = migrationToken{value: token, owner: owner, issuedAt: time.Now()}
 	p.Unlock()
 
 	return token

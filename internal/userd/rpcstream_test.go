@@ -3,13 +3,16 @@ package userd_test
 import (
 	"bytes"
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	xconnd "github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
 	"github.com/xconnio/xconn/bindings/go"
@@ -59,4 +62,90 @@ func TestRPCStreamEndpointErrorsRemainWAMPErrors(t *testing.T) {
 	var application *xconn.Error
 	require.ErrorAs(t, err, &application)
 	require.Equal(t, common.ErrNoSuchProcedure, application.URI)
+}
+
+type rpcShell struct {
+	conn                net.Conn
+	sendKey, receiveKey []byte
+	ack                 shellAck
+}
+
+// openRPCShell opens a shell stream from session and sends ctrl as its first message.
+func openRPCShell(t *testing.T, session *xconn.Session, ctrl common.ShellControlMsg) rpcShell {
+	t.Helper()
+	conn, err := common.OpenRPCStream(t.Context(), session, common.ProcedureShellStream, false)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(conn)
+	require.NoError(t, err)
+	require.NoError(t, sendQUICShellControl(conn, sendKey, ctrl))
+	ack, err := recvQUICShellEnvelope(conn, receiveKey)
+	require.NoError(t, err)
+	return rpcShell{conn: conn, sendKey: sendKey, receiveKey: receiveKey, ack: ack}
+}
+
+// TestRPCShellMigrationIsBoundToCaller moves a shell between two RPC sessions, as the CLI
+// does from a routed to a direct connection: the authenticated caller that opened it may,
+// another caller holding the same token may not.
+func TestRPCShellMigrationIsBoundToCaller(t *testing.T) {
+	// The machine as the daemon runs it: features on the local app layer, and a bridge from
+	// the machine's router giving each remote caller its own session there, as itself.
+	const machineRealm = "machine"
+	dir := t.TempDir()
+	appRouter, appListener, appSession, err := xconnd.StartAppLayer(common.LocalRealm, filepath.Join(dir, "app.sock"))
+	require.NoError(t, err)
+	t.Cleanup(appRouter.Close)
+	t.Cleanup(func() { _ = appListener.Close() })
+	host, err := xconn.ConnectInMemory(appRouter, common.LocalRealm)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = host.Close() })
+	backend := userd.NewDeskconn(false, dir)
+	require.NoError(t, backend.Register(host))
+	t.Cleanup(func() { backend.CloseStreams() })
+
+	device, err := xconnd.NewDeviceRouter(machineRealm)
+	require.NoError(t, err)
+	t.Cleanup(device.Close)
+	bridgeSession, err := xconn.ConnectInMemory(device, machineRealm)
+	require.NoError(t, err)
+	bridge, err := xconnd.NewBridge(t.Context(), bridgeSession, &xconnd.App{
+		Session: appSession,
+		NewSession: func(authID, authRole string) (*xconn.Session, error) {
+			return connectAs(appRouter, common.LocalRealm, authID, authRole)
+		},
+		Prefixes: []string{common.ProcedurePrefix, common.ProcedureAdminPrefix},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = bridge.Close() })
+
+	sessionAs := func(authID string) *xconn.Session {
+		session, err := connectAs(device, machineRealm, authID, common.RoleOwner)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = session.Close() })
+		return session
+	}
+
+	routed := sessionAs("alice@example.com")
+	opened := openRPCShell(t, routed, common.ShellControlMsg{Op: common.ShellOpSize, Cols: 80, Rows: 24})
+	require.NotEmpty(t, opened.ack.ackShellID)
+	require.NotEmpty(t, opened.ack.ackToken)
+	migrate := common.ShellControlMsg{Op: common.ShellOpMigrate, OldID: opened.ack.ackShellID, Token: opened.ack.ackToken}
+
+	other := sessionAs("mallory@example.com")
+	stolen := openRPCShell(t, other, migrate)
+	assert.Empty(t, stolen.ack.ackShellID, "another caller must not take the shell")
+
+	direct := sessionAs("alice@example.com")
+	moved := openRPCShell(t, direct, migrate)
+	require.Equal(t, opened.ack.ackShellID, moved.ack.ackShellID, "the owner's other session takes the shell")
+
+	// The shell now answers on the new stream.
+	require.NoError(t, sendQUICShellData(moved.conn, moved.sendKey, []byte("echo migrated-$((6*7))\r")))
+	var output []byte
+	for !bytes.Contains(output, []byte("migrated-42")) {
+		msg, err := recvQUICShellEnvelope(moved.conn, moved.receiveKey)
+		require.NoError(t, err, "output so far: %q", output)
+		output = append(output, msg.data...)
+	}
+	require.NoError(t, sendQUICShellData(moved.conn, moved.sendKey, []byte("exit\r")))
 }
