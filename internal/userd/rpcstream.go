@@ -13,6 +13,7 @@ import (
 // Encryption and feature messages run in the stream; routing runs in XConn.
 func (d *Deskconn) streamHandler(op common.FSOp, input bool) xconn.InvocationHandler {
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
+		caller := inv.CallerAuthID()
 		if input {
 			stream, err := inv.ArgStream(1)
 			if err != nil {
@@ -32,7 +33,7 @@ func (d *Deskconn) streamHandler(op common.FSOp, input bool) xconn.InvocationHan
 			defer stop()
 			defer tracked.Close()
 			//nolint:contextcheck // RPC cancellation closes the feature connection.
-			d.serveStreamOperation(op, &invocationStream{Conn: tracked})
+			d.serveStreamOperation(op, &invocationStream{Conn: tracked}, caller)
 			// Input streams end with the RPC. Keep the invocation alive until
 			// the caller has drained the final encrypted reply and sent EOF.
 			_, _ = io.Copy(io.Discard, tracked)
@@ -49,7 +50,7 @@ func (d *Deskconn) streamHandler(op common.FSOp, input bool) xconn.InvocationHan
 		go func() { //nolint:contextcheck // The stream owns this worker after the RPC reply.
 			defer stop()
 			defer tracked.Close()
-			d.serveStreamOperation(op, tracked) //nolint:contextcheck // Stream closure owns the feature lifetime.
+			d.serveStreamOperation(op, tracked, caller) //nolint:contextcheck // Stream closure owns the feature lifetime.
 		}()
 		return xconn.NewResult(nil, xconn.DuplexStream(endpoint))
 	}

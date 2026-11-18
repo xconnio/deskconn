@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,6 +134,55 @@ func TestBeginShellSessionMigrateUnknownShellID(t *testing.T) {
 		common.ShellControlMsg{Op: common.ShellOpMigrate, OldID: "no-such-shell", Token: "whatever"},
 		&userd.FakeShellTransport{})
 	assert.Error(t, err)
+}
+
+func TestBeginShellSessionMigrateOtherCaller(t *testing.T) {
+	p := userd.NewInteractiveShellSession()
+	original := &userd.FakeShellTransport{}
+	shellID, token, _, startReader, err := p.BeginShellSessionAs("alice",
+		common.ShellControlMsg{Op: common.ShellOpSize, Cols: 80, Rows: 24}, original)
+	require.NoError(t, err)
+	startReader()
+	t.Cleanup(func() { p.CleanupShellID(shellID) })
+
+	_, _, _, _, err = p.BeginShellSessionAs("mallory",
+		common.ShellControlMsg{Op: common.ShellOpMigrate, OldID: shellID, Token: token}, &userd.FakeShellTransport{})
+	require.Error(t, err, "a token must not move a shell for another caller")
+	assert.Same(t, original, p.SessionTransport(shellID))
+
+	_, _, _, _, err = p.BeginShellSessionAs("alice",
+		common.ShellControlMsg{Op: common.ShellOpMigrate, OldID: shellID, Token: token}, &userd.FakeShellTransport{})
+	assert.NoError(t, err, "a rejected caller must not use up the owner's token")
+}
+
+func TestBeginShellSessionMigrateConcurrentClaims(t *testing.T) {
+	p := userd.NewInteractiveShellSession()
+	shellID, token, _, startReader, err := p.BeginShellSession(
+		common.ShellControlMsg{Op: common.ShellOpSize, Cols: 80, Rows: 24}, &userd.FakeShellTransport{})
+	require.NoError(t, err)
+	startReader()
+	t.Cleanup(func() { p.CleanupShellID(shellID) })
+
+	const claims = 32
+	var wg sync.WaitGroup
+	var succeeded atomic.Int32
+	start := make(chan struct{})
+	for range claims {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, _, _, err := p.BeginShellSession(
+				common.ShellControlMsg{Op: common.ShellOpMigrate, OldID: shellID, Token: token},
+				&userd.FakeShellTransport{})
+			if err == nil {
+				succeeded.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	assert.Equal(t, int32(1), succeeded.Load(), "a token must move a shell only once")
 }
 
 // TestBeginShellSessionExecNonexistentCommand confirms a failed exec (e.g. a
