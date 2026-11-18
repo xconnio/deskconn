@@ -9,8 +9,18 @@ import (
 	api "github.com/xconnio/xconn/bindings/go"
 )
 
+// listenAppLayer serves the local realm on a Unix socket only its owner can connect to,
+// whatever umask the daemon runs with.
 func listenAppLayer(router *api.Router, path string) (*api.Listener, error) {
-	return api.NewServer(router, nil, nil).ListenAndServeYamux(api.NetworkUnix, path)
+	listener, err := api.NewServer(router, nil, nil).ListenAndServeYamux(api.NetworkUnix, path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	return listener, nil
 }
 
 // ConnectApp joins an application's local yamux connection.

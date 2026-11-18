@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -21,18 +22,15 @@ import (
 var ErrKeyExpired = errors.New("authentication key expired, please login again")
 
 func CredentialsFilePath() (string, error) {
-	homedir, err := os.UserHomeDir()
+	cfgDirectory, err := CfgDirectory()
 	if err != nil {
-		return "", fmt.Errorf("failed to get user home dir: %w", err)
+		return "", err
 	}
-
-	credFilePath := filepath.Join(homedir, ".deskconn/credentials.json")
-
-	_ = os.MkdirAll(filepath.Dir(credFilePath), 0755)
-
-	return credFilePath, nil
+	return filepath.Join(cfgDirectory, "credentials.json"), nil
 }
 
+// CfgDirectory returns ~/.deskconn, creating it if needed. It holds the machine's keys and the
+// daemon's socket, so only its owner may use it.
 func CfgDirectory() (string, error) {
 	homedir, err := os.UserHomeDir()
 	if err != nil {
@@ -40,8 +38,20 @@ func CfgDirectory() (string, error) {
 	}
 
 	cfgDirectory := filepath.Join(homedir, ".deskconn")
-
-	_ = os.MkdirAll(cfgDirectory, 0755)
+	if err := os.MkdirAll(cfgDirectory, 0o700); err != nil {
+		return "", err
+	}
+	// Installs from before it was private have it open to others. Windows keeps a user's
+	// profile private by its ACL instead.
+	info, err := os.Stat(cfgDirectory)
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(cfgDirectory, 0o700); err != nil {
+			return "", err
+		}
+	}
 	return cfgDirectory, nil
 }
 

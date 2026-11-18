@@ -12,28 +12,38 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 )
 
+// tempHome points the user's home directory at an empty directory for the test.
+func tempHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
 func TestCredentialsFilePath(t *testing.T) {
+	home := tempHome(t)
 	path, err := common.CredentialsFilePath()
 	require.NoError(t, err)
-
-	homeDir, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	require.Equal(t, filepath.Join(homeDir, ".deskconn", "credentials.json"), path)
+	require.Equal(t, filepath.Join(home, ".deskconn", "credentials.json"), path)
 }
 
 func TestCfgDirectory(t *testing.T) {
+	home := tempHome(t)
 	dir, err := common.CfgDirectory()
 	require.NoError(t, err)
-
-	homeDir, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	require.Equal(t, filepath.Join(homeDir, ".deskconn"), dir)
+	require.Equal(t, filepath.Join(home, ".deskconn"), dir)
 
 	info, err := os.Stat(dir)
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
+}
+
+func TestCfgDirectoryRejectsFile(t *testing.T) {
+	home := tempHome(t)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".deskconn"), nil, 0600))
+	_, err := common.CfgDirectory()
+	require.Error(t, err)
 }
 
 func TestMachinesFromCfgSuccess(t *testing.T) {
