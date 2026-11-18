@@ -127,17 +127,18 @@ func dialShellQUIC(ctx context.Context, realm, cfgDirectory string,
 	if err != nil {
 		return nil, err
 	}
-	return shellHandshakeOnStream(ctx, quicSess, ctrl, func() { _ = quicSess.Connection().Close() })
+	return shellHandshakeOnStream(ctx, quicSess, ctrl, realm, "QUIC", func() { _ = quicSess.Connection().Close() })
 }
 
 // shellHandshakeOnStream opens the shell on a stream of sess. release frees sess: it's
 // called if the handshake fails, and otherwise becomes part of the result's cleanup.
 func shellHandshakeOnStream(ctx context.Context, sess common.StreamSession, ctrl common.ShellControlMsg,
-	release func()) (*shellHandshakeResult, error) {
+	realm, transport string, release func()) (*shellHandshakeResult, error) {
 	stream, err := common.OpenRPCStream(ctx, sess, common.ProcedureShellStream, false)
 	if err != nil {
 		release()
-		return nil, err
+		return nil, fmt.Errorf("open shell RPC %s for realm %q via %s: %w",
+			common.ProcedureShellStream, realm, transport, err)
 	}
 	cleanup := func() { _ = stream.Close(); release() }
 	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
@@ -168,14 +169,14 @@ func dialShellP2P(ctx context.Context, realm, cfgDirectory string,
 	if err != nil {
 		return nil, err
 	}
-	return shellHandshakeOnStream(ctx, p2pSess, ctrl, func() { _ = p2pSess.Close() })
+	return shellHandshakeOnStream(ctx, p2pSess, ctrl, realm, "WebRTC", func() { _ = p2pSess.Close() })
 }
 
 // dialShellDaemon opens the shell on userd's persistent connection.
 func dialShellDaemon(ctx context.Context, ds *DaemonStreams,
 	ctrl common.ShellControlMsg) (*shellHandshakeResult, error) {
 	release := func() { _ = ds.Close() }
-	return shellHandshakeOnStream(ctx, ds, ctrl, release)
+	return shellHandshakeOnStream(ctx, ds, ctrl, ds.realm, "local daemon", release)
 }
 
 // activeShellConn is the connection the stdin/resize/output loops below are

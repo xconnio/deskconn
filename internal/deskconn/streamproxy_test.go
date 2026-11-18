@@ -134,3 +134,39 @@ func TestDaemonStreamsDaemonNotRunning(t *testing.T) {
 	_, err := deskconn.DialDaemonStreams(context.Background(), streamProxyTestRealm, t.TempDir())
 	require.ErrorIs(t, err, deskconn.ErrDaemonUnavailable)
 }
+
+func TestShellReportsMissingProcedure(t *testing.T) {
+	directory, err := os.MkdirTemp("", "rpcproxy")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	_, key, err := auth.GenerateCryptoSignKeyPair()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "id_ed25519"), []byte(key+" client"), 0600))
+	router, listener, session, err := xconnd.StartAppLayer(common.LocalRealm, filepath.Join(directory, "deskconn.sock"))
+	require.NoError(t, err)
+	t.Cleanup(router.Close)
+	t.Cleanup(func() { _ = listener.Close(); _ = session.Close() })
+
+	err = deskconn.RunShell(t.Context(), "", streamProxyTestRealm, directory)
+	require.ErrorContains(t, err, `probe local daemon RPC io.xconn.local.proxy.stream for realm "io.xconn.test"`)
+	var connection *deskconn.ConnectionError
+	require.ErrorAs(t, err, &connection)
+	var application *xconn.Error
+	require.ErrorAs(t, err, &application)
+	require.Equal(t, common.ErrNoSuchProcedure, application.URI)
+
+	proxy := func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
+		if inv.ArgStringOr(1, "") == "" {
+			return xconn.NewResult(false)
+		}
+		return xconn.NewResultError(common.ErrNoSuchProcedure)
+	}
+	require.NoError(t, session.Register(common.ProcedureProxyStream, proxy).ExecuteContext(t.Context()).Err)
+
+	err = deskconn.RunShell(t.Context(), "", streamProxyTestRealm, directory)
+	require.ErrorContains(t, err,
+		`open shell RPC io.xconn.deskconn.shell.stream for realm "io.xconn.test" via local daemon`)
+	require.ErrorAs(t, err, &connection)
+	require.ErrorAs(t, err, &application)
+	require.Equal(t, common.ErrNoSuchProcedure, application.URI)
+}
