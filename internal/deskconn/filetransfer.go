@@ -3,6 +3,7 @@ package deskconn
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -140,10 +141,15 @@ feed:
 	}
 }
 
-func newTransferProgress(name string, total int64) *common.TransferProgress {
-	p := &common.TransferProgress{Name: name, Total: total, Start: time.Now()}
+// newTransferProgress starts printing a transfer's progress to out, or returns nil, for no
+// progress, if out is nil.
+func newTransferProgress(out io.Writer, name string, total int64) *common.TransferProgress {
+	if out == nil {
+		return nil
+	}
+	p := &common.TransferProgress{Out: out, Name: name, Total: total, Start: time.Now()}
 	p.LastPrint.Store(p.Start.UnixNano())
-	common.PrintProgress(p.Name, 0, p.Total, 0)
+	common.PrintProgress(out, p.Name, 0, p.Total, 0)
 	return p
 }
 
@@ -157,8 +163,8 @@ func newTransferProgress(name string, total int64) *common.TransferProgress {
 // listFn performs the one-shot manifest request. newWorker is called once,
 // with the manifest's source root and whether localPath should be treated
 // as a directory, and must return the per-worker job-queue handler to pass
-// to runChunkWorkers.
-func downloadFiles(remotePath, localPath string, recursive bool, numWorkers int,
+// to runChunkWorkers. Progress is printed to progressOut, if not nil.
+func downloadFiles(remotePath, localPath string, recursive bool, numWorkers int, progressOut io.Writer,
 	listFn func(common.FSRequest) (*common.FSResponse, error),
 	newWorker func(sourceRoot string, localIsDir bool,
 		progress *common.TransferProgress) func(jobs <-chan transferChunk) error,
@@ -183,7 +189,7 @@ func downloadFiles(remotePath, localPath string, recursive bool, numWorkers int,
 		return nil
 	}
 
-	progress := newTransferProgress(filepath.Base(remotePath), total)
+	progress := newTransferProgress(progressOut, filepath.Base(remotePath), total)
 	err = runChunkWorkers(chunks, effectiveWorkers(numWorkers), newWorker(entries[0].RelPath, localIsDir, progress))
 	progress.Finish(err)
 	return err
@@ -195,8 +201,8 @@ func downloadFiles(remotePath, localPath string, recursive bool, numWorkers int,
 // is called once, with whether the source is a directory and whether the
 // destination should be created as one, and must return the per-worker
 // job-queue handler to pass to runChunkWorkers. numWorkers <= 0 uses the
-// default (parallelStreamWorkers).
-func uploadFiles(localPath, remotePath string, recursive bool, numWorkers int,
+// default (parallelStreamWorkers). Progress is printed to progressOut, if not nil.
+func uploadFiles(localPath, remotePath string, recursive bool, numWorkers int, progressOut io.Writer,
 	initFn func(common.FSRequest) (*common.FSResponse, error),
 	newWorker func(sourceIsDir, targetIsDirHint bool,
 		progress *common.TransferProgress) func(jobs <-chan transferChunk) error,
@@ -223,7 +229,7 @@ func uploadFiles(localPath, remotePath string, recursive bool, numWorkers int,
 		return nil
 	}
 
-	progress := newTransferProgress(filepath.Base(localPath), total)
+	progress := newTransferProgress(progressOut, filepath.Base(localPath), total)
 	err = runChunkWorkers(chunks, effectiveWorkers(numWorkers), newWorker(sourceIsDir, targetIsDirHint, progress))
 	progress.Finish(err)
 	return err

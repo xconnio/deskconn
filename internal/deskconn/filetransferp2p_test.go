@@ -71,7 +71,7 @@ func TestDownloadFilesP2PSingleFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcFile, content, 0644))
 
 	dstFile := filepath.Join(t.TempDir(), "hello.txt")
-	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 0))
+	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 0, nil))
 
 	got, err := os.ReadFile(dstFile)
 	require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestDownloadFilesP2PLargeFileSpansMultipleChunks(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcFile, content, 0644))
 
 	dstFile := filepath.Join(t.TempDir(), "big.bin")
-	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 0))
+	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 0, nil))
 
 	got, err := os.ReadFile(dstFile)
 	require.NoError(t, err)
@@ -105,7 +105,7 @@ func TestDownloadFilesP2PDirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "subdir", "nested.txt"), []byte("nested content"), 0644))
 
 	dstDir := t.TempDir()
-	require.NoError(t, deskconn.DownloadFiles(sess, srcDir, dstDir, true, 0))
+	require.NoError(t, deskconn.DownloadFiles(sess, srcDir, dstDir, true, 0, nil))
 
 	base := filepath.Base(srcDir)
 	got, err := os.ReadFile(filepath.Join(dstDir, base, "root.txt"))
@@ -119,7 +119,7 @@ func TestDownloadFilesP2PDirectory(t *testing.T) {
 
 func TestDownloadFilesP2PNonExistentPath(t *testing.T) {
 	sess := newP2PTestConnection(t)
-	err := deskconn.DownloadFiles(sess, "/nonexistent/path/that/does/not/exist", t.TempDir(), false, 0)
+	err := deskconn.DownloadFiles(sess, "/nonexistent/path/that/does/not/exist", t.TempDir(), false, 0, nil)
 	require.Error(t, err)
 }
 
@@ -131,7 +131,7 @@ func TestUploadFilesP2PSingleFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcFile, content, 0644))
 
 	dstFile := filepath.Join(t.TempDir(), "upload.bin")
-	require.NoError(t, deskconn.UploadFiles(sess, srcFile, dstFile, false, 0))
+	require.NoError(t, deskconn.UploadFiles(sess, srcFile, dstFile, false, 0, nil))
 
 	got, err := os.ReadFile(dstFile)
 	require.NoError(t, err)
@@ -147,7 +147,7 @@ func TestUploadFilesP2PDirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "subdir", "nested.txt"), []byte("nested content"), 0644))
 
 	dstDir := t.TempDir()
-	require.NoError(t, deskconn.UploadFiles(sess, srcDir, dstDir, true, 0))
+	require.NoError(t, deskconn.UploadFiles(sess, srcDir, dstDir, true, 0, nil))
 
 	base := filepath.Base(srcDir)
 	got, err := os.ReadFile(filepath.Join(dstDir, base, "root.txt"))
@@ -161,7 +161,7 @@ func TestUploadFilesP2PDirectory(t *testing.T) {
 
 func TestUploadFilesP2PNonExistentLocalPath(t *testing.T) {
 	sess := newP2PTestConnection(t)
-	err := deskconn.UploadFiles(sess, "/nonexistent/local/path", t.TempDir(), false, 0)
+	err := deskconn.UploadFiles(sess, "/nonexistent/local/path", t.TempDir(), false, 0, nil)
 	require.Error(t, err)
 }
 
@@ -176,7 +176,7 @@ func TestDownloadFilesP2PCustomWorkerCount(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcFile, content, 0644))
 
 	dstFile := filepath.Join(t.TempDir(), "custom.bin")
-	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 1))
+	require.NoError(t, deskconn.DownloadFiles(sess, srcFile, dstFile, false, 1, nil))
 
 	got, err := os.ReadFile(dstFile)
 	require.NoError(t, err)

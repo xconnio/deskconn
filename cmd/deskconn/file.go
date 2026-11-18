@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
+	"golang.org/x/term"
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
@@ -40,6 +42,7 @@ type fileCommands struct {
 	cpRecursive *bool
 	cpMode      *string
 	cpStreams   *int
+	cpProgress  *bool
 
 	rmTarget *string
 	rmMode   *string
@@ -84,6 +87,9 @@ func registerFileCommands(app *kingpin.Application, cfgDirectory string) *fileCo
 	cmds.cpMode = modeFlag(cmds.cp, modeHelp+" (default: try direct, fall back to routed)")
 	cmds.cpStreams = cmds.cp.Flag("streams", "Number of parallel streams to use for the transfer (default 4)").
 		Short('s').Int()
+	cmds.cpProgress = cmds.cp.Flag("progress",
+		"Show transfer progress on stderr when it's a terminal (--no-progress to never show it)").
+		Default("true").Bool()
 
 	cmds.rm = fileCmd.Command("rm", "Remove a file or directory on a machine")
 	cmds.rmTarget = cmds.rm.Arg("target", "Remote path as machine:path (e.g. m1:/tmp/a.txt)").Required().
@@ -118,7 +124,8 @@ func dispatchFileCommand(parsedCmd string, cmds *fileCommands, cfgDirectory stri
 	case cmds.mv.FullCommand():
 		exitOnErr(moveFile(cfgDirectory, *cmds.mvSrc, *cmds.mvDst, *cmds.mvMode))
 	case cmds.cp.FullCommand():
-		exitOnErr(copyFiles(cfgDirectory, *cmds.cpSrc, *cmds.cpDst, *cmds.cpRecursive, *cmds.cpStreams, *cmds.cpMode))
+		exitOnErr(copyFiles(cfgDirectory, *cmds.cpSrc, *cmds.cpDst, *cmds.cpRecursive, *cmds.cpStreams, *cmds.cpMode,
+			transferProgressOut(*cmds.cpProgress)))
 	case cmds.rm.FullCommand():
 		exitOnErr(removeFile(cfgDirectory, *cmds.rmTarget, *cmds.rmMode))
 	case cmds.cat.FullCommand():
@@ -161,7 +168,16 @@ func moveFile(cfgDirectory, src, dst, mode string) error {
 	return fileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileRename, payload, mode)
 }
 
-func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode string) error {
+// transferProgressOut is where a transfer prints its progress: stderr, if show is set and
+// stderr is a terminal, since the progress line redraws itself. Otherwise nil, for none.
+func transferProgressOut(show bool) io.Writer {
+	if !show || !term.IsTerminal(int(os.Stderr.Fd())) { // #nosec
+		return nil
+	}
+	return os.Stderr
+}
+
+func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode string, progress io.Writer) error {
 	srcRemote := isRemotePath(src)
 	dstRemote := isRemotePath(dst)
 	switch {
@@ -185,7 +201,7 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 			return err
 		}
 		return transferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
-			return deskconn.UploadFiles(session, src, dstPath, recursive, streams)
+			return deskconn.UploadFiles(session, src, dstPath, recursive, streams, progress)
 		})
 
 	case srcRemote && !dstRemote:
@@ -195,7 +211,7 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 			return err
 		}
 		return transferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
-			return deskconn.DownloadFiles(session, srcPath, dst, recursive, streams)
+			return deskconn.DownloadFiles(session, srcPath, dst, recursive, streams, progress)
 		})
 
 	default:

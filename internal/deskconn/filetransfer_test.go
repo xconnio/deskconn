@@ -156,20 +156,9 @@ func TestRunChunkWorkersReusesWorkerAcrossChunks(t *testing.T) {
 func TestTransferProgressThrottlesPrinting(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
-	origStderr := os.Stderr
-	os.Stderr = w
-	restored := false
-	restore := func() {
-		if restored {
-			return
-		}
-		restored = true
-		os.Stderr = origStderr
-		_ = w.Close()
-	}
-	defer restore()
+	defer func() { _ = r.Close() }()
 
-	p := deskconn.NewTransferProgress("bench.bin", 1_000_000)
+	p := deskconn.NewTransferProgress(w, "bench.bin", 1_000_000)
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Add(1)
@@ -183,7 +172,7 @@ func TestTransferProgressThrottlesPrinting(t *testing.T) {
 	wg.Wait()
 	p.Finish(nil)
 
-	restore()
+	_ = w.Close()
 
 	data, readErr := io.ReadAll(r)
 	require.NoError(t, readErr)
@@ -198,28 +187,25 @@ func TestTransferProgressThrottlesPrinting(t *testing.T) {
 func TestTransferProgressFinishReportsActualProgressOnFailure(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
-	origStderr := os.Stderr
-	os.Stderr = w
-	restored := false
-	restore := func() {
-		if restored {
-			return
-		}
-		restored = true
-		os.Stderr = origStderr
-		_ = w.Close()
-	}
-	defer restore()
+	defer func() { _ = r.Close() }()
 
-	p := deskconn.NewTransferProgress("partial.bin", 1000)
+	p := deskconn.NewTransferProgress(w, "partial.bin", 1000)
 	p.Done.Store(400) // only 400 of 1000 bytes actually made it before the failure
 	p.Finish(errors.New("worker failed"))
 
-	restore()
+	_ = w.Close()
 
 	data, readErr := io.ReadAll(r)
 	require.NoError(t, readErr)
 
 	assert.Contains(t, string(data), "400B", "finish() should report the actual bytes completed, not the full total")
 	assert.NotContains(t, string(data), "100%", "finish() should not claim 100% when the transfer failed")
+}
+
+// Without somewhere to print it, a transfer has no progress and finishing it prints nothing.
+func TestTransferProgressDisabled(t *testing.T) {
+	p := deskconn.NewTransferProgress(nil, "quiet.bin", 1000)
+	require.Nil(t, p)
+	p.Finish(nil)
+	p.Finish(errors.New("worker failed"))
 }
