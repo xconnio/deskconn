@@ -288,10 +288,16 @@ func cloudCycle(
 	if err = WritePrincipalsToFile(config.PrincipalsFile, principals); err != nil {
 		return false, err
 	}
+	routeContext := fmt.Sprintf("hub=%s realm=%s procedures=%q prefixes=%q",
+		config.Address, credentials.Realm, app.Procedures, app.Prefixes)
+	log.Printf("Registering Deskconn Hub routes: %s", routeContext)
+	registrationStart := time.Now()
 	bridge, err := NewBridge(ctx, device, app)
+	registrationElapsed := time.Since(registrationStart).Round(time.Microsecond)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("register Deskconn Hub routes (%s) after %s: %w", routeContext, registrationElapsed, err)
 	}
+	log.Printf("Registered Deskconn Hub routes in %s: %s", registrationElapsed, routeContext)
 	defer bridge.Close()
 	provider := api.NewWebRTCHandler()
 	servers := config.ICEServers
