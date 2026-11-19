@@ -32,3 +32,7 @@ func RunShellStdin(stream net.Conn, key []byte, stdin io.Reader, forwardEOF bool
 	active.set(&shellHandshakeResult{conn: &streamClientShellConn{stream: stream}, sendKey: key, cleanup: func() {}})
 	shellStdinLoop(active, stdin, forwardEOF)
 }
+
+var FinishShellHandshake = finishShellHandshake
+
+var ShellSetupContext = shellSetupContext
