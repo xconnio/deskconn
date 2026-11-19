@@ -82,7 +82,7 @@ limitations, and configuration paths.
 3. Log in from the CLI and complete email verification:
 
    ```sh
-   desk account login --username <email>
+   desk auth login --username <email>
    ```
 
 4. Find your machines and open a shell:

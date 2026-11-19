@@ -183,7 +183,7 @@ func (v *topMachinesView) emptyLines(m *Model) []string {
 		return []string{
 			m.styles.text.Render("No machines or profiles yet."),
 			"",
-			m.styles.dim.Render("Log in with `desk account login`, or add a standalone machine with `desk profile add`."),
+			m.styles.dim.Render("Log in with `desk auth login`, or add a standalone machine with `desk profile add`."),
 		}
 	default:
 		return []string{

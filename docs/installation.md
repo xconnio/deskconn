@@ -43,7 +43,7 @@ daemon, as a userspace NAT that carries TCP, UDP and ping.
 
 ## Authentication
 
-All cloud connections use CryptoSign (Ed25519). `desk account login` generates a
+All cloud connections use CryptoSign (Ed25519). `desk auth login` generates a
 keypair, registers the public key with the management service, and stores the
 private key in `~/.deskconn/id_ed25519`.
 

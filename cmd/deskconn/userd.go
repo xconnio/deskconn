@@ -103,7 +103,7 @@ func runUserd(flags userdFlags, standalone bool) {
 	defer appListener.Close()
 
 	clientSessions := userd.NewClientSessions()
-	// Logged in already: desk account login only tells a daemon that's running.
+	// Logged in already: desk auth login only tells a daemon that's running.
 	if _, _, err := common.ReadCredentials(cfgDirectory); err == nil {
 		clientSessions.Login()
 	}

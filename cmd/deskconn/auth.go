@@ -15,7 +15,7 @@ import (
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
-type accountCommands struct {
+type authCommands struct {
 	login  *kingpin.CmdClause
 	whoami *kingpin.CmdClause
 	logout *kingpin.CmdClause
@@ -23,15 +23,15 @@ type accountCommands struct {
 	loginUsername *string
 }
 
-func registerAccountCommands(app *kingpin.Application) *accountCommands {
-	accountCmd := app.Command("account", "Manage CLI authentication")
+func registerAuthCommands(app *kingpin.Application) *authCommands {
+	authCmd := app.Command("auth", "Manage CLI authentication")
 
-	loginCmd := accountCmd.Command("login", "Sign in to access your machines")
+	loginCmd := authCmd.Command("login", "Sign in to access your machines")
 	loginUsername := loginCmd.Flag("username", "Username").Short('u').String()
-	whoamiCmd := accountCmd.Command("whoami", "Show your account")
-	logoutCmd := accountCmd.Command("logout", "Sign out of the CLI")
+	whoamiCmd := authCmd.Command("whoami", "Show your account")
+	logoutCmd := authCmd.Command("logout", "Sign out of the CLI")
 
-	return &accountCommands{
+	return &authCommands{
 		login:         loginCmd,
 		whoami:        whoamiCmd,
 		logout:        logoutCmd,
@@ -39,7 +39,7 @@ func registerAccountCommands(app *kingpin.Application) *accountCommands {
 	}
 }
 
-func dispatchAccountCommand(parsedCmd string, cmds *accountCommands, cfgDirectory string) bool {
+func dispatchAuthCommand(parsedCmd string, cmds *authCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.login.FullCommand():
 		exitOnErr(runLogin(cfgDirectory, *cmds.loginUsername))
