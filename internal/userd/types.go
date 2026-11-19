@@ -150,10 +150,6 @@ func NewClientSessions() *ClientSessions {
 // ErrMachineOffline is the error connecting to a machine that isn't online fails with.
 var ErrMachineOffline = errors.New("the machine is offline")
 
-// legacyProcedurePing is ProcedurePing before procedures lost their "deskconnd." part, for
-// machines that haven't updated since.
-const legacyProcedurePing = "com.deskconn.deskconnd.ping"
-
 // machineAnswersTimeout bounds waiting for a machine to answer.
 const machineAnswersTimeout = 10 * time.Second
 
@@ -163,16 +159,11 @@ const machineAnswersTimeout = 10 * time.Second
 func machineAnswers(ctx context.Context, session *xconn.Session) error {
 	ctx, cancel := context.WithTimeout(ctx, machineAnswersTimeout)
 	defer cancel()
-	for _, procedure := range []string{common.ProcedurePing, legacyProcedurePing} {
-		err := session.Call(procedure).ExecuteContext(ctx).Err
-		if err == nil {
-			return nil
-		}
-		if !strings.Contains(err.Error(), common.ErrNoSuchProcedure) {
-			return err
-		}
+	err := session.Call(common.ProcedurePing).ExecuteContext(ctx).Err
+	if err != nil && strings.Contains(err.Error(), common.ErrNoSuchProcedure) {
+		return ErrMachineOffline
 	}
-	return ErrMachineOffline
+	return err
 }
 
 func (c *ClientSessions) isDisconnected(realm string) bool {
