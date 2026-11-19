@@ -343,16 +343,7 @@ func resetShellTerminal(output io.Writer) {
 // It returns an *ExitError if the command exits nonzero, and a *ConnectionError if
 // the machine can't be reached or the connection drops before the command exits.
 func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctrl common.ShellControlMsg) error {
-	// Without a terminal (a script piping in or out), there's no raw mode to set, and
-	// the PTY on the machine keeps its default size.
 	fd := int(os.Stdin.Fd()) // #nosec
-	if term.IsTerminal(fd) {
-		oldState, err := term.MakeRaw(fd)
-		if err != nil {
-			return fmt.Errorf("failed to set raw mode: %w", err)
-		}
-		defer func() { _ = term.Restore(fd, oldState) }()
-	}
 
 	// Terminal dimensions are a property of the screen, not the keyboard: querying them
 	// needs stdout's fd, not stdin's. On Unix either works (both ends of the same tty
@@ -397,6 +388,16 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	active := &activeShellConn{}
 	active.set(primary)
 	defer active.cleanupCurrent()
+
+	// Keep local Ctrl+C available until the remote shell acknowledges startup.
+	if term.IsTerminal(fd) {
+		oldState, err := term.MakeRaw(fd)
+		if err != nil {
+			return fmt.Errorf("failed to set raw mode: %w", err)
+		}
+		defer func() { _ = term.Restore(fd, oldState) }()
+	}
+
 	if term.IsTerminal(sizeFd) {
 		defer resetShellTerminal(os.Stdout)
 	}
