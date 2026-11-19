@@ -8,7 +8,7 @@ tells the daemon which apps it serves. The daemon lists them to clients (the web
 it's listed and enabled), owners and admins enable or disable them (`desk app enable|disable`), and xconn exposes
 their procedures over routed and direct connections.
 
-1. **Connect** to the local daemon with `appkit.Connect` (realm `io.xconn.deskconn.local`).
+1. **Connect** to the local daemon with `appkit.Connect` (realm `com.deskconn.local`).
    This uses a Unix socket, or authenticated loopback yamux on Windows.
    Reconnect when the daemon restarts.
 2. **Register a key exchange.** deskconn only supports end-to-end encrypted apps: the daemon refuses an app without one.
