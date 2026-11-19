@@ -15,19 +15,19 @@ import (
 // a one-time password and tells machines' daemons who may connect.
 
 const (
-	procedureAccountLogin       = "io.xconn.deskconn.account.login"
-	procedureAccountLoginVerify = "io.xconn.deskconn.account.login.verify"
-	procedureAccountGet         = "io.xconn.deskconn.account.get"
-	procedurePrincipalDelete    = "io.xconn.deskconn.account.principal.delete"
+	procedureAccountLogin       = "com.deskconn.account.login"
+	procedureAccountLoginVerify = "com.deskconn.account.login.verify"
+	procedureAccountGet         = "com.deskconn.account.get"
+	procedurePrincipalDelete    = "com.deskconn.account.principal.delete"
 
-	procedureDesktopList   = "io.xconn.deskconn.desktop.list"
-	procedureDesktopAttach = "io.xconn.deskconn.desktop.attach"
-	procedureDesktopDetach = "io.xconn.deskconn.desktop.detach"
+	procedureDesktopList   = "com.deskconn.desktop.list"
+	procedureDesktopAttach = "com.deskconn.desktop.attach"
+	procedureDesktopDetach = "com.deskconn.desktop.detach"
 
-	procedureDesktopKeyList      = "io.xconn.deskconn.desktop.access.key.list"
-	topicDesktopKeyAddedFormat   = "io.xconn.deskconn.desktop.%s.key.add"
-	topicDesktopKeyRemovedFormat = "io.xconn.deskconn.desktop.%s.key.remove"
-	topicDesktopDetachFormat     = "io.xconn.deskconn.desktop.%s.detach"
+	procedureDesktopKeyList      = "com.deskconn.desktop.access.key.list"
+	topicDesktopKeyAddedFormat   = "com.deskconn.desktop.%s.key.add"
+	topicDesktopKeyRemovedFormat = "com.deskconn.desktop.%s.key.remove"
+	topicDesktopDetachFormat     = "com.deskconn.desktop.%s.detach"
 )
 
 func accountServiceCloud() *deskconn.Cloud {

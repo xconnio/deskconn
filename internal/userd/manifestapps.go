@@ -34,7 +34,10 @@ const (
 
 var manifestIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
-const procedureNamespace = "io.xconn."
+// isProcedure reports whether a manifest string is a procedure, to be checked as one.
+func isProcedure(value string) bool {
+	return strings.HasPrefix(value, common.ProcedurePrefix) || strings.HasPrefix(value, "io.xconn.")
+}
 
 var errManifestTooLarge = fmt.Errorf("an app can have at most %d YAML mappings with its includes expanded",
 	manifestMaxNodes)
@@ -146,7 +149,7 @@ func resolveManifest(files map[string]string) (*manifestApp, error) {
 			}
 			for _, v := range values {
 				procedure, ok := v.(string)
-				if !ok || !strings.HasPrefix(procedure, procedureNamespace) {
+				if !ok || !isProcedure(procedure) {
 					continue
 				}
 				if err := checkReachable(procedure); err != nil {

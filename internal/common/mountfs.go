@@ -14,7 +14,7 @@ import (
 // rather than one per operation so a failure can travel back as an errno
 // in the (encrypted) result instead of a WAMP error string, which the
 // mount has to turn back into the exact errno the kernel expects.
-const ProcedureMountFS = "io.xconn.deskconn.file.mount"
+const ProcedureMountFS = "com.deskconn.file.mount"
 
 // MountMaxIO bounds a single read or write request.
 const MountMaxIO = 1024 * 1024

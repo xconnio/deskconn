@@ -152,7 +152,7 @@ var ErrMachineOffline = errors.New("the machine is offline")
 
 // legacyProcedurePing is ProcedurePing before procedures lost their "deskconnd." part, for
 // machines that haven't updated since.
-const legacyProcedurePing = "io.xconn.deskconn.deskconnd.ping"
+const legacyProcedurePing = "com.deskconn.deskconnd.ping"
 
 // machineAnswersTimeout bounds waiting for a machine to answer.
 const machineAnswersTimeout = 10 * time.Second

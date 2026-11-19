@@ -18,6 +18,7 @@ func TestSettingsPerUser(t *testing.T) {
 	require.NoError(t, r.AddRealm("realm1", &xconn.RealmConfig{AutoDiscloseCaller: true,
 		Roles: []xconn.RealmRole{{Name: common.RoleMember, Permissions: []xconn.Permission{
 			{URI: "io.xconn.", MatchPolicy: protocol.MatchPrefix, AllowCall: true},
+			{URI: "com.deskconn.", MatchPolicy: protocol.MatchPrefix, AllowCall: true},
 		}}}}))
 	callee, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)

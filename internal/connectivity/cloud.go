@@ -98,6 +98,7 @@ func NewDeviceRouter(realm string) (*api.Router, error) {
 		return nil, err
 	}
 	permissions := []api.Permission{{URI: "io.xconn.", MatchPolicy: protocol.MatchPrefix, AllowCall: true},
+		{URI: "com.deskconn.", MatchPolicy: protocol.MatchPrefix, AllowCall: true},
 		{URI: "io.xconn.webrtc.", MatchPolicy: protocol.MatchPrefix, AllowPublish: true, AllowSubscribe: true}}
 	if err = router.AddRealm(realm, &api.RealmConfig{AutoDiscloseCaller: true, Meta: true, Roles: []api.RealmRole{
 		{Name: "owner", Permissions: permissions},

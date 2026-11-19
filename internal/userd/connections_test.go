@@ -106,7 +106,7 @@ func startTestCloud(t *testing.T) *testCloud {
 
 // procedureTestEcho is an encrypted procedure of the test machine's, which returns its
 // request.
-const procedureTestEcho = "io.xconn.deskconn.test.echo"
+const procedureTestEcho = "com.deskconn.test.echo"
 
 // machineOnline brings the machine's daemon online: answering ping (by its name before
 // procedures lost their "deskconnd." part, if legacy), exchanging keys like userd's does,
@@ -120,7 +120,7 @@ func (c *testCloud) machineOnline(legacy bool) (offline func()) {
 
 	ping := common.ProcedurePing
 	if legacy {
-		ping = "io.xconn.deskconn.deskconnd.ping"
+		ping = "com.deskconn.deskconnd.ping"
 	}
 	var mu sync.Mutex
 	keys := map[uint64]*common.SessionKeys{} // by caller, from the machine's side

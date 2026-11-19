@@ -80,7 +80,7 @@ func run() error {
 	defer router.Close()
 	if err = router.AddRealm("machine", &api.RealmConfig{AutoDiscloseCaller: true,
 		Roles: []api.RealmRole{{Name: "anonymous", Permissions: []api.Permission{
-			{URI: "io.xconn.deskconn.", MatchPolicy: "prefix", AllowCall: true},
+			{URI: "com.deskconn.", MatchPolicy: "prefix", AllowCall: true},
 			{URI: "offer", AllowCall: true},
 			{URI: "to-provider", AllowPublish: true, AllowSubscribe: true},
 			{URI: "to-client", AllowPublish: true, AllowSubscribe: true},
@@ -93,7 +93,7 @@ func run() error {
 	}
 	defer host.Close()
 	bridge, err := host.Bridge(ctx, api.BridgeConfig{Target: target, Routes: []api.BridgeRoute{{
-		Procedure: "io.xconn.deskconn.", Options: api.Options{"match": "prefix"},
+		Procedure: "com.deskconn.", Options: api.Options{"match": "prefix"},
 	}}})
 	if err != nil {
 		return err

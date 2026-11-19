@@ -26,13 +26,13 @@ their procedures over routed and direct connections.
    `requires` are apps this one can't work without (it's disabled with them), and a `default_off` app stays disabled
    until an owner or admin enables it. Ids must be unique on the machine. The apps are listed until the app's session
    leaves.
-4. **Follow enabled apps.** Call `io.xconn.deskconn.capabilities.list` for every app's
+4. **Follow enabled apps.** Call `com.deskconn.capabilities.list` for every app's
    `{"id", "name", "enabled", "key_exchange", "requires"}`, and subscribe to
-   `io.xconn.deskconn.capabilities.on_change`, published with the same list whenever an app is enabled or
+   `com.deskconn.capabilities.on_change`, published with the same list whenever an app is enabled or
    disabled. Register an app's procedures while it's enabled and unregister them while it's disabled; keep the key
    exchange registered.
 
-Procedures under `io.xconn.deskconn.` are reachable by remote clients (and `io.xconn.deskconn.admin.` by
+Procedures under `com.deskconn.` are reachable by remote clients (and `com.deskconn.admin.` by
 the machine's owner and admins only), and so are the app prefixes the Hub allows
 (`io.xconn.remotecontrol.` and `io.xconn.media.`), so the key exchange and the app's procedures go under one of them.
 Everything else on the socket, such as `io.xconn.local.*`, stays local.

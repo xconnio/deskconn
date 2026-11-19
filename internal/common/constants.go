@@ -52,49 +52,49 @@ const (
 // host package.
 // RPC endpoints select and authorize features before byte traffic starts.
 const (
-	ProcedureFileListStream     = "io.xconn.deskconn.file.stream.list"
-	ProcedureFileReadStream     = "io.xconn.deskconn.file.stream.read"
-	ProcedureFileInitStream     = "io.xconn.deskconn.file.stream.init"
-	ProcedureFileWriteStream    = "io.xconn.deskconn.file.stream.write"
-	ProcedureShellStream        = "io.xconn.deskconn.shell.stream"
-	ProcedurePortForwardStream  = "io.xconn.deskconn.port.forward.stream"
-	ProcedurePortReverseStream  = "io.xconn.deskconn.port.reverse.stream"
-	ProcedureAgentForwardStream = "io.xconn.deskconn.agent.forward.stream"
-	ProcedureLogsStream         = "io.xconn.deskconn.logs.stream"
+	ProcedureFileListStream     = "com.deskconn.file.stream.list"
+	ProcedureFileReadStream     = "com.deskconn.file.stream.read"
+	ProcedureFileInitStream     = "com.deskconn.file.stream.init"
+	ProcedureFileWriteStream    = "com.deskconn.file.stream.write"
+	ProcedureShellStream        = "com.deskconn.shell.stream"
+	ProcedurePortForwardStream  = "com.deskconn.port.forward.stream"
+	ProcedurePortReverseStream  = "com.deskconn.port.reverse.stream"
+	ProcedureAgentForwardStream = "com.deskconn.agent.forward.stream"
+	ProcedureLogsStream         = "com.deskconn.logs.stream"
 	ProcedureProxyStream        = LocalProcedurePrefix + "proxy.stream"
 )
 
 const (
-	ProcedureKeyExchange    = "io.xconn.deskconn.key.exchange"
-	ProcedureShellIsBusy    = "io.xconn.deskconn.shell.isbusy"
-	ProcedureFileBrowse     = "io.xconn.deskconn.file.browse"
-	ProcedurePrinterList    = "io.xconn.deskconn.printer.list"
-	ProcedurePrinterPrint   = "io.xconn.deskconn.printer.print"
-	ProcedureFileRename     = "io.xconn.deskconn.file.rename"
-	ProcedureFileDelete     = "io.xconn.deskconn.file.delete"
-	ProcedureFileCopy       = "io.xconn.deskconn.file.copy"
-	ProcedureFileEdit       = "io.xconn.deskconn.file.edit"
-	ProcedureFileSearch     = "io.xconn.deskconn.file.search"
-	ProcedureFileThumbnails = "io.xconn.deskconn.file.thumbnails"
-	ProcedurePing           = "io.xconn.deskconn.ping"
+	ProcedureKeyExchange    = "com.deskconn.key.exchange"
+	ProcedureShellIsBusy    = "com.deskconn.shell.isbusy"
+	ProcedureFileBrowse     = "com.deskconn.file.browse"
+	ProcedurePrinterList    = "com.deskconn.printer.list"
+	ProcedurePrinterPrint   = "com.deskconn.printer.print"
+	ProcedureFileRename     = "com.deskconn.file.rename"
+	ProcedureFileDelete     = "com.deskconn.file.delete"
+	ProcedureFileCopy       = "com.deskconn.file.copy"
+	ProcedureFileEdit       = "com.deskconn.file.edit"
+	ProcedureFileSearch     = "com.deskconn.file.search"
+	ProcedureFileThumbnails = "com.deskconn.file.thumbnails"
+	ProcedurePing           = "com.deskconn.ping"
 
-	ProcedureMachineInfo      = "io.xconn.deskconn.machine.info"
-	ProcedureMachineIsDesktop = "io.xconn.deskconn.machine.is_desktop"
-	ProcedureProcessList      = "io.xconn.deskconn.process.list"
-	ProcedureProcessSignal    = "io.xconn.deskconn.process.signal"
-	ProcedureAppList          = "io.xconn.deskconn.app.list"
-	ProcedureAppIcon          = "io.xconn.deskconn.app.icon"
+	ProcedureMachineInfo      = "com.deskconn.machine.info"
+	ProcedureMachineIsDesktop = "com.deskconn.machine.is_desktop"
+	ProcedureProcessList      = "com.deskconn.process.list"
+	ProcedureProcessSignal    = "com.deskconn.process.signal"
+	ProcedureAppList          = "com.deskconn.app.list"
+	ProcedureAppIcon          = "com.deskconn.app.icon"
 
-	ProcedureClaudeSessionList = "io.xconn.deskconn.claude.session.list"
-	ProcedureClaudeSessionPull = "io.xconn.deskconn.claude.session.pull"
-	ProcedureClaudeProjectList = "io.xconn.deskconn.claude.project.list"
+	ProcedureClaudeSessionList = "com.deskconn.claude.session.list"
+	ProcedureClaudeSessionPull = "com.deskconn.claude.session.pull"
+	ProcedureClaudeProjectList = "com.deskconn.claude.project.list"
 
-	ProcedureCodexSessionList = "io.xconn.deskconn.codex.session.list"
-	ProcedureCodexSessionPull = "io.xconn.deskconn.codex.session.pull"
-	ProcedureCodexProjectList = "io.xconn.deskconn.codex.project.list"
+	ProcedureCodexSessionList = "com.deskconn.codex.session.list"
+	ProcedureCodexSessionPull = "com.deskconn.codex.session.pull"
+	ProcedureCodexProjectList = "com.deskconn.codex.project.list"
 
-	ProcedureGitStatus   = "io.xconn.deskconn.git.status"
-	ProcedureGitOriginal = "io.xconn.deskconn.git.original"
+	ProcedureGitStatus   = "com.deskconn.git.status"
+	ProcedureGitOriginal = "com.deskconn.git.original"
 )
 
 // Envelope kind bytes, own namespace like every other raw-stream feature's.
@@ -113,7 +113,7 @@ const (
 	Realm = "io.xconn.deskconn"
 )
 
-const ProcedureFileCat = "io.xconn.deskconn.file.cat"
+const ProcedureFileCat = "com.deskconn.file.cat"
 
 // ProcedureCapabilitiesList lists the apps the frontend may show and whether each is
 // enabled. Apps served outside userd, like media-app's, are listed while their process
@@ -121,21 +121,21 @@ const ProcedureFileCat = "io.xconn.deskconn.file.cat"
 // ProcedureAdminPrefix, the procedures only a machine's owner and admins may call, which
 // userd checks by the caller's role.
 const (
-	ProcedureCapabilitiesList = "io.xconn.deskconn.capabilities.list"
-	ProcedureCapabilitiesSet  = "io.xconn.deskconn.admin.capabilities.set"
+	ProcedureCapabilitiesList = "com.deskconn.capabilities.list"
+	ProcedureCapabilitiesSet  = "com.deskconn.admin.capabilities.set"
 	// ProcedureCapabilitiesWatch sends the apps' list as a progressive result, again whenever
 	// it changes.
-	ProcedureCapabilitiesWatch = "io.xconn.deskconn.capabilities.watch"
+	ProcedureCapabilitiesWatch = "com.deskconn.capabilities.watch"
 	// TopicCapabilitiesChanged is published on the local realm, with the apps' list, after
 	// an app is enabled or disabled.
-	TopicCapabilitiesChanged = "io.xconn.deskconn.capabilities.on_change"
+	TopicCapabilitiesChanged = "com.deskconn.capabilities.on_change"
 )
 
 // Each user's settings on the machine, as their frontend keeps them: list returns the
 // caller's as a dict of key to string value, save takes a key and its string value.
 const (
-	ProcedureSettingsList = "io.xconn.deskconn.settings.list"
-	ProcedureSettingsSave = "io.xconn.deskconn.settings.save"
+	ProcedureSettingsList = "com.deskconn.settings.list"
+	ProcedureSettingsSave = "com.deskconn.settings.save"
 )
 
 // The users of a standalone machine, whom its admins (the config file's users with role admin)
@@ -152,9 +152,9 @@ const (
 // Owners and admins register them, with their files as JSON {"<path>": "<yaml>"}, and
 // clients get an enabled one's app.yaml with screens and includes resolved.
 const (
-	ProcedureManifestRegister   = "io.xconn.deskconn.admin.manifest.register"
-	ProcedureManifestUnregister = "io.xconn.deskconn.admin.manifest.unregister"
-	ProcedureManifestGet        = "io.xconn.deskconn.manifest.get"
+	ProcedureManifestRegister   = "com.deskconn.admin.manifest.register"
+	ProcedureManifestUnregister = "com.deskconn.admin.manifest.unregister"
+	ProcedureManifestGet        = "com.deskconn.manifest.get"
 )
 
 // ProcedureAppsRegister is how a process on userd's local socket registers the apps it
@@ -166,8 +166,8 @@ const ProcedureAppsRegister = LocalProcedurePrefix + "apps.register"
 // prefixes to remote clients: userd's own and other apps' alike. Procedures under
 // ProcedureAdminPrefix are only for a machine's owner and admins.
 const (
-	ProcedurePrefix      = "io.xconn.deskconn."
-	ProcedureAdminPrefix = "io.xconn.deskconn.admin."
+	ProcedurePrefix      = "com.deskconn."
+	ProcedureAdminPrefix = "com.deskconn.admin."
 )
 
 // The caller roles of a machine's owners and admins, who may call the procedures under
