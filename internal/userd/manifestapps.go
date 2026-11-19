@@ -36,7 +36,7 @@ var manifestIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
 // isProcedure reports whether a manifest string is a procedure, to be checked as one.
 func isProcedure(value string) bool {
-	return strings.HasPrefix(value, common.ProcedurePrefix) || strings.HasPrefix(value, "io.xconn.")
+	return strings.HasPrefix(value, common.ProcedurePrefix) || strings.HasPrefix(value, common.LocalProcedurePrefix)
 }
 
 var errManifestTooLarge = fmt.Errorf("an app can have at most %d YAML mappings with its includes expanded",

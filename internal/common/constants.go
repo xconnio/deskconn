@@ -21,7 +21,7 @@ const (
 // half. They're under LocalProcedurePrefix, outside ProcedurePrefix and the app prefixes,
 // so xconn doesn't expose them remotely.
 const (
-	LocalProcedurePrefix = "io.xconn.local."
+	LocalProcedurePrefix = "local.deskconn."
 
 	ProcedureProxyFileOp       = LocalProcedurePrefix + "proxy.file.op"
 	ProcedureProxyMachineInfo  = LocalProcedurePrefix + "proxy.machine.info"
@@ -236,9 +236,9 @@ const progressPrintInterval = int64(100 * time.Millisecond)
 const P2PRequestTimeout = 15 * time.Second
 
 const (
-	ProcedureWebRTCOffer     = "io.xconn.webrtc.offer"
-	TopicAnswererOnCandidate = "io.xconn.webrtc.answerer.on_candidate"
-	TopicOffererOnCandidate  = "io.xconn.webrtc.offerer.on_candidate"
+	ProcedureWebRTCOffer     = "com.deskconn.webrtc.offer"
+	TopicAnswererOnCandidate = "com.deskconn.webrtc.answerer.on_candidate"
+	TopicOffererOnCandidate  = "com.deskconn.webrtc.offerer.on_candidate"
 
 	CloudRealm = "io.xconn.deskconn"
 
@@ -419,5 +419,5 @@ const VPNHelperBufSize = 64 * 1024
 
 // AppPrefixes are the external app procedures exposed through a machine connection.
 func AppPrefixes() []string {
-	return []string{"io.xconn.remotecontrol.", "io.xconn.media."}
+	return []string{"com.deskconn.remotecontrol.", "com.deskconn.media."}
 }

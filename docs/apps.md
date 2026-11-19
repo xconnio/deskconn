@@ -16,10 +16,10 @@ their procedures over routed and direct connections.
    `frontendToBackend` for requests and `backendToFrontend` for results. Every other procedure takes its request as a
    single encrypted JSON argument (nonce + ChaCha20-Poly1305 ciphertext, empty or absent when there is none) and returns
    a single encrypted JSON result. Keys are per caller session.
-3. **Register the apps** by calling `io.xconn.local.apps.register` with a JSON list:
+3. **Register the apps** by calling `local.deskconn.apps.register` with a JSON list:
 
    ```json
-   [{"id": "pictures", "name": "Pictures", "key_exchange": "io.xconn.media.key.exchange",
+   [{"id": "pictures", "name": "Pictures", "key_exchange": "com.deskconn.media.key.exchange",
      "requires": ["files"], "default_off": true}]
    ```
 
@@ -34,8 +34,8 @@ their procedures over routed and direct connections.
 
 Procedures under `com.deskconn.` are reachable by remote clients (and `com.deskconn.admin.` by
 the machine's owner and admins only), and so are the app prefixes the Hub allows
-(`io.xconn.remotecontrol.` and `io.xconn.media.`), so the key exchange and the app's procedures go under one of them.
-Everything else on the socket, such as `io.xconn.local.*`, stays local.
+(`com.deskconn.remotecontrol.` and `com.deskconn.media.`), so the key exchange and the app's procedures go under one of them.
+Everything else on the socket, such as `local.deskconn.*`, stays local.
 
 In Go, the `github.com/xconnio/deskconn/appkit` package has what an app needs: the connection (`appkit.Connect`), the
 procedures above, and `appkit.Encryption`, which does step 2:
@@ -43,21 +43,21 @@ procedures above, and `appkit.Encryption`, which does step 2:
 ```go
 session, err := appkit.Connect(ctx, cfgDirectory)
 enc := appkit.NewEncryption()
-if err := enc.Register(session, "io.xconn.media.key.exchange"); err != nil {
+if err := enc.Register(session, "com.deskconn.media.key.exchange"); err != nil {
     return err
 }
 handler := enc.Encrypted(func(ctx context.Context, req []byte) (any, error) {
     // req is the decrypted JSON request; the result is sent back as encrypted JSON.
     return map[string]string{"hello": "world"}, nil
 })
-resp := session.Register("io.xconn.media.hello", handler).Execute()
+resp := session.Register("com.deskconn.media.hello", handler).Execute()
 ```
 
 A client finds the app's key exchange in the apps list, then calls it before the app's procedures:
 
 ```go
 keys, err := appkit.ClientKeyExchange(session, keyExchange)
-result, err := appkit.EncryptedCall(session, "io.xconn.media.hello", nil, keys)
+result, err := appkit.EncryptedCall(session, "com.deskconn.media.hello", nil, keys)
 ```
 
 ### Manifest apps

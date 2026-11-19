@@ -11,7 +11,7 @@ layout:
         bind: context.capabilities.screen
       label: Lock screen
       icon: https://example.com/icons/lock.png
-      call: io.xconn.remotecontrol.screen.lock
+      call: com.deskconn.remotecontrol.screen.lock
 
     - id: mute
       include: app-engine/blocks/toggle.yaml
@@ -20,5 +20,5 @@ layout:
       label:
         on: Unmute
         off: Mute
-      read: io.xconn.remotecontrol.audio.ismuted
-      toggle: io.xconn.remotecontrol.audio.togglemute
+      read: com.deskconn.remotecontrol.audio.ismuted
+      toggle: com.deskconn.remotecontrol.audio.togglemute

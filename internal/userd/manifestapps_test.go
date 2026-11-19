@@ -86,7 +86,7 @@ func TestManifestApp(t *testing.T) {
 
 	require.Equal(t, &listedApp{
 		ID: id, Enabled: true, Manifest: true,
-		KeyExchange: "io.xconn.remotecontrol.key.exchange",
+		KeyExchange: "com.deskconn.remotecontrol.key.exchange",
 	}, findApp(t, caller, id))
 	require.False(t, findApp(t, caller, "files").Manifest)
 
@@ -104,7 +104,7 @@ func TestManifestApp(t *testing.T) {
 	// app-engine's blocks are left for clients to expand, with their fields.
 	mute := children[1]
 	require.Equal(t, "app-engine/blocks/toggle.yaml", mute["include"])
-	require.Equal(t, "io.xconn.remotecontrol.audio.ismuted", mute["read"])
+	require.Equal(t, "com.deskconn.remotecontrol.audio.ismuted", mute["read"])
 	require.NotContains(t, mute, "block")
 
 	// Disabled apps can't be fetched.
@@ -137,30 +137,30 @@ func TestManifestAppRejected(t *testing.T) {
 		"admin call": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"io.xconn.remotecontrol.screen.lock", "com.deskconn.admin.capabilities.set", 1)
+					"com.deskconn.remotecontrol.screen.lock", "com.deskconn.admin.capabilities.set", 1)
 			},
 			err: "call com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"admin read": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"io.xconn.remotecontrol.audio.ismuted", "com.deskconn.admin.capabilities.set", 1)
+					"com.deskconn.remotecontrol.audio.ismuted", "com.deskconn.admin.capabilities.set", 1)
 			},
 			err: "read com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"admin toggle": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"io.xconn.remotecontrol.audio.togglemute", "com.deskconn.admin.capabilities.set", 1)
+					"com.deskconn.remotecontrol.audio.togglemute", "com.deskconn.admin.capabilities.set", 1)
 			},
 			err: "toggle com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"unreachable toggle": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"io.xconn.remotecontrol.audio.togglemute", "io.xconn.local.login", 1)
+					"com.deskconn.remotecontrol.audio.togglemute", "local.deskconn.login", 1)
 			},
-			err: `toggle "io.xconn.local.login" must be under one of`,
+			err: `toggle "local.deskconn.login" must be under one of`,
 		},
 		"include blowup": {
 			change: func(files map[string]string) {
@@ -176,9 +176,9 @@ func TestManifestAppRejected(t *testing.T) {
 		"unreachable call": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"io.xconn.remotecontrol.screen.lock", "io.xconn.local.login", 1)
+					"com.deskconn.remotecontrol.screen.lock", "local.deskconn.login", 1)
 			},
-			err: `call "io.xconn.local.login" must be under one of`,
+			err: `call "local.deskconn.login" must be under one of`,
 		},
 		"include outside the app": {
 			change: func(files map[string]string) {

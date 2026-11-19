@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	keyExchange = "io.xconn.test.key.exchange"
-	echo        = "io.xconn.test.echo"
+	keyExchange = "com.deskconn.test.key.exchange"
+	echo        = "com.deskconn.test.echo"
 )
 
 // An app serves an encrypted procedure, and a client calls it with its own keys.
