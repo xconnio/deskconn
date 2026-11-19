@@ -24,6 +24,8 @@ import (
 const (
 	ModeRouted = "routed"
 	ModeDirect = "direct"
+
+	shellSetupTimeout = 15 * time.Second
 )
 
 // clampUint16 clamps a terminal dimension (from term.GetSize, always
@@ -141,10 +143,35 @@ func shellHandshakeOnStream(ctx context.Context, sess common.StreamSession, ctrl
 			common.ProcedureShellStream, realm, transport, err)
 	}
 	cleanup := func() { _ = stream.Close(); release() }
+	return finishShellHandshake(ctx, stream, ctrl, cleanup)
+}
+
+// The RPC context bounds opening the stream; feature reads and writes need their
+// own cancellation once the stream has been returned.
+func finishShellHandshake(ctx context.Context, stream net.Conn, ctrl common.ShellControlMsg,
+	cleanup func()) (*shellHandshakeResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, shellSetupTimeout)
+	defer cancel()
+	deadline, _ := ctx.Deadline() // WithTimeout always supplies a deadline.
+	if err := stream.SetDeadline(deadline); err != nil {
+		cleanup()
+		return nil, err
+	}
+	canceled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = stream.SetDeadline(time.Now())
+		close(canceled)
+	})
+	defer func() {
+		if !stop() {
+			<-canceled
+		}
+		_ = stream.SetDeadline(time.Time{})
+	}()
 	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
 	if err != nil {
 		cleanup()
-		return nil, err
+		return nil, fmt.Errorf("shell key exchange: %w", err)
 	}
 
 	conn := &streamClientShellConn{stream: stream}
@@ -155,7 +182,7 @@ func shellHandshakeOnStream(ctx context.Context, sess common.StreamSession, ctrl
 	ack, err := recvShellAck(conn, receiveKey)
 	if err != nil {
 		cleanup()
-		return nil, err
+		return nil, fmt.Errorf("shell startup acknowledgement: %w", err)
 	}
 	return &shellHandshakeResult{
 		conn: conn, sendKey: sendKey, receiveKey: receiveKey,
@@ -329,6 +356,26 @@ func resetShellTerminal(output io.Writer) {
 			"\x1b[?25h\x1b[0m") // Visible cursor and default attributes.
 }
 
+// shellSetupContext limits setup without imposing a deadline on the returned
+// RPC stream. finish disarms the timer; cancel releases the stream's lifetime.
+func shellSetupContext(
+	parent context.Context, timeout time.Duration,
+) (context.Context, func() error, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(parent)
+	expired := make(chan struct{})
+	timer := time.AfterFunc(timeout, func() {
+		cancel(context.DeadlineExceeded)
+		close(expired)
+	})
+	finish := func() error {
+		if !timer.Stop() {
+			<-expired
+		}
+		return context.Cause(ctx)
+	}
+	return ctx, finish, func() { cancel(context.Canceled) }
+}
+
 // runStreamCommand is the shared connect-and-run loop behind RunShell and
 // RunExec: ctrl seeds the initial control message (RunExec sets
 // Command/Args; RunShell leaves them empty for an interactive bash shell),
@@ -360,22 +407,31 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	}
 	ctrl.Op, ctrl.Cols, ctrl.Rows = common.ShellOpSize, clampUint16(cols), clampUint16(rows)
 
+	// Bound connection, daemon probing, RPC setup and the feature handshake together.
+	setupCtx, finishSetup, cancelSetup := shellSetupContext(ctx, shellSetupTimeout)
+	defer cancelSetup()
 	var err error
 	var primary *shellHandshakeResult
 	var daemon *DaemonStreams
 	switch mode {
 	case ModeDirect:
-		primary, err = dialShellP2P(ctx, realm, cfgDirectory, ctrl)
+		primary, err = dialShellP2P(setupCtx, realm, cfgDirectory, ctrl)
 	case ModeRouted:
-		primary, err = dialShellQUIC(ctx, realm, cfgDirectory, ctrl)
+		primary, err = dialShellQUIC(setupCtx, realm, cfgDirectory, ctrl)
 	default:
-		daemon, err = DialDaemonStreams(ctx, realm, cfgDirectory)
+		daemon, err = DialDaemonStreams(setupCtx, realm, cfgDirectory)
 		switch {
 		case err == nil:
-			primary, err = dialShellDaemon(ctx, daemon, ctrl)
+			primary, err = dialShellDaemon(setupCtx, daemon, ctrl)
 		case errors.Is(err, ErrDaemonUnavailable):
-			primary, err = dialShellQUIC(ctx, realm, cfgDirectory, ctrl)
+			primary, err = dialShellQUIC(setupCtx, realm, cfgDirectory, ctrl)
 		}
+	}
+	if setupErr := finishSetup(); setupErr != nil {
+		if primary != nil {
+			primary.cleanup()
+		}
+		err = errors.Join(err, fmt.Errorf("shell connection setup: %w", setupErr))
 	}
 	if err != nil {
 		var rejected *shellRejectedError

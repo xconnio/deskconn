@@ -2,6 +2,7 @@ package deskconn_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 func TestShellConcurrentFrames(t *testing.T) {
@@ -98,4 +100,81 @@ func TestShellStdinEOF(t *testing.T) {
 			require.Equal(t, tt.want, string(got))
 		})
 	}
+}
+
+// A peer that accepts a stream but stops during setup must not trap the terminal.
+func TestShellHandshakeStall(t *testing.T) {
+	for _, stage := range []string{"key exchange", "shell acknowledgement"} {
+		t.Run(stage, func(t *testing.T) {
+			client, server := net.Pipe()
+			defer server.Close()
+			defer client.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			if stage == "shell acknowledgement" {
+				go func() {
+					_, err := common.ReadFrame(server)
+					if err != nil {
+						return
+					}
+					publicKey, _, err := common.CreateX25519KeyPair()
+					if err != nil {
+						return
+					}
+					if common.WriteMsg(server, common.KeyExchangeMsg{PublicKey: publicKey}) == nil {
+						_, _ = common.ReadFrame(server)
+					}
+				}()
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := deskconn.FinishShellHandshake(ctx, client, common.ShellControlMsg{}, func() { _ = client.Close() })
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				require.Error(t, err)
+			case <-time.After(2 * time.Second):
+				t.Fatal("stalled handshake ignored its deadline")
+			}
+		})
+	}
+}
+
+func TestShellSetupKeepsRPCStreamAlive(t *testing.T) {
+	router, err := xconn.NewRouter(nil)
+	require.NoError(t, err)
+	defer router.Close()
+	require.NoError(t, router.AddRealm("shell-setup", nil))
+	backend, err := xconn.ConnectInMemory(router, "shell-setup")
+	require.NoError(t, err)
+	defer backend.Close()
+	caller, err := xconn.ConnectInMemory(router, "shell-setup")
+	require.NoError(t, err)
+	defer caller.Close()
+	endpoint, peer := net.Pipe()
+	defer endpoint.Close()
+	defer peer.Close()
+	require.NoError(t, backend.Register("test.shell", func(context.Context, *xconn.Invocation) *xconn.Result {
+		return xconn.NewResult(nil, xconn.DuplexStream(endpoint))
+	}).ExecuteContext(t.Context()).Err)
+	ctx, finish, cancel := deskconn.ShellSetupContext(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	stream, err := common.OpenRPCStream(ctx, caller, "test.shell", false)
+	require.NoError(t, err)
+	defer stream.Close()
+	require.NoError(t, finish())
+	// Keep using the actual RPC stream beyond the setup timeout.
+	time.Sleep(150 * time.Millisecond)
+	require.NoError(t, ctx.Err())
+	require.NoError(t, stream.SetDeadline(time.Now().Add(time.Second)))
+	written := make(chan error, 1)
+	go func() { _, err := peer.Write([]byte("ok")); written <- err }()
+	data := make([]byte, 2)
+	_, err = io.ReadFull(stream, data)
+	require.NoError(t, err)
+	require.NoError(t, <-written)
+	require.Equal(t, "ok", string(data))
+	cancel()
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
