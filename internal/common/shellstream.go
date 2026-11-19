@@ -14,7 +14,7 @@ type ShellControlMsg struct {
 	Op      shellControlOp `json:"op"`
 	Cols    uint16         `json:"cols,omitempty"`
 	Rows    uint16         `json:"rows,omitempty"`
-	AuthID  string         `json:"auth_id,omitempty"`  // size only: self-reported, for agent-forward lookup
+	AuthID  string         `json:"auth_id,omitempty"`  // size only: read by older machines; newer ones use the caller
 	Command string         `json:"command,omitempty"`  // size only: exec's command; empty means an interactive bash shell
 	Args    []string       `json:"args,omitempty"`     // size only: exec's arguments to Command
 	Dir     string         `json:"dir,omitempty"`      // size only: the directory to start in; empty means home

@@ -42,8 +42,8 @@ func (d *Deskconn) HandleQUICPortForwardStream(stream net.Conn) {
 func (d *Deskconn) HandleQUICPortReverseStream(stream net.Conn) {
 	d.handleQUICPortReverseStream(stream)
 }
-func (d *Deskconn) HandleQUICAgentForwardStream(stream net.Conn) {
-	d.handleQUICAgentForwardStream(stream)
+func (d *Deskconn) HandleQUICAgentForwardStream(stream net.Conn, caller string) {
+	d.handleQUICAgentForwardStream(stream, caller)
 }
 
 // NewAgentForwardDeskconn returns a Deskconn with only agent forwarding set up.

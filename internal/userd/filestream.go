@@ -27,7 +27,7 @@ func (d *Deskconn) serveStreamOperation(op common.FSOp, stream net.Conn, caller 
 		d.handleQUICPortReverseStream(stream)
 		return
 	case common.FSOpAgentForward:
-		d.handleQUICAgentForwardStream(stream)
+		d.handleQUICAgentForwardStream(stream, caller)
 		return
 	case common.FSOpLogs:
 		d.handleQUICLogsStream(stream)

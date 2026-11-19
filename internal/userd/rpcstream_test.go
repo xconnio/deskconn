@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,10 +85,10 @@ func openRPCShell(t *testing.T, session *xconn.Session, ctrl common.ShellControl
 	return rpcShell{conn: conn, sendKey: sendKey, receiveKey: receiveKey, ack: ack}
 }
 
-// TestRPCShellMigrationIsBoundToCaller moves a shell between two RPC sessions, as the CLI
-// does from a routed to a direct connection: the authenticated caller that opened it may,
-// another caller holding the same token may not.
-func TestRPCShellMigrationIsBoundToCaller(t *testing.T) {
+// newBridgedMachine starts a machine as the daemon runs it, returning a way to call it as
+// an authenticated user and its features.
+func newBridgedMachine(t *testing.T) (func(authID string) *xconn.Session, *userd.Deskconn) {
+	t.Helper()
 	// The machine as the daemon runs it: features on the local app layer, and a bridge from
 	// the machine's router giving each remote caller its own session there, as itself.
 	const machineRealm = "machine"
@@ -119,11 +120,20 @@ func TestRPCShellMigrationIsBoundToCaller(t *testing.T) {
 	t.Cleanup(func() { _ = bridge.Close() })
 
 	sessionAs := func(authID string) *xconn.Session {
+		t.Helper()
 		session, err := connectAs(device, machineRealm, authID, common.RoleOwner)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = session.Close() })
 		return session
 	}
+	return sessionAs, backend
+}
+
+// TestRPCShellMigrationIsBoundToCaller moves a shell between two RPC sessions, as the CLI
+// does from a routed to a direct connection: the authenticated caller that opened it may,
+// another caller holding the same token may not.
+func TestRPCShellMigrationIsBoundToCaller(t *testing.T) {
+	sessionAs, _ := newBridgedMachine(t)
 
 	routed := sessionAs("alice@example.com")
 	opened := openRPCShell(t, routed, common.ShellControlMsg{Op: common.ShellOpSize, Cols: 80, Rows: 24})
@@ -148,4 +158,44 @@ func TestRPCShellMigrationIsBoundToCaller(t *testing.T) {
 		output = append(output, msg.data...)
 	}
 	require.NoError(t, sendQUICShellData(moved.conn, moved.sendKey, []byte("exit\r")))
+}
+
+// TestRPCAgentForwardUsesAuthenticatedCaller forwards an agent as one caller claiming to be
+// another: the agent is the authenticated caller's, and only its own shells get it.
+func TestRPCAgentForwardUsesAuthenticatedCaller(t *testing.T) {
+	sessionAs, backend := newBridgedMachine(t)
+
+	alice := sessionAs("alice@example.com")
+	forward, err := common.OpenRPCStream(t.Context(), alice, common.ProcedureAgentForwardStream, false)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = forward.Close() })
+	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(forward)
+	require.NoError(t, err)
+	require.NoError(t, sendPortEnvelope(forward, common.AgentFwdMsgControl, common.MustJSON(
+		common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: "bob@example.com"}), sendKey))
+	_, _, err = recvPortEnvelope(forward, receiveKey)
+	require.NoError(t, err)
+
+	sockPath, ok := backend.AgentSocketPath("alice@example.com")
+	require.True(t, ok)
+	_, ok = backend.AgentSocketPath("bob@example.com")
+	require.False(t, ok, "the agent must not be registered for the claimed AuthID")
+
+	agentSock := func(session *xconn.Session, claimed string) string {
+		t.Helper()
+		shell := openRPCShell(t, session, common.ShellControlMsg{Op: common.ShellOpSize, Cols: 80, Rows: 24,
+			AuthID: claimed, Command: "sh", Args: []string{"-c", "echo \"agent=[$SSH_AUTH_SOCK]\""}})
+		require.NotEmpty(t, shell.ack.ackShellID)
+		var output []byte
+		for {
+			if match := regexp.MustCompile(`agent=\[([^\]]*)\]`).FindSubmatch(output); match != nil {
+				return string(match[1])
+			}
+			msg, err := recvQUICShellEnvelope(shell.conn, shell.receiveKey)
+			require.NoError(t, err, "output so far: %q", output)
+			output = append(output, msg.data...)
+		}
+	}
+	assert.Equal(t, sockPath, agentSock(alice, "bob@example.com"))
+	assert.NotEqual(t, sockPath, agentSock(sessionAs("bob@example.com"), "alice@example.com"))
 }
