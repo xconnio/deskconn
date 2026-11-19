@@ -39,7 +39,7 @@ func TestAgentForwardStartSuccessAndDataRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(plaintext, &ack))
 	require.Empty(t, ack.Error)
 
-	sockPath, ok := d.AgentSocketPath(testAuthID)
+	sockPath, ok := d.AgentSocketPath(caller.Details().AuthID())
 	require.True(t, ok)
 	require.NotEmpty(t, sockPath)
 
@@ -70,7 +70,7 @@ func TestAgentForwardStartFailureReportsError(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 	d := newTestAgentForwardDeskconn()
-	go d.HandleQUICAgentForwardStream(server)
+	go d.HandleQUICAgentForwardStream(server, testAuthID)
 
 	sendKey, _, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestAgentForwardStartFailureReportsError(t *testing.T) {
 func TestAgentForwardSocketPathCompareAndDeleteOnCleanup(t *testing.T) {
 	client1, server1 := net.Pipe()
 	d := newTestAgentForwardDeskconn()
-	go d.HandleQUICAgentForwardStream(server1)
+	go d.HandleQUICAgentForwardStream(server1, testAuthID)
 
 	sendKey1, receiveKey1, err := deskconn.StreamClientKeyExchange(client1)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestAgentForwardSocketPathCompareAndDeleteOnCleanup(t *testing.T) {
 
 	client2, server2 := net.Pipe()
 	t.Cleanup(func() { _ = client2.Close() })
-	go d.HandleQUICAgentForwardStream(server2)
+	go d.HandleQUICAgentForwardStream(server2, testAuthID)
 
 	sendKey2, receiveKey2, err := deskconn.StreamClientKeyExchange(client2)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestAgentForwardIgnoresPing(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 	d := newTestAgentForwardDeskconn()
-	go d.HandleQUICAgentForwardStream(server)
+	go d.HandleQUICAgentForwardStream(server, testAuthID)
 
 	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestAgentForwardConcurrentConnections(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 	d := newTestAgentForwardDeskconn()
-	go d.HandleQUICAgentForwardStream(server)
+	go d.HandleQUICAgentForwardStream(server, testAuthID)
 
 	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)

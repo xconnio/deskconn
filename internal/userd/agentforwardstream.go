@@ -12,7 +12,7 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 )
 
-// agentForwardSessions maps a client's self-reported AuthID to the private
+// agentForwardSessions maps an authenticated caller to the private
 // UNIX socket path currently forwarded for it, so shell.go's
 // agentSockForAuthID can set SSH_AUTH_SOCK when starting a PTY. Each
 // handleQUICAgentForwardStream session registers
@@ -80,8 +80,9 @@ func createAgentForwardSocket() (dir, sockPath string, ln net.Listener, err erro
 // handleQUICAgentForwardStream serves one agent-forward session over an RPC
 // byte stream: key exchange, read the client's start request, create the
 // private socket, then multiplex every accepted connection's lifecycle and
-// data over this one stream.
-func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
+// data over this one stream. The socket is registered for caller, the
+// authenticated caller of the RPC, not the AuthID the client reports.
+func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn, caller string) {
 	defer stream.Close()
 
 	sendKey, receiveKey, err := streamServerKeyExchange(stream)
@@ -110,8 +111,8 @@ func (d *Deskconn) handleQUICAgentForwardStream(stream net.Conn) {
 	} else {
 		defer os.RemoveAll(dir)
 		defer ln.Close()
-		d.agentForwardSessions.register(ctrl.AuthID, sockPath)
-		defer d.agentForwardSessions.unregister(ctrl.AuthID, sockPath)
+		d.agentForwardSessions.register(caller, sockPath)
+		defer d.agentForwardSessions.unregister(caller, sockPath)
 	}
 	if env, buildErr := common.BuildPortEnvelope(common.AgentFwdMsgControl,
 		common.MustJSON(ack), sendKey); buildErr == nil {

@@ -208,8 +208,8 @@ func (p *interactiveShellSession) resolveStartDir(prevShellID string) (string, e
 }
 
 // agentSockForAuthID returns the forwarded SSH agent socket path for
-// authID (self-reported by the client in ShellControlMsg), or "" if agent
-// forwarding isn't active for it.
+// authID, the authenticated caller, or "" if agent forwarding isn't active
+// for it.
 func (p *interactiveShellSession) agentSockForAuthID(authID string) string {
 	if p.agentForward == nil || authID == "" {
 		return ""
