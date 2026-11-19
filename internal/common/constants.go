@@ -38,10 +38,10 @@ const (
 	ProcedureDisconnectAll     = LocalProcedurePrefix + "disconnect_all"
 	ProcedureConnectedMachines = LocalProcedurePrefix + "connected_machines"
 
-	LocalRealm = "io.xconn.deskconn.local"
+	LocalRealm = "com.deskconn.local"
 
 	// StandaloneRealm is the machine realm served in standalone mode.
-	StandaloneRealm = "io.xconn.deskconn.standalone"
+	StandaloneRealm = "com.deskconn.standalone"
 )
 
 // These are the machine-facing procedures userd's app-layer handlers
@@ -110,7 +110,7 @@ const (
 )
 
 const (
-	Realm = "io.xconn.deskconn"
+	Realm = "com.deskconn"
 )
 
 const ProcedureFileCat = "com.deskconn.file.cat"
@@ -240,7 +240,7 @@ const (
 	TopicAnswererOnCandidate = "com.deskconn.webrtc.answerer.on_candidate"
 	TopicOffererOnCandidate  = "com.deskconn.webrtc.offerer.on_candidate"
 
-	CloudRealm = "io.xconn.deskconn"
+	CloudRealm = "com.deskconn"
 
 	StunServerURL = "stun:stun.l.google.com:19302"
 )
