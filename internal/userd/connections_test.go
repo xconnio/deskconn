@@ -108,24 +108,20 @@ func startTestCloud(t *testing.T) *testCloud {
 // request.
 const procedureTestEcho = "com.deskconn.test.echo"
 
-// machineOnline brings the machine's daemon online: answering ping (by its name before
-// procedures lost their "deskconnd." part, if legacy), exchanging keys like userd's does,
-// and serving procedureTestEcho with them. It goes offline when the returned func is called.
-func (c *testCloud) machineOnline(legacy bool) (offline func()) {
+// machineOnline brings the machine's daemon online: answering ping, exchanging keys like
+// userd's does, and serving procedureTestEcho with them. It goes offline when the returned
+// func is called.
+func (c *testCloud) machineOnline() (offline func()) {
 	c.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	session, err := xconn.ConnectCryptosign(ctx, c.rawSocketURI, cloudMachineRealm, cloudMachineAuthID, c.machineKey)
 	require.NoError(c.t, err)
 
-	ping := common.ProcedurePing
-	if legacy {
-		ping = "com.deskconn.deskconnd.ping"
-	}
 	var mu sync.Mutex
 	keys := map[uint64]*common.SessionKeys{} // by caller, from the machine's side
 	handlers := map[string]xconn.InvocationHandler{
-		ping: func(context.Context, *xconn.Invocation) *xconn.Result {
+		common.ProcedurePing: func(context.Context, *xconn.Invocation) *xconn.Result {
 			return xconn.NewResult()
 		},
 		common.ProcedureKeyExchange: func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
@@ -187,7 +183,7 @@ func TestConnectingToAnOfflineMachine(t *testing.T) {
 
 func TestConnectingToAnOnlineMachine(t *testing.T) {
 	cloud := startTestCloud(t)
-	cloud.machineOnline(false)
+	cloud.machineOnline()
 	sessions := userd.NewClientSessions()
 
 	// Callers at once share one connection.
@@ -209,18 +205,9 @@ func TestConnectingToAnOnlineMachine(t *testing.T) {
 	require.Equal(t, []string{cloudMachineRealm}, connectedRealms(sessions))
 }
 
-func TestConnectingToAMachineNotUpdated(t *testing.T) {
-	cloud := startTestCloud(t)
-	cloud.machineOnline(true)
-
-	_, err := userd.NewClientSessions().EnsureMachineSession(context.Background(), cloudMachineRealm,
-		cloud.cfgDirectory)
-	require.NoError(t, err, "it answers to ping by its old name")
-}
-
 func TestLostConnection(t *testing.T) {
 	cloud := startTestCloud(t)
-	offline := cloud.machineOnline(false)
+	offline := cloud.machineOnline()
 	sessions := userd.NewClientSessions()
 	session, err := sessions.EnsureMachineSession(context.Background(), cloudMachineRealm, cloud.cfgDirectory)
 	require.NoError(t, err)
@@ -244,7 +231,7 @@ func TestLostConnection(t *testing.T) {
 	require.Never(t, func() bool { return len(connectedRealms(sessions)) > 0 }, 3*time.Second,
 		100*time.Millisecond, "the machine is offline")
 
-	cloud.machineOnline(false)
+	cloud.machineOnline()
 	require.Eventually(t, func() bool { return len(connectedRealms(sessions)) == 1 }, 20*time.Second,
 		100*time.Millisecond, "back once the machine is")
 }
@@ -270,7 +257,7 @@ func TestConnectedSinceKeptAcrossUpgrade(t *testing.T) {
 
 func TestProxiedCallsAtOnce(t *testing.T) {
 	cloud := startTestCloud(t)
-	cloud.machineOnline(false)
+	cloud.machineOnline()
 	sessions := userd.NewClientSessions()
 
 	local, err := xconn.NewRouter(&xconn.RouterConfig{})
@@ -302,7 +289,7 @@ func TestProxiedCallsAtOnce(t *testing.T) {
 
 func TestFailedProxiedCallKeepsTheConnection(t *testing.T) {
 	cloud := startTestCloud(t)
-	cloud.machineOnline(false)
+	cloud.machineOnline()
 	sessions := userd.NewClientSessions()
 
 	local, err := xconn.NewRouter(&xconn.RouterConfig{})
