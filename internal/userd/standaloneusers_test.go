@@ -283,6 +283,7 @@ func TestStandaloneUsersOnlyForAdmins(t *testing.T) {
 	for _, role := range roles { // and the built-in trusted
 		realm.Roles = append(realm.Roles, xconn.RealmRole{Name: role, Permissions: []xconn.Permission{
 			{URI: "io.xconn.", MatchPolicy: wampproto.MatchPrefix, AllowCall: true, AllowRegister: true},
+			{URI: "com.deskconn.", MatchPolicy: wampproto.MatchPrefix, AllowCall: true, AllowRegister: true},
 		}})
 	}
 	router, err := xconn.NewRouter(&xconn.RouterConfig{})

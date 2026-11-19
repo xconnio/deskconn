@@ -24,7 +24,7 @@ Leave out `--private-key` to log in with a password instead (`--authid <username
 passing users as flags instead of a config file.
 
 Users can also be added and removed while the machine is served, by its admins: the config file's users with
-`role: admin`. They do it through the `io.xconn.deskconn.admin.users.list`, `.add` and `.remove` procedures. The
+`role: admin`. They do it through the `com.deskconn.admin.users.list`, `.add` and `.remove` procedures. The
 users added are members, kept in `~/.deskconn/standalone-users.db` beside the config file's users, which only the
 config file changes.
 

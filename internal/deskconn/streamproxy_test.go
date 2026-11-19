@@ -165,7 +165,7 @@ func TestShellReportsMissingProcedure(t *testing.T) {
 
 	err = deskconn.RunShell(t.Context(), "", streamProxyTestRealm, directory)
 	require.ErrorContains(t, err,
-		`open shell RPC io.xconn.deskconn.shell.stream for realm "io.xconn.test" via local daemon`)
+		`open shell RPC com.deskconn.shell.stream for realm "io.xconn.test" via local daemon`)
 	require.ErrorAs(t, err, &connection)
 	require.ErrorAs(t, err, &application)
 	require.Equal(t, common.ErrNoSuchProcedure, application.URI)

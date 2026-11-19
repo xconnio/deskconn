@@ -137,23 +137,23 @@ func TestManifestAppRejected(t *testing.T) {
 		"admin call": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"io.xconn.remotecontrol.screen.lock", "io.xconn.deskconn.admin.capabilities.set", 1)
+					"io.xconn.remotecontrol.screen.lock", "com.deskconn.admin.capabilities.set", 1)
 			},
-			err: "call io.xconn.deskconn.admin.capabilities.set is only for the machine's owner and admins",
+			err: "call com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"admin read": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"io.xconn.remotecontrol.audio.ismuted", "io.xconn.deskconn.admin.capabilities.set", 1)
+					"io.xconn.remotecontrol.audio.ismuted", "com.deskconn.admin.capabilities.set", 1)
 			},
-			err: "read io.xconn.deskconn.admin.capabilities.set is only for the machine's owner and admins",
+			err: "read com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"admin toggle": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"io.xconn.remotecontrol.audio.togglemute", "io.xconn.deskconn.admin.capabilities.set", 1)
+					"io.xconn.remotecontrol.audio.togglemute", "com.deskconn.admin.capabilities.set", 1)
 			},
-			err: "toggle io.xconn.deskconn.admin.capabilities.set is only for the machine's owner and admins",
+			err: "toggle com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"unreachable toggle": {
 			change: func(files map[string]string) {
@@ -210,7 +210,7 @@ func TestManifestAppRejected(t *testing.T) {
 		"id taken": {
 			change: func(files map[string]string) {
 				files["app.yaml"] = "app:\n  id: files\n  name: Files\napi:\n  key_exchange: " +
-					"io.xconn.deskconn.deskconnd.key.exchange\nentry_screen: home\nscreens:\n  - screens/home.yaml\n"
+					"com.deskconn.deskconnd.key.exchange\nentry_screen: home\nscreens:\n  - screens/home.yaml\n"
 				files["screens/home.yaml"] = "id: home\n"
 			},
 			err: "app files is already registered",
