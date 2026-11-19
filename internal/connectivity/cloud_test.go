@@ -65,12 +65,13 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	defer local.Close()
 	defer socket.Close()
 	defer localSession.Close()
-	require.NoError(t, localSession.Register("io.xconn.echo", func(_ context.Context, inv *api.Invocation) *api.Result {
+	require.NoError(t, localSession.Register("com.deskconn.echo", func(_ context.Context,
+		inv *api.Invocation) *api.Result {
 		return api.NewResult(inv.Args()...)
 	}).ExecuteContext(ctx).Err)
 	bobPublic, bobPrivate, err := auth.GenerateCryptoSignKeyPair()
 	require.NoError(t, err)
-	require.NoError(t, localSession.Register("io.xconn.stream", func(context.Context, *api.Invocation) *api.Result {
+	require.NoError(t, localSession.Register("com.deskconn.stream", func(context.Context, *api.Invocation) *api.Result {
 		endpoint, worker := net.Pipe()
 		go func() {
 			defer worker.Close()
@@ -104,7 +105,7 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 		TopicDetachFormat: "detach.%s", RetryInterval: 10 * time.Millisecond,
 	}
 	go func() {
-		application := &app.App{Session: localSession, Prefixes: []string{"io.xconn."},
+		application := &app.App{Session: localSession, Prefixes: []string{"com.deskconn."},
 			DatagramChannel: func(channel *api.WebRTCDataChannel) {
 				channel.OnMessage(func(message api.WebRTCDataChannelMessage) {
 					if !message.IsString || string(message.Data) != "hello" {
@@ -127,7 +128,7 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	defer caller.Close()
 	require.Eventually(t, func() bool {
-		reply := caller.Call("io.xconn.echo").Arg("cloud to app").ExecuteContext(ctx)
+		reply := caller.Call("com.deskconn.echo").Arg("cloud to app").ExecuteContext(ctx)
 		return reply.Err == nil && reply.ArgStringOr(0, "") == "cloud to app"
 	}, 3*time.Second, time.Millisecond)
 	require.NoError(
@@ -139,7 +140,7 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 		return err == nil && len(principals) == 3
 	}, time.Second, time.Millisecond)
 	checkStream := func(session *api.Session) {
-		reply := session.Call("io.xconn.stream").ExecuteContext(ctx)
+		reply := session.Call("com.deskconn.stream").ExecuteContext(ctx)
 		require.NoError(t, reply.Err)
 		stream, err := reply.ArgStream(1)
 		require.NoError(t, err)
@@ -161,7 +162,7 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	}
 	direct, err := api.ConnectWebRTCContext(ctx, directConfig)
 	require.NoError(t, err)
-	require.NoError(t, direct.Call("io.xconn.echo").Arg("direct").ExecuteContext(ctx).Err)
+	require.NoError(t, direct.Call("com.deskconn.echo").Arg("direct").ExecuteContext(ctx).Err)
 	checkStream(direct.Session)
 	channel, err := direct.OpenChannel("vpn", nil)
 	require.NoError(t, err)
@@ -202,7 +203,7 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	defer reconnected.Close()
 	require.Eventually(t, func() bool {
-		reply := caller.Call("io.xconn.echo").Arg("reconnected").ExecuteContext(ctx)
+		reply := caller.Call("com.deskconn.echo").Arg("reconnected").ExecuteContext(ctx)
 		return reply.Err == nil && reply.ArgStringOr(0, "") == "reconnected"
 	}, 3*time.Second, time.Millisecond)
 	require.NoError(t, service.Publish("detach.machine").Acknowledge(true).ExecuteContext(ctx).Err)
@@ -217,7 +218,7 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	defer reattached.Close()
 	require.Eventually(t, func() bool {
-		reply := caller.Call("io.xconn.echo").Arg("reattached").ExecuteContext(ctx)
+		reply := caller.Call("com.deskconn.echo").Arg("reattached").ExecuteContext(ctx)
 		return reply.Err == nil && reply.ArgStringOr(0, "") == "reattached"
 	}, 3*time.Second, time.Millisecond)
 	cloudRouter.RemoveRealm(deviceRealm)
@@ -263,7 +264,7 @@ func TestCloudReconnectStopsDuringRetryDelay(t *testing.T) {
 			failures := make(chan error, 16)
 			finished := make(chan error, 1)
 			go func() {
-				finished <- app.Run(ctx, &app.App{Session: session, Prefixes: []string{"io.xconn."}}, &app.CloudConfig{
+				finished <- app.Run(ctx, &app.App{Session: session, Prefixes: []string{"com.deskconn."}}, &app.CloudConfig{
 					Address: "127.0.0.1:1", Realm: cloudRealm, MachineID: "machine",
 					CredentialsFile: credentialsPath, PrincipalsFile: filepath.Join(directory, "principals.json"),
 					ProcedureListKeys: "keys", RootCertificates: [][]byte{[]byte("invalid certificate")},

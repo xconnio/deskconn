@@ -42,7 +42,8 @@ func TestStandaloneServesApplicationAndStopsRelays(t *testing.T) {
 	application, err := app.ConnectApp(ctx, socketPath, "local")
 	require.NoError(t, err)
 	defer application.Close()
-	require.NoError(t, application.Register("io.xconn.transfer", func(_ context.Context, inv *api.Invocation) *api.Result {
+	require.NoError(t, application.Register("com.deskconn.transfer", func(_ context.Context,
+		inv *api.Invocation) *api.Result {
 		stream, openErr := inv.ArgStream(1)
 		if openErr != nil {
 			return api.NewResultError("test.invalid_stream", openErr.Error())
@@ -54,7 +55,7 @@ func TestStandaloneServesApplicationAndStopsRelays(t *testing.T) {
 		}
 		return api.NewResult(inv.CallerAuthID(), api.ReadStream(io.NopCloser(bytes.NewReader(body))))
 	}).ExecuteContext(ctx).Err)
-	require.NoError(t, application.Register("io.xconn.echo", func(_ context.Context, inv *api.Invocation) *api.Result {
+	require.NoError(t, application.Register("com.deskconn.echo", func(_ context.Context, inv *api.Invocation) *api.Result {
 		return api.NewResult(inv.Args()...)
 	}).ExecuteContext(ctx).Err)
 	identity, err := api.GenerateSelfSignedTLSConfig()
@@ -70,7 +71,7 @@ func TestStandaloneServesApplicationAndStopsRelays(t *testing.T) {
 	defer stop()
 	go func() {
 		stopped <- app.RunStandalone(serving, &app.App{
-			Session: backend, Procedures: []string{"io.xconn.echo", "io.xconn.transfer"},
+			Session: backend, Procedures: []string{"com.deskconn.echo", "com.deskconn.transfer"},
 			NewSession: func(id, role string) (*api.Session, error) {
 				//nolint:contextcheck // BaseSession constructors have no context API.
 				base, joinErr := api.ConnectInMemoryBase(local, "local", id, role, &serializers.CBORSerializer{}, 16)
@@ -110,7 +111,7 @@ func TestStandaloneServesApplicationAndStopsRelays(t *testing.T) {
 	defer wt.Close()
 	for _, session := range []*api.Session{quic.Session, wt.Session} {
 		require.Eventually(t, func() bool {
-			response := session.Call("io.xconn.echo").Arg("hello").ExecuteContext(ctx)
+			response := session.Call("com.deskconn.echo").Arg("hello").ExecuteContext(ctx)
 			return response.Err == nil && response.ArgStringOr(0, "") == "hello"
 		}, time.Second, 10*time.Millisecond)
 	}
@@ -125,7 +126,7 @@ func TestStandaloneServesApplicationAndStopsRelays(t *testing.T) {
 	defer rtc.Close()
 	content := bytes.Repeat([]byte{0, 255, 3, 128}, 384*1024)
 	for _, session := range []*api.Session{quic.Session, wt.Session, rtc.Session} {
-		result := session.Call("io.xconn.transfer").Arg("report.bin").
+		result := session.Call("com.deskconn.transfer").Arg("report.bin").
 			Arg(api.ReadStream(io.NopCloser(bytes.NewReader(content)))).ExecuteContext(ctx)
 		require.NoError(t, result.Err)
 		require.Equal(t, "carol", result.ArgStringOr(0, ""))

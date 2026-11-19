@@ -7,7 +7,7 @@ app:
   icon: https://example.com/icons/remote-control.png
 
 api:
-  key_exchange: io.xconn.remotecontrol.key.exchange
+  key_exchange: com.deskconn.remotecontrol.key.exchange
 
 entry_screen: home
 

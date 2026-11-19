@@ -33,7 +33,7 @@ func startStandalone(t *testing.T, keys []string, passwords map[string]string) (
 
 	local, err := xconn.ConnectInMemory(router, common.StandaloneRealm)
 	require.NoError(t, err)
-	resp := local.Register("io.xconn.test.echo", func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
+	resp := local.Register("com.deskconn.test.echo", func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 		return xconn.NewResult(inv.Args()...)
 	}).Execute()
 	require.NoError(t, resp.Err)
@@ -91,7 +91,7 @@ func TestStandaloneTransports(t *testing.T) {
 		conn, err := connectStandalone(t, &common.StandaloneTarget{URL: url, CertHash: certHash, AuthID: testUser,
 			Password: testPassword})
 		require.NoError(t, err, url)
-		resp := conn.Call("io.xconn.test.echo").Args("hello").Execute()
+		resp := conn.Call("com.deskconn.test.echo").Args("hello").Execute()
 		require.NoError(t, resp.Err, url)
 		require.Equal(t, "hello", resp.Args[0])
 
@@ -132,7 +132,7 @@ func TestStandaloneAuthenticatorPassword(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
 	require.Equal(t, testUser, conn.Details().AuthID())
-	resp := conn.Call("io.xconn.test.echo").Args("hello").Execute()
+	resp := conn.Call("com.deskconn.test.echo").Args("hello").Execute()
 	require.NoError(t, resp.Err)
 	require.Equal(t, "hello", resp.Args[0])
 

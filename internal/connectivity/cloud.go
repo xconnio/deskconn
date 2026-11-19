@@ -20,9 +20,9 @@ import (
 const cloudEventDetach = "detach"
 
 const (
-	ProcedureWebRTCOffer     = "io.xconn.webrtc.offer"
-	TopicAnswererOnCandidate = "io.xconn.webrtc.answerer.on_candidate"
-	TopicOffererOnCandidate  = "io.xconn.webrtc.offerer.on_candidate"
+	ProcedureWebRTCOffer     = "com.deskconn.webrtc.offer"
+	TopicAnswererOnCandidate = "com.deskconn.webrtc.answerer.on_candidate"
+	TopicOffererOnCandidate  = "com.deskconn.webrtc.offerer.on_candidate"
 	DefaultSTUNServer        = "stun:stun.l.google.com:19302"
 )
 
@@ -97,9 +97,8 @@ func NewDeviceRouter(realm string) (*api.Router, error) {
 	if err != nil {
 		return nil, err
 	}
-	permissions := []api.Permission{{URI: "io.xconn.", MatchPolicy: protocol.MatchPrefix, AllowCall: true},
-		{URI: "com.deskconn.", MatchPolicy: protocol.MatchPrefix, AllowCall: true},
-		{URI: "io.xconn.webrtc.", MatchPolicy: protocol.MatchPrefix, AllowPublish: true, AllowSubscribe: true}}
+	permissions := []api.Permission{{URI: "com.deskconn.", MatchPolicy: protocol.MatchPrefix, AllowCall: true},
+		{URI: "com.deskconn.webrtc.", MatchPolicy: protocol.MatchPrefix, AllowPublish: true, AllowSubscribe: true}}
 	if err = router.AddRealm(realm, &api.RealmConfig{AutoDiscloseCaller: true, Meta: true, Roles: []api.RealmRole{
 		{Name: "owner", Permissions: permissions},
 		{Name: "admin", Permissions: permissions},
