@@ -294,7 +294,7 @@ func TestTopMachines(t *testing.T) {
 
 	empty := top.NewModel(t.TempDir(), "", newFakeRemote())
 	empty.Update(tea.WindowSizeMsg{Width: width, Height: height})
-	require.Contains(t, ansi.Strip(empty.View()), "desk account login", "points the way when there's nothing")
+	require.Contains(t, ansi.Strip(empty.View()), "desk auth login", "points the way when there's nothing")
 }
 
 func TestTopFilter(t *testing.T) {

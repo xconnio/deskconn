@@ -42,7 +42,7 @@ func main() {
 
 	profileCmds := registerProfileCommands(app, cfgDirectory)
 	machineCmds := registerMachineCommands(app, cfgDirectory)
-	accountCmds := registerAccountCommands(app)
+	authCmds := registerAuthCommands(app)
 	fileCmds := registerFileCommands(app, cfgDirectory)
 	shellCmds := registerShellCommands(app, cfgDirectory)
 	portCmds := registerPortCommands(app, cfgDirectory)
@@ -102,7 +102,7 @@ func main() {
 
 	_ = dispatchProfileCommand(parsedCmd, profileCmds, cfgDirectory) ||
 		dispatchMachineCommand(parsedCmd, machineCmds, cfgDirectory) ||
-		dispatchAccountCommand(parsedCmd, accountCmds, cfgDirectory) ||
+		dispatchAuthCommand(parsedCmd, authCmds, cfgDirectory) ||
 		dispatchFileCommand(parsedCmd, fileCmds, cfgDirectory) ||
 		dispatchShellCommand(parsedCmd, shellCmds, cfgDirectory) ||
 		dispatchPortCommand(parsedCmd, portCmds, cfgDirectory) ||
