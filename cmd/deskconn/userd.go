@@ -307,15 +307,13 @@ func loginMethods(user serveConfigUser) string {
 func registerLocalProcedures(session *xconn.Session, deskconnApis *userd.Deskconn,
 	clientSessions *userd.ClientSessions, cfgDirectory string) error {
 	handlers := map[string]xconn.InvocationHandler{
-		common.ProcedureProxyFileOp:       userd.ProxyFileOpHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyStream:       userd.ProxyStreamHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyMachineInfo:  userd.ProxyMachineInfoHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyPing:         userd.ProxyPingHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyCat:          userd.ProxyCatHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyVPNStart:     userd.ProxyVPNStartHandler(deskconnApis),
-		common.ProcedureProxyVPNStop:      userd.ProxyVPNStopHandler(deskconnApis),
-		common.ProcedureProxyPrinterList:  userd.ProxyPrinterListHandler(clientSessions, cfgDirectory),
-		common.ProcedureProxyPrinterPrint: userd.ProxyPrinterPrintHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyFileOp:      userd.ProxyFileOpHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyStream:      userd.ProxyStreamHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyMachineInfo: userd.ProxyMachineInfoHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyPing:        userd.ProxyPingHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyCat:         userd.ProxyCatHandler(clientSessions, cfgDirectory),
+		common.ProcedureProxyVPNStart:    userd.ProxyVPNStartHandler(deskconnApis),
+		common.ProcedureProxyVPNStop:     userd.ProxyVPNStopHandler(deskconnApis),
 		common.ProcedureLogin: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
 			clientSessions.Login()
 			return xconn.NewResult()
