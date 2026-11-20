@@ -38,7 +38,7 @@ const (
 	ProcedureDisconnectAll     = LocalProcedurePrefix + "disconnect_all"
 	ProcedureConnectedMachines = LocalProcedurePrefix + "connected_machines"
 
-	LocalRealm = "com.deskconn.local"
+	LocalRealm = "local.deskconn"
 
 	// StandaloneRealm is the machine realm served in standalone mode.
 	StandaloneRealm = "com.deskconn.standalone"
