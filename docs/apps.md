@@ -16,7 +16,7 @@ their procedures over routed and direct connections.
    `frontendToBackend` for requests and `backendToFrontend` for results. Every other procedure takes its request as a
    single encrypted JSON argument (nonce + ChaCha20-Poly1305 ciphertext, empty or absent when there is none) and returns
    a single encrypted JSON result. Keys are per caller session.
-3. **Register the apps** by calling `local.deskconn.apps.register` with a JSON list:
+3. **Register the apps** by calling `local.deskconn.app.register` with a JSON list:
 
    ```json
    [{"id": "pictures", "name": "Pictures", "key_exchange": "com.deskconn.media.key.exchange",

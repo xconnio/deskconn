@@ -22,7 +22,7 @@ import (
 
 // app is one app of the web frontend. userd's own apps (see Deskconn.apps) come with
 // their procedures: a procedure stays registered while any enabled app needs it. Apps
-// served by other processes register themselves with ProcedureAppsRegister, are listed
+// served by other processes register themselves with ProcedureAppRegister, are listed
 // while that process is connected, and follow TopicCapabilitiesChanged to stop serving
 // while disabled.
 type app struct {

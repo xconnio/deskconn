@@ -15,10 +15,10 @@ import (
 // LocalRealm is the local application realm joined by Connect.
 const LocalRealm = common.LocalRealm
 
-// ProcedureAppsRegister registers the apps a session serves, with a JSON list of
+// ProcedureAppRegister registers the apps a session serves, with a JSON list of
 // {"id", "name", "key_exchange", "requires", "default_off"}. They're listed until the
 // session leaves.
-const ProcedureAppsRegister = common.ProcedureAppsRegister
+const ProcedureAppRegister = common.ProcedureAppRegister
 
 // ProcedureCapabilitiesList lists every app, with whether it's enabled, and
 // TopicCapabilitiesChanged is published with the same list when an app is enabled or
