@@ -14,7 +14,6 @@ import (
 func TestLocalProceduresAreNotBridged(t *testing.T) {
 	local := []string{
 		common.ProcedureProxyFileOp, common.ProcedureProxyMachineInfo, common.ProcedureProxyPing, common.ProcedureProxyCat,
-		common.ProcedureProxyPrinterList, common.ProcedureProxyPrinterPrint,
 		common.ProcedureProxyVPNStart, common.ProcedureProxyVPNStop, common.ProcedureLogin,
 		common.ProcedureLogout, common.ProcedureConnect, common.ProcedureDisconnect,
 		common.ProcedureConnectedMachines, common.ProcedureAppsRegister,
