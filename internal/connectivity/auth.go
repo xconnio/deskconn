@@ -3,9 +3,11 @@ package connectivity
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"sync"
+	"time"
 
 	api "github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/auth"
@@ -15,6 +17,8 @@ type CryptosignPrincipal struct {
 	AuthID         string   `json:"authid"`
 	AuthorizedKeys []string `json:"authorized_keys"`
 	AuthRole       string   `json:"authrole"`
+	// KeyExpiresAt maps the keys that expire (login keys) to when, in Unix seconds.
+	KeyExpiresAt map[string]int64 `json:"key_expires_at,omitempty"`
 }
 
 // Authenticator owns a synchronized snapshot of the cloud-authorized keys.
@@ -43,6 +47,9 @@ func (a *Authenticator) Authenticate(request auth.Request) (auth.Response, error
 	if !exists || !slices.Contains(principal.AuthorizedKeys, cryptosign.PublicKey()) {
 		return nil, fmt.Errorf("unknown identity or public key")
 	}
+	if expiresAt, expires := principal.KeyExpiresAt[cryptosign.PublicKey()]; expires && time.Now().Unix() >= expiresAt {
+		return nil, fmt.Errorf("public key expired")
+	}
 	return auth.NewResponse(principal.AuthID, principal.AuthRole, 0)
 }
 
@@ -54,6 +61,7 @@ func (a *Authenticator) SetPrincipals(principals []*CryptosignPrincipal) {
 		}
 		copy := *principal
 		copy.AuthorizedKeys = slices.Clone(principal.AuthorizedKeys)
+		copy.KeyExpiresAt = maps.Clone(principal.KeyExpiresAt)
 		snapshot[copy.AuthID] = copy
 	}
 	a.mu.Lock()
@@ -108,12 +116,33 @@ func (a *Authenticator) addKey(event *api.Event) error {
 	if err != nil {
 		return err
 	}
+	// Login keys come with their expiry; other keys, and keys from older account services, don't.
+	var expiresAt int64
+	expires := event.ArgsLen() > 3
+	if expires {
+		if expiresAt, err = event.ArgInt64(3); err != nil {
+			return err
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	principal := a.principals[id]
 	principal.AuthID, principal.AuthRole = id, role
-	if !slices.Contains(principal.AuthorizedKeys, key) {
+	known := slices.Contains(principal.AuthorizedKeys, key)
+	if !known {
 		principal.AuthorizedKeys = append(principal.AuthorizedKeys, key)
+	}
+	// As in the account service, a key added without an expiry never expires, and one added
+	// twice with an expiry expires last.
+	previous, expiring := principal.KeyExpiresAt[key]
+	switch {
+	case !expires:
+		delete(principal.KeyExpiresAt, key)
+	case !known || expiring:
+		if principal.KeyExpiresAt == nil {
+			principal.KeyExpiresAt = map[string]int64{}
+		}
+		principal.KeyExpiresAt[key] = max(previous, expiresAt)
 	}
 	a.principals[id] = principal
 	return a.persistLocked()
@@ -139,6 +168,9 @@ func (a *Authenticator) removeKeys(event *api.Event) error {
 			principal.AuthorizedKeys,
 			func(key string) bool { return slices.Contains(keys, key) },
 		)
+		for _, key := range keys {
+			delete(principal.KeyExpiresAt, key)
+		}
 		if len(principal.AuthorizedKeys) == 0 {
 			delete(a.principals, id)
 		} else {

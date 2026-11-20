@@ -46,6 +46,7 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	defer listener.Close()
 	service, err := api.ConnectInMemory(cloudRouter, cloudRealm)
+	keyExpiry := time.Now().Add(time.Hour).Unix()
 	require.NoError(t, err)
 	defer service.Close()
 	require.NoError(t, service.Register("keys", func(_ context.Context, _ *api.Invocation) *api.Result {
@@ -57,7 +58,8 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 			return &api.Result{Err: publication.Err}
 		}
 		return api.NewResult(
-			[]any{map[string]any{"authid": userAuthID, "authorized_keys": []any{"key1"}, "authrole": "owner"}},
+			[]any{map[string]any{"authid": userAuthID, "authorized_keys": []any{"key1"}, "authrole": "owner",
+				"key_expires_at": map[string]any{"key1": keyExpiry}}},
 		)
 	}).ExecuteContext(ctx).Err)
 	local, socket, localSession, err := app.StartAppLayer("local", filepath.Join(t.TempDir(), "app.sock"))
@@ -122,7 +124,8 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	defer accepted.Close()
 	require.Eventually(t, func() bool {
 		principals, err := app.ReadPrincipalsFromFile(principalsPath)
-		return err == nil && len(principals) == 2 && principals[0].AuthID == userAuthID
+		return err == nil && len(principals) == 2 && principals[0].AuthID == userAuthID &&
+			principals[0].KeyExpiresAt["key1"] == keyExpiry
 	}, 3*time.Second, time.Millisecond)
 	caller, err := api.ConnectInMemory(cloudRouter, deviceRealm)
 	require.NoError(t, err)
@@ -180,10 +183,31 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	}
 	require.NoError(t, direct.Close())
 	require.NoError(t, direct.Connection().Close())
+	davePublic, davePrivate, err := auth.GenerateCryptoSignKeyPair()
+	require.NoError(t, err)
+	expired := time.Now().Add(-time.Minute).Unix()
+	require.NoError(
+		t,
+		service.Publish("add.machine").Args("dave", davePublic, "member", expired).Acknowledge(true).ExecuteContext(ctx).Err,
+	)
+	require.Eventually(t, func() bool {
+		principals, err := app.ReadPrincipalsFromFile(principalsPath)
+		return err == nil && len(principals) == 4 && principals[3].KeyExpiresAt[davePublic] == expired
+	}, time.Second, time.Millisecond)
+	daveAuthenticator, err := auth.NewCryptoSignAuthenticator("dave", davePrivate, nil)
+	require.NoError(t, err)
+	daveConfig := *directConfig
+	daveConfig.Authenticator = daveAuthenticator
+	dave, err := api.ConnectWebRTCContext(ctx, &daveConfig)
+	if dave != nil {
+		_ = dave.Close()
+		_ = dave.Connection().Close()
+	}
+	require.ErrorContains(t, err, "authentication", "an expired key must not open a direct session")
 	require.NoError(
 		t,
 		service.Publish("remove.machine").
-			Arg(map[string]any{"bob": []any{bobPublic}}).
+			Arg(map[string]any{"bob": []any{bobPublic}, "dave": []any{davePublic}}).
 			Acknowledge(true).
 			ExecuteContext(ctx).
 			Err,
