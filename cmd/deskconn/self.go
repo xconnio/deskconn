@@ -22,6 +22,9 @@ type selfCommands struct {
 	version *kingpin.CmdClause
 	update  *kingpin.CmdClause
 	remove  *kingpin.CmdClause
+	// installCompletions is run by install.sh, so it applies the same completion fixes as
+	// "desk self update".
+	installCompletions *kingpin.CmdClause
 
 	removeYes *bool
 }
@@ -32,12 +35,15 @@ func registerSelfCommands(app *kingpin.Application) *selfCommands {
 	updateCmd := selfCmd.Command("update", "Check for updates and install the latest release")
 	removeCmd := selfCmd.Command("remove", "Remove desk from this machine")
 	removeYes := removeCmd.Flag("yes", "Do not prompt for confirmation").Short('y').Bool()
+	installCompletionsCmd := selfCmd.Command("install-completions",
+		"Install shell completions (used by install.sh)").Hidden()
 
 	return &selfCommands{
-		version:   versionCmd,
-		update:    updateCmd,
-		remove:    removeCmd,
-		removeYes: removeYes,
+		version:            versionCmd,
+		update:             updateCmd,
+		remove:             removeCmd,
+		installCompletions: installCompletionsCmd,
+		removeYes:          removeYes,
 	}
 }
 
@@ -49,6 +55,8 @@ func dispatchSelfCommand(parsedCmd string, cmds *selfCommands, cfgDirectory stri
 		exitOnErr(updateApp())
 	case cmds.remove.FullCommand():
 		exitOnErr(removeApp(cfgDirectory, *cmds.removeYes))
+	case cmds.installCompletions.FullCommand():
+		exitOnErr(installCompletionsForSelf())
 	default:
 		return false
 	}
@@ -222,7 +230,21 @@ func latestAppUpdate() (appUpdateResponse, error) {
 	return appUpdateResponse{}, fmt.Errorf("latest release %s missing asset %s", release.TagName, assetName)
 }
 
-const pathInstallerBlock = "\n# Added by deskconn installer\nexport PATH=\"$HOME/.local/bin:$PATH\"\n"
+const (
+	pathInstallerBlock = "\n# Added by deskconn installer\nexport PATH=\"$HOME/.local/bin:$PATH\"\n"
+
+	zshCompletionBlock = "\n# Added by deskconn installer (deskconn completion)\n" +
+		"if [ -d \"$HOME/.local/share/zsh/site-functions\" ]; then\n" +
+		"    fpath=(\"$HOME/.local/share/zsh/site-functions\" $fpath)\n" +
+		"    autoload -Uz _desk 2>/dev/null\n" +
+		"    compdef _desk desk deskconn 2>/dev/null\n" +
+		"fi\n"
+
+	bashCompletionBlock = "\n# Added by deskconn installer (deskconn completion)\n" +
+		"if [ -f \"$HOME/.local/share/bash-completion/completions/desk\" ]; then\n" +
+		"    . \"$HOME/.local/share/bash-completion/completions/desk\" 2>/dev/null\n" +
+		"fi\n"
+)
 
 func removeApp(cfgDirectory string, skipConfirm bool) error {
 	if !skipConfirm {
@@ -287,7 +309,9 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		filepath.Join(binDir, cliName),
 		filepath.Join(execDir, binaryName),
 		filepath.Join(bashCompDir, cliName),
+		filepath.Join(bashCompDir, binaryName),
 		filepath.Join(zshCompDir, "_"+cliName),
+		filepath.Join(zshCompDir, "_"+binaryName),
 	}
 
 	fmt.Println("Removing desk binaries and shell completions...")
@@ -295,6 +319,19 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove %s: %w", p, err)
 		}
+	}
+	// Links the installer may have added to Homebrew/system completion directories.
+	for _, p := range []string{
+		"/opt/homebrew/share/zsh/site-functions/_" + cliName,
+		"/opt/homebrew/share/zsh/site-functions/_" + binaryName,
+		"/usr/local/share/zsh/site-functions/_" + cliName,
+		"/usr/local/share/zsh/site-functions/_" + binaryName,
+		"/opt/homebrew/etc/bash_completion.d/" + cliName,
+		"/opt/homebrew/etc/bash_completion.d/" + binaryName,
+		"/usr/local/etc/bash_completion.d/" + cliName,
+		"/usr/local/etc/bash_completion.d/" + binaryName,
+	} {
+		removeSymlink(p)
 	}
 
 	for _, rcFile := range []string{".bashrc", ".bash_profile", ".zshrc", ".profile"} {
@@ -312,8 +349,8 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 	return nil
 }
 
-// removePathInstallerBlock strips the exact PATH block install.sh appends to shell rc files.
-// It is a no-op if the file doesn't exist or doesn't contain the block.
+// removePathInstallerBlock strips PATH and completion blocks install.sh appends to shell rc files.
+// It is a no-op if the file doesn't exist or doesn't contain any block.
 func removePathInstallerBlock(rcFile string) error {
 	data, err := os.ReadFile(rcFile)
 	if err != nil {
@@ -323,16 +360,23 @@ func removePathInstallerBlock(rcFile string) error {
 		return err
 	}
 
-	if !strings.Contains(string(data), pathInstallerBlock) {
+	content := string(data)
+	changed := false
+	for _, block := range []string{pathInstallerBlock, zshCompletionBlock, bashCompletionBlock} {
+		if strings.Contains(content, block) {
+			content = strings.Replace(content, block, "", 1)
+			changed = true
+		}
+	}
+	if !changed {
 		return nil
 	}
 
-	updated := strings.Replace(string(data), pathInstallerBlock, "", 1)
 	info, err := os.Stat(rcFile)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(rcFile, []byte(updated), info.Mode()) // nolint: gosec
+	return os.WriteFile(rcFile, []byte(content), info.Mode()) // nolint: gosec
 }
 
 func downloadAndInstallUpdate(downloadURL string) error {
@@ -419,6 +463,15 @@ func linkCLI(binDir, execDir string) error {
 	return nil
 }
 
+// installCompletionsForSelf installs the completion scripts generated by the running binary.
+func installCompletionsForSelf() error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to find the desk binary: %w", err)
+	}
+	return installCompletions(self)
+}
+
 func installCompletions(deskBin string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -438,8 +491,11 @@ func installCompletions(deskBin string) error {
 	if err != nil {
 		return fmt.Errorf("generating bash completion: %w", err)
 	}
-	bashScript := fixBashCompletionSpacing(fixBashCompletionWordBreaks(string(bashOut)))
+	bashScript := fixBashCompletionCommands(fixBashCompletionSpacing(fixBashCompletionWordBreaks(string(bashOut))))
 	if err := os.WriteFile(filepath.Join(bashDir, "desk"), []byte(bashScript), 0644); err != nil { // nolint: gosec
+		return fmt.Errorf("writing bash completion: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(bashDir, "deskconn"), []byte(bashScript), 0644); err != nil { // nolint: gosec
 		return fmt.Errorf("writing bash completion: %w", err)
 	}
 
@@ -447,31 +503,18 @@ func installCompletions(deskBin string) error {
 	if err != nil {
 		return fmt.Errorf("generating zsh completion: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(zshDir, "_desk"), zshOut, 0644); err != nil { // nolint: gosec
+	zshScript := fixZshCompletion(string(zshOut))
+	if err := os.WriteFile(filepath.Join(zshDir, "_desk"), []byte(zshScript), 0644); err != nil { // nolint: gosec
 		return fmt.Errorf("writing zsh completion: %w", err)
 	}
+	// _desk covers both desk and deskconn; a second file with the same #compdef line could
+	// win at compinit and never call _desk, so remove one left by an earlier install.
+	if err := os.Remove(filepath.Join(zshDir, "_deskconn")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing stale zsh completion: %w", err)
+	}
 
+	linkOptionalCompletions(zshDir, bashDir)
 	return nil
-}
-
-// fixBashCompletionWordBreaks clears ':' from COMP_WORDBREAKS so bash
-// completes "machine:path" as one word instead of splitting at the colon.
-func fixBashCompletionWordBreaks(script string) string {
-	const marker = "_desk_bash_autocomplete() {\n"
-	return strings.Replace(script, marker, marker+"    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}\n", 1)
-}
-
-// fixBashCompletionSpacing makes path completions behave like "cd": the menu shows only the last
-// path segment (-o filenames), and no trailing space is added after directories/"machine:" prefixes.
-// Leaf files are left to bash's default space-append.
-func fixBashCompletionSpacing(script string) string {
-	const marker = `    COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )` + "\n"
-	const replacement = marker +
-		"    compopt -o filenames 2>/dev/null || true\n" +
-		`    if [ "${#COMPREPLY[@]}" -eq 1 ] && [[ "${COMPREPLY[0]}" == */ || "${COMPREPLY[0]}" == *: ]]; then` + "\n" +
-		"        compopt -o nospace 2>/dev/null || true\n" +
-		"    fi\n"
-	return strings.Replace(script, marker, replacement, 1)
 }
 
 func installBinaryFromReader(src io.Reader, dst string, mode os.FileMode) error {

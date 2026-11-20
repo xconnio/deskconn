@@ -71,68 +71,79 @@ mv "$TMP_DIR/deskconn" "$EXEC_DIR/deskconn"
 chmod 755 "$EXEC_DIR/deskconn"
 ln -sf "$EXEC_DIR/deskconn" "$BIN_DIR/desk"
 
-BASH_COMP_DIR="$HOME/.local/share/bash-completion/completions"
-ZSH_COMP_DIR="$HOME/.local/share/zsh/site-functions"
-
-mkdir -p "$BASH_COMP_DIR" "$ZSH_COMP_DIR"
-
-"$BIN_DIR/desk" --completion-script-bash > "$BASH_COMP_DIR/desk"
-
-# ':' is in COMP_WORDBREAKS by default, which splits "device:path" at the colon.
-# Make path completions behave like "cd": show only the last path segment
-# in the menu, and don't add a trailing space after directories/"device:".
-# (awk rather than "sed -i", whose syntax differs between GNU and macOS sed.)
-AWK_SCRIPT="$(mktemp)"
-cat > "$AWK_SCRIPT" << 'AWKEOF'
-{
-    print
-    if ($0 == "_desk_bash_autocomplete() {") {
-        print "    COMP_WORDBREAKS=${COMP_WORDBREAKS//:}"
-    }
-    if ($0 == "    COMPREPLY=( $(compgen -W \"${opts}\" -- ${cur}) )") {
-        print "    compopt -o filenames 2>/dev/null || true"
-        print "    if [ \"${#COMPREPLY[@]}\" -eq 1 ] && [[ \"${COMPREPLY[0]}\" == */ || \"${COMPREPLY[0]}\" == *: ]]; then"
-        print "        compopt -o nospace 2>/dev/null || true"
-        print "    fi"
-    }
-}
-AWKEOF
-awk -f "$AWK_SCRIPT" "$BASH_COMP_DIR/desk" > "$BASH_COMP_DIR/desk.tmp"
-mv "$BASH_COMP_DIR/desk.tmp" "$BASH_COMP_DIR/desk"
-rm -f "$AWK_SCRIPT"
-
-"$BIN_DIR/desk" --completion-script-zsh > "$ZSH_COMP_DIR/_desk"
-
-echo "Installed shell completions"
+# desk generates its completion scripts and applies the zsh/bash fixes itself, the same
+# way "desk self update" does, so the installer and updates can't drift apart.
+if "$BIN_DIR/desk" self install-completions; then
+    echo "Installed shell completions"
+else
+    echo "warning: failed to install shell completions" >&2
+fi
 echo "Installed desk $VERSION"
 
-# Add BIN_DIR to PATH in shell config files if not already present
-add_to_path() {
-    local file="$1"
-    grep -qF '.local/bin' "$file" 2>/dev/null && return
-    printf '\n# Added by deskconn installer\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$file"
-    echo "  Updated $file"
-}
-
+# BIN_DIR goes into shell config files only if it isn't on PATH already.
+NEED_PATH=""
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *)
-        echo "Adding $BIN_DIR to PATH..."
-        [ -f "$HOME/.bashrc" ]        && add_to_path "$HOME/.bashrc"
-        [ -f "$HOME/.bash_profile" ]  && add_to_path "$HOME/.bash_profile"
-        [ -f "$HOME/.zshrc" ]         && add_to_path "$HOME/.zshrc"
-        # Fall back to .profile if none of the above exist (.zshrc on macOS, where zsh is
-        # the default shell and doesn't read .profile)
-        if [ ! -f "$HOME/.bashrc" ] && [ ! -f "$HOME/.bash_profile" ] && [ ! -f "$HOME/.zshrc" ]; then
-            if [ "$OS" = "darwin" ]; then
-                add_to_path "$HOME/.zshrc"
-            else
-                add_to_path "$HOME/.profile"
-            fi
-        fi
-        echo "Run this to apply immediately:  export PATH=\"\$HOME/.local/bin:\$PATH\""
-        ;;
+    *) NEED_PATH=1 ;;
 esac
+
+# Add BIN_DIR (when needed) and shell completions to shell config files if not already present
+add_shell_config() {
+    local file="$1"
+    local shell_name="$2"
+
+    if [ -n "$NEED_PATH" ]; then
+        grep -qF '.local/bin' "$file" 2>/dev/null || {
+            printf '\n# Added by deskconn installer\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$file"
+            echo "  Updated $file with PATH"
+        }
+    fi
+
+    if [ "$shell_name" = "zsh" ]; then
+        grep -qF 'deskconn completion' "$file" 2>/dev/null || {
+            cat >> "$file" << 'ZSHEOF'
+
+# Added by deskconn installer (deskconn completion)
+if [ -d "$HOME/.local/share/zsh/site-functions" ]; then
+    fpath=("$HOME/.local/share/zsh/site-functions" $fpath)
+    autoload -Uz _desk 2>/dev/null
+    compdef _desk desk deskconn 2>/dev/null
+fi
+ZSHEOF
+            echo "  Updated $file with shell completions"
+        }
+    elif [ "$shell_name" = "bash" ]; then
+        grep -qF 'deskconn completion' "$file" 2>/dev/null || {
+            cat >> "$file" << 'BASHEOF'
+
+# Added by deskconn installer (deskconn completion)
+if [ -f "$HOME/.local/share/bash-completion/completions/desk" ]; then
+    . "$HOME/.local/share/bash-completion/completions/desk" 2>/dev/null
+fi
+BASHEOF
+            echo "  Updated $file with shell completions"
+        }
+    fi
+}
+
+[ -f "$HOME/.bashrc" ]        && add_shell_config "$HOME/.bashrc" "bash"
+[ -f "$HOME/.bash_profile" ]  && add_shell_config "$HOME/.bash_profile" "bash"
+[ -f "$HOME/.zshrc" ]         && add_shell_config "$HOME/.zshrc" "zsh"
+# Fall back to .profile if none of the above exist (.zshrc on macOS, where zsh is
+# the default shell and doesn't read .profile)
+if [ ! -f "$HOME/.bashrc" ] && [ ! -f "$HOME/.bash_profile" ] && [ ! -f "$HOME/.zshrc" ]; then
+    if [ "$OS" = "darwin" ]; then
+        # A .zshrc we create ourselves has nothing else to run compinit, without which
+        # compdef doesn't exist and completion silently does nothing.
+        printf '# Added by deskconn installer\nautoload -Uz compinit && compinit\n' > "$HOME/.zshrc"
+        add_shell_config "$HOME/.zshrc" "zsh"
+    else
+        add_shell_config "$HOME/.profile" "sh"
+    fi
+fi
+if [ -n "$NEED_PATH" ]; then
+    echo "Run this to apply immediately:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+fi
 
 install_service_linux() {
     local systemd_user_dir="$HOME/.config/systemd/user"
