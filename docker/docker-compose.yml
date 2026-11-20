@@ -40,7 +40,7 @@ services:
       - "8081:8081/udp"
       - "8082:8082/udp"
       - "8083:8083"
-      - "8084:8084"
+      - "127.0.0.1:8084:8084"
     depends_on:
       postgres:
         condition: service_healthy
