@@ -10,10 +10,10 @@ import (
 	"github.com/xconnio/xconn/bindings/go"
 )
 
-// handleAppsRegister lists the apps a process on the local socket serves, e.g. media-app's
+// handleAppRegister lists the apps a process on the local socket serves, e.g. media-app's
 // Pictures, Videos and Documents, until its session leaves. Its argument is their JSON
 // list (see app). The process registers and serves the apps' procedures itself.
-func (d *Deskconn) handleAppsRegister(_ context.Context, inv *xconn.Invocation) *xconn.Result {
+func (d *Deskconn) handleAppRegister(_ context.Context, inv *xconn.Invocation) *xconn.Result {
 	payload, err := inv.ArgBytes(0)
 	if err != nil {
 		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())

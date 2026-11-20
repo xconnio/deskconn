@@ -75,7 +75,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		common.ProcedureManifestRegister:   d.capabilities.handleManifestRegister,
 		common.ProcedureManifestUnregister: d.capabilities.handleManifestUnregister,
 		common.ProcedureManifestGet:        d.capabilities.handleManifestGet,
-		common.ProcedureAppsRegister:       d.handleAppsRegister,
+		common.ProcedureAppRegister:        d.handleAppRegister,
 		common.ProcedureSettingsList:       d.settings.handleList,
 		common.ProcedureSettingsSave:       d.settings.handleSave,
 		common.ProcedurePing: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {

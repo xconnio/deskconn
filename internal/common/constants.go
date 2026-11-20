@@ -161,10 +161,10 @@ const (
 	ProcedureManifestGet        = "com.deskconn.manifest.get"
 )
 
-// ProcedureAppsRegister is how a process on userd's local socket registers the apps it
+// ProcedureAppRegister is how a process on userd's local socket registers the apps it
 // serves, with a JSON list of {"id", "name", "key_exchange", "requires", "default_off"}
 // (see the README's "Adding an app"). Local realm only.
-const ProcedureAppsRegister = LocalProcedurePrefix + "apps.register"
+const ProcedureAppRegister = LocalProcedurePrefix + "app.register"
 
 // xconn exposes every procedure registered on userd's local socket under these
 // prefixes to remote clients: userd's own and other apps' alike. Procedures under
