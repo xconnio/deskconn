@@ -327,7 +327,8 @@ func DiscoverCodexProjects(homeDir string) ([]AgentProject, error) {
 	return projects, nil
 }
 
-// codexSessionCWD returns the directory a Codex session ran in, from its first record.
+// codexSessionCWD returns the directory of a user-visible Codex session.
+// Internal Codex threads have rollout files too, but do not belong in the session picker.
 func codexSessionCWD(path string) string {
 	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
@@ -339,11 +340,23 @@ func codexSessionCWD(path string) string {
 	var meta struct {
 		Type    string `json:"type"`
 		Payload struct {
-			CWD string `json:"cwd"`
+			CWD          string          `json:"cwd"`
+			ThreadSource string          `json:"thread_source"`
+			Source       json.RawMessage `json:"source"`
 		} `json:"payload"`
 	}
 	if json.Unmarshal(line, &meta) != nil || meta.Type != "session_meta" {
 		return ""
+	}
+	switch meta.Payload.ThreadSource {
+	case "guardian_review", "subagent":
+		return ""
+	case "":
+		// Older rollouts identify internal threads by a structured source instead.
+		var source map[string]json.RawMessage
+		if json.Unmarshal(meta.Payload.Source, &source) == nil && source["subagent"] != nil {
+			return ""
+		}
 	}
 	return meta.Payload.CWD
 }
