@@ -336,15 +336,15 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *userd.Deskcon
 			return xconn.NewResult()
 		},
 		common.ProcedureDisconnect: func(_ context.Context, inv *xconn.Invocation) *xconn.Result {
-			realm, err := inv.ArgString(0)
+			realm, all, err := parseDisconnect(inv.Kwargs())
 			if err != nil {
 				return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 			}
-			clientSessions.Disconnect(realm)
-			return xconn.NewResult()
-		},
-		common.ProcedureDisconnectAll: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
-			clientSessions.DisconnectAll()
+			if all {
+				clientSessions.DisconnectAll()
+			} else {
+				clientSessions.Disconnect(realm)
+			}
 			return xconn.NewResult()
 		},
 		common.ProcedureConnectedMachines: func(_ context.Context, _ *xconn.Invocation) *xconn.Result {
@@ -358,4 +358,28 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *userd.Deskcon
 		}
 	}
 	return nil
+}
+
+// parseDisconnect reads ProcedureDisconnect's kwargs: {"realm": "..."} to disconnect one
+// machine, or {"all": true} to disconnect them all. Exactly one of the two is required.
+func parseDisconnect(kwargs map[string]any) (realm string, all bool, err error) {
+	realmValue, hasRealm := kwargs[common.DisconnectKwargRealm]
+	allValue, hasAll := kwargs[common.DisconnectKwargAll]
+	switch {
+	case hasRealm && hasAll:
+		return "", false, errors.New(`give either "realm" or "all", not both`)
+	case hasRealm:
+		realm, ok := realmValue.(string)
+		if !ok || realm == "" {
+			return "", false, errors.New(`"realm" must be a non-empty string`)
+		}
+		return realm, false, nil
+	case hasAll:
+		if all, ok := allValue.(bool); !ok || !all {
+			return "", false, errors.New(`"all" must be true`)
+		}
+		return "", true, nil
+	default:
+		return "", false, errors.New(`give either "realm" or "all"`)
+	}
 }

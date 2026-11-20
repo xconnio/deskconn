@@ -17,7 +17,7 @@ func TestLocalProceduresAreNotBridged(t *testing.T) {
 		common.ProcedureProxyPrinterList, common.ProcedureProxyPrinterPrint,
 		common.ProcedureProxyVPNStart, common.ProcedureProxyVPNStop, common.ProcedureLogin,
 		common.ProcedureLogout, common.ProcedureConnect, common.ProcedureDisconnect,
-		common.ProcedureDisconnectAll, common.ProcedureConnectedMachines, common.ProcedureAppsRegister,
+		common.ProcedureConnectedMachines, common.ProcedureAppsRegister,
 	}
 	bridged := append([]string{common.ProcedurePrefix, common.ProcedureAdminPrefix}, common.AppPrefixes()...)
 	for _, procedure := range local {

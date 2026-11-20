@@ -325,7 +325,8 @@ func disconnectMachine(cfgDirectory, machine string, all bool) error {
 		return err
 	}
 	if all {
-		if err := session.Call(common.ProcedureDisconnectAll).Execute().Err; err != nil {
+		kwargs := map[string]any{common.DisconnectKwargAll: true}
+		if err := session.Call(common.ProcedureDisconnect).Kwargs(kwargs).Execute().Err; err != nil {
 			return err
 		}
 		fmt.Println("disconnected all machines")
@@ -338,7 +339,8 @@ func disconnectMachine(cfgDirectory, machine string, all bool) error {
 	if err != nil {
 		return err
 	}
-	if err := session.Call(common.ProcedureDisconnect).Args(realm).Execute().Err; err != nil {
+	kwargs := map[string]any{common.DisconnectKwargRealm: realm}
+	if err := session.Call(common.ProcedureDisconnect).Kwargs(kwargs).Execute().Err; err != nil {
 		return err
 	}
 	fmt.Printf("disconnected %s\n", machine)

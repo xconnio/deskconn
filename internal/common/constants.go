@@ -34,8 +34,9 @@ const (
 	ProcedureLogin             = LocalProcedurePrefix + "login"
 	ProcedureLogout            = LocalProcedurePrefix + "logout"
 	ProcedureConnect           = LocalProcedurePrefix + "connect"
+	// ProcedureDisconnect takes the kwargs {"realm": "..."} to disconnect one machine, or
+	// {"all": true} to disconnect them all, but not both.
 	ProcedureDisconnect        = LocalProcedurePrefix + "disconnect"
-	ProcedureDisconnectAll     = LocalProcedurePrefix + "disconnect_all"
 	ProcedureConnectedMachines = LocalProcedurePrefix + "connected_machines"
 
 	LocalRealm = "local.deskconn"
@@ -111,6 +112,13 @@ const (
 
 const (
 	Realm = "com.deskconn"
+)
+
+// The kwargs of ProcedureDisconnect: DisconnectKwargRealm names one machine's realm, and
+// DisconnectKwargAll set to true disconnects them all.
+const (
+	DisconnectKwargRealm = "realm"
+	DisconnectKwargAll   = "all"
 )
 
 const ProcedureFileCat = "com.deskconn.file.cat"
