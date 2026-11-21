@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version=0.6.4
+version=0.6.6
 destination=${1:?Usage: prepare-release-sdk.sh DIRECTORY [linux_amd64|linux_arm64|windows_amd64|darwin_arm64]}
 mkdir -p "$destination"
 destination=$(cd "$destination" && pwd)
