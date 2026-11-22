@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,4 +19,13 @@ func TestTransferProgressOut(t *testing.T) {
 
 	require.Nil(t, transferProgressOut(true))
 	require.Nil(t, transferProgressOut(false))
+}
+
+func TestIsRemotePath(t *testing.T) {
+	require.True(t, isRemotePath("office:/tmp/file"))
+	require.False(t, isRemotePath("file"))
+	if runtime.GOOS == "windows" {
+		require.False(t, isRemotePath("C:/Users/me/file"))
+		require.True(t, isRemotePath("office:C:/Users/me/file"))
+	}
 }

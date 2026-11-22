@@ -31,3 +31,12 @@ func ConnectApp(ctx context.Context, path, realm string) (*api.Session, error) {
 func secureLocalEndpoint(file *os.File) error {
 	return file.Chmod(0600)
 }
+
+// CanServeLocalFilePaths permits path requests on an unprivileged daemon's private socket.
+func CanServeLocalFilePaths(directory string) bool {
+	if os.Geteuid() <= 0 || os.Getuid() != os.Geteuid() {
+		return false
+	}
+	info, err := os.Stat(directory)
+	return err == nil && info.Mode().Perm()&0o077 == 0
+}

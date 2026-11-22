@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -84,7 +85,7 @@ func registerFileCommands(app *kingpin.Application, cfgDirectory string) *fileCo
 	cmds.cpDst = cmds.cp.Arg("dst", "Destination: machine:path for remote, /path for local").Required().
 		HintAction(remotePathCompletions(cfgDirectory)).String()
 	cmds.cpRecursive = cmds.cp.Flag("recursive", "Copy directories recursively").Short('r').Bool()
-	cmds.cpMode = modeFlag(cmds.cp, modeHelp+" (default: try direct, fall back to routed)")
+	cmds.cpMode = modeFlag(cmds.cp, modeHelp+" (default: use the daemon's connection)")
 	cmds.cpStreams = cmds.cp.Flag("streams", "Number of parallel streams to use for the transfer (default 4)").
 		Short('s').Int()
 	cmds.cpProgress = cmds.cp.Flag("progress",
@@ -200,6 +201,15 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 		if err != nil {
 			return err
 		}
+		if _, standalone := common.StandaloneTargetFor(realm); !standalone && !recursive {
+			info, err := os.Lstat(src)
+			if err != nil {
+				return err
+			}
+			if info.Mode().IsRegular() {
+				return uploadViaDaemon(cfgDirectory, realm, src, dstPath, mode, streams, progress)
+			}
+		}
 		return transferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
 			return deskconn.UploadFiles(session, src, dstPath, recursive, streams, progress)
 		})
@@ -216,6 +226,43 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 
 	default:
 		return errors.New("at least one of src or dst must be a remote path (machine:path)")
+	}
+}
+
+func uploadViaDaemon(directory, realm, source, destination, mode string, streams int, progress io.Writer) error {
+	source, err := filepath.Abs(source)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	session, err := common.ConnectDaemon(ctx, directory)
+	if err != nil {
+		return fmt.Errorf("connect to local daemon for upload: %w", err)
+	}
+
+	call := session.Call(common.ProcedureProxyUpload).
+		Args(realm, source, destination, max(streams, 0), progress != nil, mode)
+	if progress != nil {
+		call.ProgressReceiver(func(result *xconn.Result) {
+			_, _ = io.WriteString(progress, result.ArgStringOr(0, ""))
+		})
+	}
+	// XConn's RPC cancellation or session close can wait on its native runtime.
+	// Let the CLI exit on Ctrl+C so closing its socket also interrupts the daemon.
+	done := make(chan error, 1)
+	go func() {
+		defer session.Close()
+		done <- call.ExecuteContext(ctx).Err
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
 	}
 }
 
@@ -535,6 +582,9 @@ func machineHasPersistentSession(localSession *xconn.Session, realm string) bool
 }
 
 func isRemotePath(s string) bool {
+	if filepath.IsAbs(s) && filepath.VolumeName(s) != "" {
+		return false
+	}
 	return strings.ContainsRune(s, ':')
 }
 

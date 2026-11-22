@@ -1,6 +1,7 @@
 package deskconn_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -76,6 +77,8 @@ func startStreamProxy(t *testing.T) (string, *userd.ClientSessions) {
 	t.Cleanup(func() { _ = listener.Close(); _ = session.Close() })
 	registration := session.Register(common.ProcedureProxyStream, userd.ProxyStreamHandler(clients, dir))
 	require.NoError(t, registration.ExecuteContext(t.Context()).Err)
+	registration = session.Register(common.ProcedureProxyUpload, userd.ProxyUploadHandler(clients, dir))
+	require.NoError(t, registration.ExecuteContext(t.Context()).Err)
 	return dir, clients
 }
 
@@ -104,6 +107,30 @@ func TestDaemonStreamsTransferFiles(t *testing.T) {
 	got, err = os.ReadFile(downloaded)
 	require.NoError(t, err)
 	require.Equal(t, content, got)
+}
+
+func TestDaemonUploadsLocalFileByPath(t *testing.T) {
+	directory, _ := startStreamProxy(t)
+	session, err := common.ConnectDaemon(t.Context(), directory)
+	require.NoError(t, err)
+	defer session.Close()
+
+	source := filepath.Join(t.TempDir(), "source.bin")
+	content := bytes.Repeat([]byte("deskconn"), 500_000)
+	require.NoError(t, os.WriteFile(source, content, 0600))
+	destination := filepath.Join(t.TempDir(), "uploaded.bin")
+
+	var progress bytes.Buffer
+	result := session.Call(common.ProcedureProxyUpload).
+		Args(streamProxyTestRealm, source, destination, 2, true).
+		ProgressReceiver(func(result *xconn.Result) {
+			progress.WriteString(result.ArgStringOr(0, ""))
+		}).ExecuteContext(t.Context())
+	require.NoError(t, result.Err)
+	require.Contains(t, progress.String(), "source.bin")
+	uploaded, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	require.Equal(t, content, uploaded)
 }
 
 func TestDaemonStreamsReusesPersistentConnection(t *testing.T) {
