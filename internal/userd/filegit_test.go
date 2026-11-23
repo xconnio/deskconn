@@ -100,6 +100,26 @@ func TestGitStatusIgnoredFile(t *testing.T) {
 	require.Equal(t, "ignored", result.Entries[0].Status)
 }
 
+// An ignored directory is reported once, not file by file (huge node_modules
+// would otherwise exceed the WAMP message size limit).
+func TestGitStatusIgnoredDirCollapsed(t *testing.T) {
+	requireGit(t)
+	dir := initGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules\n"), 0644))
+	runGit(t, dir, "add", ".gitignore")
+	runGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "add gitignore")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0755))
+	for _, name := range []string{"a.js", "pkg/b.js"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "node_modules", name), []byte("x"), 0644))
+	}
+
+	result, err := userd.NewFileBrowser().GitStatus(dir)
+	require.NoError(t, err)
+	require.Len(t, result.Entries, 1)
+	require.Equal(t, filepath.Join(dir, "node_modules"), result.Entries[0].Path)
+	require.Equal(t, "ignored", result.Entries[0].Status)
+}
+
 func TestGitStatusStagedNewFile(t *testing.T) {
 	requireGit(t)
 	dir := initGitRepo(t)
@@ -164,7 +184,50 @@ func TestGitStatusFromSubdirectoryResolvesRepoRoot(t *testing.T) {
 	require.True(t, result.IsRepo)
 	require.Equal(t, dir, result.RepoRoot)
 	require.Len(t, result.Entries, 1)
-	require.Equal(t, filepath.Join(subDir, "new.txt"), result.Entries[0].Path)
+	// sub/ holds no tracked files, so it's reported whole, like `git status`.
+	require.Equal(t, subDir, result.Entries[0].Path)
+	require.Equal(t, "untracked", result.Entries[0].Status)
+}
+
+func TestGitStatusUntrackedDirCollapsed(t *testing.T) {
+	requireGit(t)
+	dir := initGitRepo(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "build", "out"), 0755))
+	for _, name := range []string{"build/a.txt", "build/out/b.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644))
+	}
+
+	result, err := userd.NewFileBrowser().GitStatus(dir)
+	require.NoError(t, err)
+	require.Len(t, result.Entries, 1)
+	require.Equal(t, filepath.Join(dir, "build"), result.Entries[0].Path)
+	require.Equal(t, "untracked", result.Entries[0].Status)
+}
+
+// A force-added file inside an ignored dir keeps the dir from collapsing, and
+// isn't itself reported as ignored.
+func TestGitStatusIgnoredDirWithTrackedFile(t *testing.T) {
+	requireGit(t)
+	dir := initGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("vendor\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "vendor", "kept.txt"), []byte("x"), 0644))
+	runGit(t, dir, "add", ".gitignore")
+	runGit(t, dir, "add", "-f", "vendor/kept.txt")
+	runGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "force add")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "vendor", "junk.txt"), []byte("x"), 0644))
+
+	result, err := userd.NewFileBrowser().GitStatus(dir)
+	require.NoError(t, err)
+	require.Len(t, result.Entries, 1)
+	require.Equal(t, filepath.Join(dir, "vendor", "junk.txt"), result.Entries[0].Path)
+	require.Equal(t, "ignored", result.Entries[0].Status)
+
+	orig, err := userd.NewFileBrowser().GitOriginal(filepath.Join(dir, "vendor", "kept.txt"))
+	require.NoError(t, err)
+	require.False(t, orig.Ignored)
+	require.False(t, orig.IsNew)
+	require.Equal(t, "x", orig.Content)
 }
 
 func TestGitOriginalCommittedFile(t *testing.T) {
