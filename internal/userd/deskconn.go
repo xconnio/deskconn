@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/terminal"
 	"github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/protocol"
 )
@@ -17,6 +18,7 @@ const MetaTopicSessionLeave = "wamp.session.on_leave"
 
 type Deskconn struct {
 	shellSession         *interactiveShellSession
+	terminals            *terminal.Manager
 	keys                 *keyManager
 	agentForwardSessions *agentForwardSessions
 	files                *FileBrowser
@@ -43,6 +45,7 @@ func (d *Deskconn) ServeStandaloneUsers(users *StandaloneUsers) {
 func NewDeskconn(desktopEnvironment bool, cfgDirectory string) *Deskconn {
 	d := &Deskconn{
 		shellSession:         newInteractiveShellSession(),
+		terminals:            newTerminalManager(cfgDirectory),
 		keys:                 newKeyManager(),
 		agentForwardSessions: newAgentForwardSessions(),
 		files:                NewFileBrowser(),
@@ -57,6 +60,9 @@ func NewDeskconn(desktopEnvironment bool, cfgDirectory string) *Deskconn {
 	d.shellSession.agentForward = d.agentForwardSessions
 	d.capabilities = newCapabilities(d.apps(), cfgDirectory)
 	common.SafeGo(d.thumbnails.sweepLoop)
+	// The terminal sessions a previous daemon left running are found as they're asked for;
+	// this only clears away those that ended with their worker, as on a reboot.
+	common.SafeGo(func() { d.terminals.Reconcile(context.Background()) })
 	return d
 }
 

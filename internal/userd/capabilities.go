@@ -65,8 +65,9 @@ func (d *Deskconn) apps() []*app {
 			common.ProcedureMountFS:         d.handleMountFS,
 		}},
 		{ID: terminalAppID, Name: "Terminal", Procedures: map[string]xconn.InvocationHandler{
-			common.ProcedureShellIsBusy: d.handleShellIsBusy,
-			common.ProcedureShellStream: d.streamHandler(common.FSOpShell, false),
+			common.ProcedureShellIsBusy:    d.handleShellIsBusy,
+			common.ProcedureShellStream:    d.streamHandler(common.FSOpShell, false),
+			common.ProcedureTerminalStream: d.streamHandler(common.FSOpTerminal, false),
 		}},
 		{ID: "resource-monitor", Name: "Resource Monitor", Procedures: map[string]xconn.InvocationHandler{
 			common.ProcedureProcessList:   d.handleProcessList,

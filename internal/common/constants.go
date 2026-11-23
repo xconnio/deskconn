@@ -57,6 +57,7 @@ const (
 	ProcedureFileInitStream     = "com.deskconn.file.stream.init"
 	ProcedureFileWriteStream    = "com.deskconn.file.stream.write"
 	ProcedureShellStream        = "com.deskconn.shell.stream"
+	ProcedureTerminalStream     = "com.deskconn.terminal.stream" // persistent sessions (see TerminalControlMsg)
 	ProcedurePortForwardStream  = "com.deskconn.port.forward.stream"
 	ProcedurePortReverseStream  = "com.deskconn.port.reverse.stream"
 	ProcedureAgentForwardStream = "com.deskconn.agent.forward.stream"
@@ -226,6 +227,7 @@ const (
 	FSOpPortReverse  FSOp = "portreverse"  // one reverse-forward session (see portstream.go)
 	FSOpAgentForward FSOp = "agentforward" // one agent-forward session (see agentforwardstream.go)
 	FSOpLogs         FSOp = "logs"
+	FSOpTerminal     FSOp = "terminal" // persistent terminal sessions (see terminalstream.go)
 )
 
 // progressPrintInterval caps how often TransferProgress.add actually prints
