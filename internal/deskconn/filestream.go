@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
 )
@@ -38,16 +39,17 @@ func StreamClientKeyExchange(stream net.Conn) (sendKey, receiveKey []byte, err e
 	return common.ClientKeyExchangeKeys(privateKey, peerKey.PublicKey)
 }
 
-func streamRequest(sess common.StreamSession, req common.FSRequest) (*common.FSResponse, error) {
+func streamRequest(ctx context.Context, sess common.StreamSession, req common.FSRequest) (*common.FSResponse, error) {
 	procedure, input := common.ProcedureFileListStream, false
 	if req.Op == common.FSOpInit {
 		procedure, input = common.ProcedureFileInitStream, true
 	}
-	stream, err := common.OpenRPCStream(context.Background(), sess, procedure, input)
+	stream, err := common.OpenRPCStream(ctx, sess, procedure, input)
 	if err != nil {
 		return nil, err
 	}
 	defer stream.Close()
+	defer context.AfterFunc(ctx, func() { _ = stream.SetDeadline(time.Now()) })()
 
 	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
 	if err != nil {
@@ -124,13 +126,14 @@ func quicReadOneChunk(stream net.Conn, sendKey, receiveKey []byte, rootArg strin
 // streamWriteWorker is the upload counterpart to streamReadWorker: it opens one
 // stream on the shared sess and owns it for the lifetime of the goroutine
 // running it, reusing it across every job pulled from jobs.
-func streamWriteWorker(sess common.StreamSession, rootArg string, jobs <-chan transferChunk, localBase string,
-	sourceIsDir, targetIsDirHint bool, progress *common.TransferProgress) error {
-	stream, err := common.OpenRPCStream(context.Background(), sess, common.ProcedureFileWriteStream, true)
+func streamWriteWorker(ctx context.Context, sess common.StreamSession, rootArg string, jobs <-chan transferChunk,
+	localBase string, sourceIsDir, targetIsDirHint bool, progress *common.TransferProgress) error {
+	stream, err := common.OpenRPCStream(ctx, sess, common.ProcedureFileWriteStream, true)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
+	defer context.AfterFunc(ctx, func() { _ = stream.SetDeadline(time.Now()) })()
 
 	sendKey, receiveKey, err := StreamClientKeyExchange(stream)
 	if err != nil {
@@ -192,7 +195,9 @@ func quicWriteOneChunk(stream net.Conn, sendKey, receiveKey []byte, rootArg stri
 func DownloadFiles(sess common.StreamSession, remotePath, localPath string,
 	recursive bool, numWorkers int, progress io.Writer) error {
 	return downloadFiles(remotePath, localPath, recursive, numWorkers, progress,
-		func(req common.FSRequest) (*common.FSResponse, error) { return streamRequest(sess, req) },
+		func(req common.FSRequest) (*common.FSResponse, error) {
+			return streamRequest(context.Background(), sess, req)
+		},
 		func(sourceRoot string, localIsDir bool, progress *common.TransferProgress) func(jobs <-chan transferChunk) error {
 			return func(jobs <-chan transferChunk) error {
 				return streamReadWorker(sess, remotePath, jobs, localPath, localIsDir, sourceRoot, progress)
@@ -205,12 +210,17 @@ func DownloadFiles(sess common.StreamSession, remotePath, localPath string,
 // A nonpositive worker count selects the default. Progress is printed as DownloadFiles does.
 func UploadFiles(sess common.StreamSession, localPath, remotePath string,
 	recursive bool, numWorkers int, progress io.Writer) error {
+	return UploadFilesContext(context.Background(), sess, localPath, remotePath, recursive, numWorkers, progress)
+}
+
+func UploadFilesContext(ctx context.Context, sess common.StreamSession, localPath, remotePath string,
+	recursive bool, numWorkers int, progress io.Writer) error {
 	localBase := filepath.Dir(localPath)
 	return uploadFiles(localPath, remotePath, recursive, numWorkers, progress,
-		func(req common.FSRequest) (*common.FSResponse, error) { return streamRequest(sess, req) },
+		func(req common.FSRequest) (*common.FSResponse, error) { return streamRequest(ctx, sess, req) },
 		func(sourceIsDir, targetIsDirHint bool, progress *common.TransferProgress) func(jobs <-chan transferChunk) error {
 			return func(jobs <-chan transferChunk) error {
-				return streamWriteWorker(sess, remotePath, jobs, localBase, sourceIsDir, targetIsDirHint,
+				return streamWriteWorker(ctx, sess, remotePath, jobs, localBase, sourceIsDir, targetIsDirHint,
 					progress)
 			}
 		},

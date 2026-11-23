@@ -23,6 +23,7 @@ const (
 const (
 	LocalProcedurePrefix = "local.deskconn."
 
+	ProcedureProxyUpload      = LocalProcedurePrefix + "proxy.file.upload"
 	ProcedureProxyFileOp      = LocalProcedurePrefix + "proxy.file.op"
 	ProcedureProxyMachineInfo = LocalProcedurePrefix + "proxy.machine.info"
 	ProcedureProxyPing        = LocalProcedurePrefix + "proxy.ping"

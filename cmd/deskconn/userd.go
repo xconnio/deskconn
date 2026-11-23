@@ -350,6 +350,10 @@ func registerLocalProcedures(session *xconn.Session, deskconnApis *userd.Deskcon
 		},
 	}
 
+	if xconnd.CanServeLocalFilePaths(cfgDirectory) {
+		handlers[common.ProcedureProxyUpload] = userd.ProxyUploadHandler(clientSessions, cfgDirectory)
+	}
+
 	for uri, handler := range handlers {
 		if resp := session.Register(uri, handler).Execute(); resp.Err != nil {
 			return resp.Err

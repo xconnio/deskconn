@@ -61,3 +61,9 @@ type lockedAppListener struct {
 func (l *lockedAppListener) Close() error {
 	return errors.Join(l.Listener.Close(), l.lock.Close())
 }
+
+// CanServeLocalFilePaths permits path requests over the authenticated per-user endpoint
+// when the daemon is running without elevation.
+func CanServeLocalFilePaths(_ string) bool {
+	return !windows.GetCurrentProcessToken().IsElevated()
+}
