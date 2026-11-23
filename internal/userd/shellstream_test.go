@@ -299,9 +299,8 @@ func TestHandleQUICShellStreamIgnoresPing(t *testing.T) {
 	}
 }
 
-// TestHandleQUICShellStreamReportsExitStatus checks the machine says in its ack that
-// it reports the exit status, then sends the command's status after its output, as
-// the last message before closing.
+// TestHandleQUICShellStreamReportsExitStatus checks the machine sends the command's
+// status after its output, as the last message before closing.
 func TestHandleQUICShellStreamReportsExitStatus(t *testing.T) {
 	command, args := "sh", []string{"-c", "echo out; exit 3"}
 	if runtime.GOOS == goosWindows {
@@ -318,9 +317,8 @@ func TestHandleQUICShellStreamReportsExitStatus(t *testing.T) {
 	require.NoError(t, sendQUICShellControl(client, sendKey, common.ShellControlMsg{
 		Op: common.ShellOpSize, Cols: 80, Rows: 24, Command: command, Args: args,
 	}))
-	ack, err := recvQUICShellEnvelope(client, receiveKey)
+	_, err = recvQUICShellEnvelope(client, receiveKey)
 	require.NoError(t, err)
-	require.True(t, ack.reportsExit, "the ack should say the exit status will be reported")
 
 	var output []byte
 	var exit *shellAck
@@ -344,12 +342,11 @@ func TestHandleQUICShellStreamReportsExitStatus(t *testing.T) {
 }
 
 type shellAck struct {
-	ackShellID  string
-	ackToken    string
-	reportsExit bool
-	op          string
-	exitCode    *int
-	data        []byte
+	ackShellID string
+	ackToken   string
+	op         string
+	exitCode   *int
+	data       []byte
 }
 
 func sendQUICShellControl(conn net.Conn, sendKey []byte, msg common.ShellControlMsg) error {
@@ -384,6 +381,6 @@ func recvQUICShellEnvelope(conn net.Conn, receiveKey []byte) (shellAck, error) {
 	if err := json.Unmarshal(plaintext, &msg); err != nil {
 		return shellAck{}, err
 	}
-	return shellAck{ackShellID: msg.ShellID, ackToken: msg.Token, reportsExit: msg.ReportsExit,
+	return shellAck{ackShellID: msg.ShellID, ackToken: msg.Token,
 		op: string(msg.Op), exitCode: msg.ExitCode}, nil
 }

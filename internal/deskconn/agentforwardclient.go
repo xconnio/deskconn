@@ -18,12 +18,11 @@ import (
 // forwarding, signals ready once the machine acks, and for every external
 // connection the machine reports, dials agentSock  and relays.
 func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock string, ready chan<- error) error {
-	authenticator, err := clientAuthenticator(realm, cfgDirectory)
-	if err != nil {
+	// Fail fast, through ready, for missing credentials or a password that can't be read.
+	if _, err := clientAuthenticator(realm, cfgDirectory); err != nil {
 		ready <- err
 		return err
 	}
-	authID := authenticator.AuthID()
 
 	switch mode {
 	case ModeDirect:
@@ -33,14 +32,14 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 			return err
 		}
 		defer func() { _ = p2pSess.Close() }()
-		return runAgentForwardOnStream(ctx, p2pSess, authID, agentSock, ready)
+		return runAgentForwardOnStream(ctx, p2pSess, agentSock, ready)
 	case ModeRouted:
-		return runAgentForwardQUIC(ctx, realm, cfgDirectory, authID, agentSock, ready)
+		return runAgentForwardQUIC(ctx, realm, cfgDirectory, agentSock, ready)
 	default:
 		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = daemon.Close() }()
-			return runAgentForwardOnStream(ctx, daemon, authID, agentSock, ready)
+			return runAgentForwardOnStream(ctx, daemon, agentSock, ready)
 		}
 		if !errors.Is(err, ErrDaemonUnavailable) {
 			ready <- err
@@ -49,26 +48,26 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err == nil {
 			defer func() { _ = p2pSess.Close() }()
-			return runAgentForwardOnStream(ctx, p2pSess, authID, agentSock, ready)
+			return runAgentForwardOnStream(ctx, p2pSess, agentSock, ready)
 		}
 		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
-		return runAgentForwardQUIC(ctx, realm, cfgDirectory, authID, agentSock, ready)
+		return runAgentForwardQUIC(ctx, realm, cfgDirectory, agentSock, ready)
 	}
 }
 
-func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, authID, agentSock string, ready chan<- error) error {
+func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, agentSock string, ready chan<- error) error {
 	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		ready <- err
 		return err
 	}
 	defer func() { _ = quicSess.Connection().Close() }()
-	return runAgentForwardOnStream(ctx, quicSess, authID, agentSock, ready)
+	return runAgentForwardOnStream(ctx, quicSess, agentSock, ready)
 }
 
 // runAgentForwardOnStream runs the agent-forward session on an RPC stream returned by sess.
 func runAgentForwardOnStream(ctx context.Context, sess common.StreamSession,
-	authID, agentSock string, ready chan<- error) error {
+	agentSock string, ready chan<- error) error {
 	stream, err := common.OpenRPCStream(ctx, sess, common.ProcedureAgentForwardStream, false)
 	if err != nil {
 		ready <- err
@@ -82,7 +81,7 @@ func runAgentForwardOnStream(ctx context.Context, sess common.StreamSession,
 		return err
 	}
 	conn := &streamClientShellConn{stream: stream}
-	if err := startAgentForward(conn, sendKey, receiveKey, authID); err != nil {
+	if err := startAgentForward(conn, sendKey, receiveKey); err != nil {
 		ready <- err
 		return err
 	}
@@ -128,9 +127,9 @@ func runAgentForwardOnStream(ctx context.Context, sess common.StreamSession,
 
 // startAgentForward sends the initial "start forwarding" request and waits
 // for the machine's ack, returning an error if it can't proceed.
-func startAgentForward(conn shellConn, sendKey, receiveKey []byte, authID string) error {
+func startAgentForward(conn shellConn, sendKey, receiveKey []byte) error {
 	env, err := common.BuildPortEnvelope(common.AgentFwdMsgControl,
-		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: authID}), sendKey)
+		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart}), sendKey)
 	if err != nil {
 		return err
 	}

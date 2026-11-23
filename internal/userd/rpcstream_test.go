@@ -172,7 +172,7 @@ func TestRPCAgentForwardUsesAuthenticatedCaller(t *testing.T) {
 	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(forward)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(forward, common.AgentFwdMsgControl, common.MustJSON(
-		common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: "bob@example.com"}), sendKey))
+		map[string]string{"op": string(common.AgentFwdOpStart), "auth_id": "bob@example.com"}), sendKey))
 	_, _, err = recvPortEnvelope(forward, receiveKey)
 	require.NoError(t, err)
 
@@ -181,10 +181,10 @@ func TestRPCAgentForwardUsesAuthenticatedCaller(t *testing.T) {
 	_, ok = backend.AgentSocketPath("bob@example.com")
 	require.False(t, ok, "the agent must not be registered for the claimed AuthID")
 
-	agentSock := func(session *xconn.Session, claimed string) string {
+	agentSock := func(session *xconn.Session) string {
 		t.Helper()
 		shell := openRPCShell(t, session, common.ShellControlMsg{Op: common.ShellOpSize, Cols: 80, Rows: 24,
-			AuthID: claimed, Command: "sh", Args: []string{"-c", "echo \"agent=[$SSH_AUTH_SOCK]\""}})
+			Command: "sh", Args: []string{"-c", "echo \"agent=[$SSH_AUTH_SOCK]\""}})
 		require.NotEmpty(t, shell.ack.ackShellID)
 		var output []byte
 		for {
@@ -196,6 +196,6 @@ func TestRPCAgentForwardUsesAuthenticatedCaller(t *testing.T) {
 			output = append(output, msg.data...)
 		}
 	}
-	assert.Equal(t, sockPath, agentSock(alice, "bob@example.com"))
-	assert.NotEqual(t, sockPath, agentSock(sessionAs("bob@example.com"), "alice@example.com"))
+	assert.Equal(t, sockPath, agentSock(alice))
+	assert.NotEqual(t, sockPath, agentSock(sessionAs("bob@example.com")))
 }

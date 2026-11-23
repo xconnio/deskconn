@@ -68,25 +68,6 @@ func TestStandaloneMachineNamesManagedOnesRefused(t *testing.T) {
 	require.NoError(t, deskconn.AddStandaloneMachine(dir, common.StandaloneMachine{Name: "lab", URL: hostURL}))
 }
 
-func TestLegacyProfilesMigrate(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yml"), []byte("profiles:\n"+
-		"  - name: lab\n    url: quic://host:18080\n    cert_hash: ab\n    private_key: cd\n    authid: alice\n"), 0600))
-
-	machines, err := deskconn.StandaloneMachines(dir)
-	require.NoError(t, err)
-	require.Equal(t, []common.StandaloneMachine{{Name: "lab", URL: hostURL, CertHash: "ab",
-		PrivateKey: "cd", Username: "alice"}}, machines)
-
-	// The next write saves them under the new key.
-	require.NoError(t, deskconn.AddStandaloneMachine(dir,
-		common.StandaloneMachine{Name: homeName, URL: "quic://home:18080"}))
-	data, err := os.ReadFile(filepath.Join(dir, "config.yml"))
-	require.NoError(t, err)
-	require.NotContains(t, string(data), "profiles:")
-	require.Contains(t, string(data), "username: alice")
-}
-
 func TestStandaloneMachinesShareConfigWithOtherSections(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yml"),

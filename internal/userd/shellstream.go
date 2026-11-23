@@ -144,7 +144,7 @@ func (d *Deskconn) handleQUICShellStream(stream net.Conn, caller string) {
 
 	transport := &quicShellTransport{stream: stream, sendKey: sendKey}
 	shellID, token, ptmx, startReader, err := d.beginShellSession(caller, ctrl, transport)
-	ackMsg := common.ShellControlMsg{ShellID: shellID, Token: token, ReportsExit: true}
+	ackMsg := common.ShellControlMsg{ShellID: shellID, Token: token}
 	if err != nil {
 		ackMsg = common.ShellControlMsg{Error: err.Error()}
 	}

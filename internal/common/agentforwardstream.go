@@ -9,6 +9,5 @@ type agentFwdOp string
 type AgentForwardMsg struct {
 	Op     agentFwdOp `json:"op,omitempty"`
 	ConnID uint64     `json:"conn_id,omitempty"`
-	AuthID string     `json:"auth_id,omitempty"` // start only: read by older machines; newer ones use the caller
-	Error  string     `json:"error,omitempty"`   // start ack failure
+	Error  string     `json:"error,omitempty"` // start ack failure
 }

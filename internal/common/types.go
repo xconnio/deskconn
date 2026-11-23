@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 
-	"gopkg.in/yaml.v3"
-
 	auth "github.com/xconnio/xconn/bindings/go/auth"
 )
 
@@ -61,42 +59,6 @@ type Config struct {
 	Printing   PrintingConfig      `yaml:"printing,omitempty"`
 	Screenshot ScreenshotConfig    `yaml:"screenshot,omitempty"`
 	Standalone []StandaloneMachine `yaml:"standalone,omitempty"`
-}
-
-// legacyProfile is a standalone machine as config.yml saved it before profiles became
-// standalone machines.
-type legacyProfile struct {
-	Name       string `yaml:"name"`
-	URL        string `yaml:"url"`
-	CertHash   string `yaml:"cert_hash,omitempty"`
-	PrivateKey string `yaml:"private_key,omitempty"`
-	AuthID     string `yaml:"authid,omitempty"`
-}
-
-// UnmarshalYAML also accepts the "devices" key that config.yml used before machines were
-// renamed, and the "profiles" key it used before profiles became standalone machines, so
-// existing configs keep working; the next write saves them under "machines" and "standalone".
-func (c *Config) UnmarshalYAML(value *yaml.Node) error {
-	type plain Config
-	var raw struct {
-		plain          `yaml:",inline"`
-		LegacyMachines []Machine       `yaml:"devices"`
-		LegacyProfiles []legacyProfile `yaml:"profiles"`
-	}
-	if err := value.Decode(&raw); err != nil {
-		return err
-	}
-	*c = Config(raw.plain)
-	if len(c.Machines) == 0 {
-		c.Machines = raw.LegacyMachines
-	}
-	if len(c.Standalone) == 0 {
-		for _, p := range raw.LegacyProfiles {
-			c.Standalone = append(c.Standalone, StandaloneMachine{Name: p.Name, URL: p.URL, CertHash: p.CertHash,
-				PrivateKey: p.PrivateKey, Username: p.AuthID})
-		}
-	}
-	return nil
 }
 
 // StandaloneTarget is a standalone machine the CLI connects to directly, instead of a

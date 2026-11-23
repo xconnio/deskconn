@@ -11,22 +11,17 @@ type shellControlOp string
 // protocol, sent inside the same encrypted envelope (ShellMsgControl kind)
 // as everything else on the connection.
 type ShellControlMsg struct {
-	Op      shellControlOp `json:"op"`
-	Cols    uint16         `json:"cols,omitempty"`
-	Rows    uint16         `json:"rows,omitempty"`
-	AuthID  string         `json:"auth_id,omitempty"`  // size only: read by older machines; newer ones use the caller
-	Command string         `json:"command,omitempty"`  // size only: exec's command; empty means an interactive bash shell
-	Args    []string       `json:"args,omitempty"`     // size only: exec's arguments to Command
-	Dir     string         `json:"dir,omitempty"`      // size only: the directory to start in; empty means home
-	OldID   string         `json:"old_id,omitempty"`   // migrate only: shell ID being claimed
-	Token   string         `json:"token,omitempty"`    // migrate only: the token issued for OldID
-	ShellID string         `json:"shell_id,omitempty"` // server->client ack: the (possibly new) shell ID
-	Error   string         `json:"error,omitempty"`    // server->client ack: set instead of ShellID/Token on failure
-	// ReportsExit is set in the server->client ack by a machine that sends ShellOpExit
-	// once the command exits, so the client can tell a lost connection (no ShellOpExit)
-	// from an older machine that never sends one.
-	ReportsExit bool `json:"reports_exit,omitempty"`
-	ExitCode    *int `json:"exit_code,omitempty"` // exit only: the command's exit status
+	Op       shellControlOp `json:"op"`
+	Cols     uint16         `json:"cols,omitempty"`
+	Rows     uint16         `json:"rows,omitempty"`
+	Command  string         `json:"command,omitempty"`   // size only: exec's command; empty means interactive bash
+	Args     []string       `json:"args,omitempty"`      // size only: exec's arguments to Command
+	Dir      string         `json:"dir,omitempty"`       // size only: the directory to start in; empty means home
+	OldID    string         `json:"old_id,omitempty"`    // migrate only: shell ID being claimed
+	Token    string         `json:"token,omitempty"`     // migrate only: the token issued for OldID
+	ShellID  string         `json:"shell_id,omitempty"`  // server->client ack: the (possibly new) shell ID
+	Error    string         `json:"error,omitempty"`     // server->client ack: set instead of ShellID/Token on failure
+	ExitCode *int           `json:"exit_code,omitempty"` // exit only: the command's exit status
 }
 
 // BuildShellEnvelope encrypts plaintext and prepends kind, ready to hand to

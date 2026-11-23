@@ -79,7 +79,6 @@ func linkOptionalCompletions(zshDir, bashDir string) {
 	for _, dir := range []string{"/opt/homebrew/share/zsh/site-functions", "/usr/local/share/zsh/site-functions"} {
 		if isWritableDirectory(dir) {
 			trySymlink(filepath.Join(zshDir, "_desk"), filepath.Join(dir, "_desk"))
-			removeSymlink(filepath.Join(dir, "_deskconn"))
 		}
 	}
 	for _, dir := range []string{"/opt/homebrew/etc/bash_completion.d", "/usr/local/etc/bash_completion.d"} {

@@ -112,14 +112,12 @@ func (e *shellRejectedError) Error() string { return e.msg }
 // shellHandshakeResult is what dialing and completing the initial
 // size/migrate handshake on a shell connection produces. token is only set
 // for a brand-new session (ShellOpSize) -- the migration token this
-// connection can later be handed off from. reportsExit is whether the machine
-// sends ShellOpExit at the end. cleanup releases the underlying QUIC connection
+// connection can later be handed off from. cleanup releases the underlying QUIC connection
 // or PeerConnection and must be called exactly once.
 type shellHandshakeResult struct {
 	conn                shellConn
 	sendKey, receiveKey []byte
 	shellID, token      string
-	reportsExit         bool
 	cleanup             func()
 }
 
@@ -186,7 +184,7 @@ func finishShellHandshake(ctx context.Context, stream net.Conn, ctrl common.Shel
 	}
 	return &shellHandshakeResult{
 		conn: conn, sendKey: sendKey, receiveKey: receiveKey,
-		shellID: ack.ShellID, token: ack.Token, reportsExit: ack.ReportsExit, cleanup: cleanup,
+		shellID: ack.ShellID, token: ack.Token, cleanup: cleanup,
 	}, nil
 }
 
@@ -478,7 +476,7 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 	go shellPingLoop(active, done)
 
 	migrateCtrl := common.ShellControlMsg{
-		Op: common.ShellOpMigrate, OldID: primary.shellID, Token: primary.token, AuthID: ctrl.AuthID,
+		Op: common.ShellOpMigrate, OldID: primary.shellID, Token: primary.token,
 	}
 	switch {
 	case daemon != nil && !daemon.P2P():
@@ -501,12 +499,8 @@ func runStreamCommand(ctx context.Context, mode, realm, cfgDirectory string, ctr
 		return &ExitError{Code: code}
 	case exited:
 		return nil
-	case primary.reportsExit:
-		return &ConnectionError{Err: fmt.Errorf("connection to the machine lost before the command finished: %w", err)}
 	default:
-		// A machine too old to report the exit status just closes the connection
-		// once the PTY exits, which can't be told apart from losing it.
-		return nil
+		return &ConnectionError{Err: fmt.Errorf("connection to the machine lost before the command finished: %w", err)}
 	}
 }
 
@@ -550,11 +544,12 @@ func awaitDaemonP2P(ctx context.Context, realm, cfgDirectory string) (*DaemonStr
 }
 
 func RunShell(ctx context.Context, mode, realm, cfgDirectory string) error {
-	authenticator, err := clientAuthenticator(realm, cfgDirectory)
-	if err != nil {
+	// Ask for a standalone machine's password, or fail for missing credentials, before
+	// runStreamCommand's setup timeout starts.
+	if _, err := clientAuthenticator(realm, cfgDirectory); err != nil {
 		return err
 	}
-	return runStreamCommand(ctx, mode, realm, cfgDirectory, common.ShellControlMsg{AuthID: authenticator.AuthID()})
+	return runStreamCommand(ctx, mode, realm, cfgDirectory, common.ShellControlMsg{})
 }
 
 // RunExec is the client entry point for anything that runs one command on a
