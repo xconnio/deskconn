@@ -48,11 +48,8 @@ func registerAgentCommands(app *kingpin.Application, cfgDirectory string) *agent
 
 	lsCmd := agentCmd.Command("ls", "List agent sessions for this project, on this machine or another one")
 	// Unlike machineArg, machine is optional here: omitting it lists this machine's own sessions.
-	lsMachine := new(string)
-	if !standaloneRequested() {
-		lsMachine = lsCmd.Arg("machine", "Machine to list sessions on (default: this machine)").
-			HintAction(machineCompletions(cfgDirectory)).String()
-	}
+	lsMachine := lsCmd.Arg("machine", "Machine to list sessions on (default: this machine)").
+		HintAction(machineCompletions(cfgDirectory)).String()
 	lsMode := modeFlag(lsCmd, modeHelp)
 
 	pullCmd := agentCmd.Command("pull", "Pull agent sessions from another machine onto this one")
@@ -147,7 +144,7 @@ func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, err
 
 	var session *xconn.Session
 	var closeFn func()
-	switch mode {
+	switch defaultMode(realm, mode) {
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -200,7 +197,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 
 	where := "this machine"
 	var sessions []common.AgentSessionSummary
-	if machine == "" && !standaloneRequested() {
+	if machine == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return fmt.Errorf("failed to get home directory: %w", err)
@@ -354,7 +351,8 @@ func runAgentResumeRemote(cfgDirectory, machine, tool, sessionID, mode string) e
 	// path is relative to home, so the project matches whatever home is on the machine; the
 	// machine runs the agent as the user's own shell finds it (see userd's userCommand).
 	cmdName, args := agentResumeCommand(tool, sessionID)
-	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, path, append([]string{cmdName}, args...))
+	return deskconn.RunExec(context.Background(), defaultMode(realm, mode), realm, cfgDirectory, path,
+		append([]string{cmdName}, args...))
 }
 
 // launch replaces desk with tool where the OS allows it (not Windows, which has no exec),

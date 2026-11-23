@@ -23,7 +23,7 @@ func ConnectDaemon(ctx context.Context, cfgDirectory string) (*xconn.Session, er
 	return connectivity.ConnectApp(ctx, filepath.Join(cfgDirectory, "deskconn.sock"), LocalRealm)
 }
 
-// CurrentUsername is the authid a profile presents unless --authid says otherwise.
+// CurrentUsername is the username a standalone machine logs in as unless --username says otherwise.
 func CurrentUsername() string {
 	if u, err := user.Current(); err == nil && u.Username != "" {
 		return u.Username

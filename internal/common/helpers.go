@@ -105,7 +105,7 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 }
 
 // ConnectMachineRealmQUIC connects to realm's machine: directly over QUIC or WebTransport for
-// the standalone target the CLI was pointed at (see SetStandaloneTarget), otherwise through
+// a standalone machine the CLI resolved (see SetStandaloneTargetFor), otherwise through
 // the cloud over QUIC.
 func ConnectMachineRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*MachineConn, error) {
 	if target, ok := StandaloneTargetFor(realm); ok {

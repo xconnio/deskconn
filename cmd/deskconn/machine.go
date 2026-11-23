@@ -14,7 +14,6 @@ import (
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/olekukonko/tablewriter"
-	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/deskconn/internal/common"
@@ -25,6 +24,8 @@ type machineCommands struct {
 	ls         *kingpin.CmdClause
 	lsShortcut *kingpin.CmdClause
 	attach     *kingpin.CmdClause
+	add        *kingpin.CmdClause
+	remove     *kingpin.CmdClause
 	detach     *kingpin.CmdClause
 	alias      *kingpin.CmdClause
 	ping       *kingpin.CmdClause
@@ -39,6 +40,14 @@ type machineCommands struct {
 
 	attachName     *string
 	attachUsername *string
+
+	addName     *string
+	addURL      *string
+	addCertHash *string
+	addKey      *string
+	addUsername *string
+
+	removeName *string
 
 	aliasMachine *string
 	aliasName    *string
@@ -69,13 +78,28 @@ func registerMachineCommands(app *kingpin.Application, cfgDirectory string) *mac
 
 	machineCmd := app.Command("machine", "Manage machines and connections")
 
-	cmds.ls = machineCmd.Command("ls", "List machines")
-	cmds.ls.Flag("refresh", "Refresh machine list from cloud").BoolVar(&cmds.lsRefresh)
+	cmds.ls = machineCmd.Command("ls", "List managed and standalone machines")
+	cmds.ls.Flag("refresh", "Refresh managed machines from your account").BoolVar(&cmds.lsRefresh)
 	cmds.ls.Flag("detailed", "Show detailed output").BoolVar(&cmds.lsDetailed)
 
 	cmds.attach = machineCmd.Command("attach", "Register this machine with your account")
 	cmds.attachName = cmds.attach.Flag("name", "Machine name").Short('n').String()
 	cmds.attachUsername = cmds.attach.Flag("username", "Username").Short('u').String()
+
+	cmds.add = machineCmd.Command("add", "Add a standalone machine (served with `desk serve --mode standalone`) "+
+		"to connect to directly")
+	cmds.addName = cmds.add.Arg("name", "Name to refer to the machine by").Required().String()
+	cmds.addURL = cmds.add.Flag("url", "The machine's URL: quic://host:port, or https://host:port "+
+		"for WebTransport").Required().String()
+	cmds.addUsername = cmds.add.Flag("username", "Username to log in as (default: current user)").String()
+	cmds.addCertHash = cmds.add.Flag("cert-hash", "SHA-256 fingerprint of the machine's certificate, "+
+		"as `desk serve` prints it, to trust it even if self-signed (default: verify against trusted CAs)").String()
+	cmds.addKey = cmds.add.Flag("private-key", "Private key (hex) to log in with; see `desk keygen`. "+
+		"Without it, a password is asked for on connecting").String()
+
+	cmds.remove = machineCmd.Command("remove", "Remove a standalone machine from this client")
+	cmds.removeName = cmds.remove.Arg("name", "Name of the standalone machine").Required().
+		HintAction(standaloneCompletions(cfgDirectory)).String()
 
 	cmds.detach = machineCmd.Command("detach", "Remove this machine from your account (asks for confirmation)")
 
@@ -118,19 +142,8 @@ func registerMachineCommands(app *kingpin.Application, cfgDirectory string) *mac
 // separately so it keeps its place after "vpn" in --help-long and shell completions.
 func (c *machineCommands) registerLsShortcut(app *kingpin.Application) {
 	c.lsShortcut = app.Command("ls", "List your machines (shortcut for 'machine ls')")
-	c.lsShortcut.Flag("refresh", "Refresh machine list from cloud").BoolVar(&c.lsRefresh)
+	c.lsShortcut.Flag("refresh", "Refresh managed machines from your account").BoolVar(&c.lsRefresh)
 	c.lsShortcut.Flag("detailed", "Show detailed output").BoolVar(&c.lsDetailed)
-}
-
-// accountOnly reports whether parsedCmd works on the machines of your account, so it isn't
-// available with --profile.
-func (c *machineCommands) accountOnly(parsedCmd string) bool {
-	switch parsedCmd {
-	case c.ping.FullCommand(), c.connect.FullCommand(), c.disconnect.FullCommand(), c.lsShortcut.FullCommand(),
-		c.ls.FullCommand():
-		return true
-	}
-	return false
 }
 
 func dispatchMachineCommand(parsedCmd string, cmds *machineCommands, cfgDirectory string) bool {
@@ -139,6 +152,11 @@ func dispatchMachineCommand(parsedCmd string, cmds *machineCommands, cfgDirector
 		exitOnErr(listMachines(cfgDirectory, cmds.lsRefresh, cmds.lsDetailed))
 	case cmds.attach.FullCommand():
 		exitOnErr(attach(*cmds.attachUsername, *cmds.attachName))
+	case cmds.add.FullCommand():
+		exitOnErr(addStandaloneMachine(cfgDirectory, common.StandaloneMachine{Name: *cmds.addName, URL: *cmds.addURL,
+			CertHash: *cmds.addCertHash, PrivateKey: *cmds.addKey, Username: *cmds.addUsername}))
+	case cmds.remove.FullCommand():
+		exitOnErr(removeStandaloneMachine(cfgDirectory, *cmds.removeName))
 	case cmds.detach.FullCommand():
 		exitOnErr(detach(cfgDirectory))
 	case cmds.alias.FullCommand():
@@ -164,71 +182,110 @@ func dispatchMachineCommand(parsedCmd string, cmds *machineCommands, cfgDirector
 	return true
 }
 
-// listMachines prints the machines of your account and when each got connected, from the
-// cached list unless refresh is set or there isn't one.
+// listMachines prints the managed machines of your account, with when each got connected,
+// and the standalone machines saved on this client. Managed machines come from the cached
+// list unless refresh is set or there isn't one.
 func listMachines(cfgDirectory string, refresh, detailed bool) error {
-	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
-	if err != nil {
-		log.Fatal(err)
+	standalone, err := deskconn.StandaloneMachines(cfgDirectory)
+	// An unreadable config is replaced by the refresh, as it was before standalone machines.
+	if err != nil && !refresh {
+		return err
 	}
-
-	machinesCallResp := session.Call(common.ProcedureConnectedMachines).Execute()
-	if machinesCallResp.Err != nil {
-		return machinesCallResp.Err
-	}
-	connectedMachines, ok := machinesCallResp.Args[0].(map[string]any)
-	if !ok {
-		return errors.New("expected a map of strings")
-	}
-	fileExists := true
-	machinesFromCfg, err := common.MachinesFromCfg(cfgDirectory)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			fileExists = false
-		} else {
-			if !refresh {
-				return err
-			}
-			fmt.Println("your config is invalid, refreshing from cloud")
-		}
-	}
-
-	tableHeader := []string{"ID", "NAME", "ALIAS", "CONNECTED SINCE"}
-	if detailed {
-		tableHeader = append(tableHeader, "ORGANIZATION", "REALM")
-	}
-	table := tablewriter.NewWriter(os.Stdout)
-	table.Header(tableHeader)
-	appendRow := func(d common.Machine) {
-		since := common.ConnectedSince(connectedMachines, d.Realm)
-		if detailed {
-			_ = table.Append([]any{common.ShortID(d.Authid), d.Name, d.Alias, since, d.Organization.Name, d.Realm})
-		} else {
-			_ = table.Append([]any{common.ShortID(d.Authid), d.Name, d.Alias, since})
-		}
-	}
-
-	if !refresh && fileExists {
-		for _, d := range machinesFromCfg {
-			if d.Name == "" && d.Authid == "" && d.Alias == "" {
-				continue
-			}
-			appendRow(d)
-		}
-		return table.Render()
-	}
-
-	machines, err := deskconn.RefreshMachines(cfgDirectory, machinesFromCfg)
+	managed, fetched, err := managedMachinesToList(cfgDirectory, refresh, len(standalone) > 0)
 	if err != nil {
 		return err
 	}
-	for _, machine := range machines {
-		appendRow(machine)
+	if len(managed) == 0 && len(standalone) == 0 && !loggedIn(cfgDirectory) {
+		fmt.Println("No machines. Sign in with `desk auth login`, or add a standalone machine with " +
+			"`desk machine add <name> --url <url>`.")
+		return nil
+	}
+
+	// Only managed machines connect through the daemon.
+	var connectedMachines map[string]any
+	if len(managed) > 0 {
+		session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = session.Leave() }()
+		machinesCallResp := session.Call(common.ProcedureConnectedMachines).Execute()
+		if machinesCallResp.Err != nil {
+			return machinesCallResp.Err
+		}
+		var ok bool
+		if connectedMachines, ok = machinesCallResp.Args[0].(map[string]any); !ok {
+			return errors.New("expected a map of strings")
+		}
+	}
+
+	tableHeader := []string{"ID", "NAME", "MODE", "ALIAS", "CONNECTED SINCE"}
+	if detailed {
+		tableHeader = append(tableHeader, "ORGANIZATION", "REALM", "URL")
+	}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.Header(tableHeader)
+	for _, d := range managed {
+		row := []any{common.ShortID(d.Authid), d.Name, modeManaged, d.Alias,
+			common.ConnectedSince(connectedMachines, d.Realm)}
+		if detailed {
+			row = append(row, d.Organization.Name, d.Realm, "")
+		}
+		_ = table.Append(row)
+	}
+	for _, m := range standalone {
+		row := []any{"", m.Name, modeStandalone, "", ""}
+		if detailed {
+			row = append(row, "", "", m.URL)
+		}
+		_ = table.Append(row)
 	}
 	if err := table.Render(); err != nil {
 		return err
 	}
-	return deskconn.CacheMachines(cfgDirectory, machines)
+	for _, m := range standalone {
+		if machine, ok := deskconn.ManagedMachineConflict(managed, m.Name); ok {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", ambiguousMachineError(m.Name, machine))
+		}
+	}
+	if fetched {
+		return deskconn.CacheMachines(cfgDirectory, managed)
+	}
+	return nil
+}
+
+// managedMachinesToList returns the account's machines desk ls shows, and whether they were
+// fetched (for the caller to cache): the cached ones, unless refresh is set or there are none
+// yet. Signed out, only the cached ones. A failed fetch that wasn't asked for doesn't stop
+// listing a config's standalone machines (haveStandalone), or an empty cached list.
+func managedMachinesToList(cfgDirectory string, refresh, haveStandalone bool) ([]common.Machine, bool, error) {
+	cached, err := common.MachinesFromCfg(cfgDirectory)
+	noConfig := errors.Is(err, os.ErrNotExist)
+	if err != nil && !noConfig {
+		if !refresh {
+			return nil, false, err
+		}
+		fmt.Println("your config is invalid, refreshing from cloud")
+	}
+	var machines []common.Machine
+	for _, d := range cached {
+		if d.Name != "" || d.Authid != "" || d.Alias != "" {
+			machines = append(machines, d)
+		}
+	}
+	if !refresh && (len(machines) > 0 || !loggedIn(cfgDirectory)) {
+		return machines, false, nil
+	}
+
+	refreshed, err := deskconn.RefreshMachines(cfgDirectory, cached)
+	if err != nil {
+		if refresh || (noConfig && !haveStandalone) {
+			return nil, false, err
+		}
+		fmt.Fprintf(os.Stderr, "warning: could not fetch managed machines: %v\n", err)
+		return machines, false, nil
+	}
+	return refreshed, true, nil
 }
 
 // pingMachine pings machine count times (0 = until interrupted) a second apart, then prints
@@ -238,10 +295,11 @@ func pingMachine(cfgDirectory, machine string, count int) error {
 	if err != nil {
 		return err
 	}
-	localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	ping, closePing, err := machinePinger(cfgDirectory, realm)
 	if err != nil {
 		return err
 	}
+	defer closePing()
 
 	fmt.Printf("PING %s\n", machine)
 
@@ -261,12 +319,11 @@ pingLoop:
 		default:
 		}
 
-		callResp := localSession.Call(common.ProcedureProxyPing).Args(realm).Execute()
+		ms, err := ping()
 		sent++
-		if callResp.Err != nil {
-			fmt.Fprintf(os.Stderr, "seq=%d error: %v\n", seq, callResp.Err)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "seq=%d error: %v\n", seq, err)
 		} else {
-			ms, _ := callResp.ArgInt64(0)
 			received++
 			totalMs += ms
 			if ms < minMs {
@@ -303,10 +360,52 @@ pingLoop:
 	return nil
 }
 
+// machinePinger returns a func that pings realm's machine once and returns the round trip
+// in milliseconds: through the daemon for a managed machine, otherwise over a connection of
+// its own, which the returned close func closes.
+func machinePinger(cfgDirectory, realm string) (func() (int64, error), func(), error) {
+	if isStandaloneRealm(realm) {
+		conn, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+		if err != nil {
+			return nil, nil, err
+		}
+		return func() (int64, error) {
+			start := time.Now()
+			if err := conn.Call(common.ProcedurePing).Execute().Err; err != nil {
+				return 0, err
+			}
+			return time.Since(start).Milliseconds(), nil
+		}, func() { _ = conn.Connection().Close() }, nil
+	}
+
+	localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	if err != nil {
+		return nil, nil, err
+	}
+	return func() (int64, error) {
+		callResp := localSession.Call(common.ProcedureProxyPing).Args(realm).Execute()
+		if callResp.Err != nil {
+			return 0, callResp.Err
+		}
+		ms, _ := callResp.ArgInt64(0)
+		return ms, nil
+	}, func() { _ = localSession.Leave() }, nil
+}
+
+// errPersistentStandalone is why desk machine connect and disconnect don't take a standalone
+// machine: they manage the daemon's connections, which are to managed machines only.
+func errPersistentStandalone(machine string) error {
+	return fmt.Errorf("%s is a standalone machine: persistent connections are for managed machines; "+
+		"commands connect to a standalone machine on each use", machine)
+}
+
 func connectMachine(cfgDirectory, machine string) error {
 	realm, err := machineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
+	}
+	if isStandaloneRealm(realm) {
+		return errPersistentStandalone(machine)
 	}
 	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
@@ -339,6 +438,9 @@ func disconnectMachine(cfgDirectory, machine string, all bool) error {
 	if err != nil {
 		return err
 	}
+	if isStandaloneRealm(realm) {
+		return errPersistentStandalone(machine)
+	}
 	kwargs := map[string]any{common.DisconnectKwargRealm: realm}
 	if err := session.Call(common.ProcedureDisconnect).Kwargs(kwargs).Execute().Err; err != nil {
 		return err
@@ -352,7 +454,7 @@ func showMachineInfo(cfgDirectory, machine, mode string) error {
 	if err != nil {
 		return err
 	}
-	rawData, err := fetchMachineInfo(cfgDirectory, realm, mode)
+	rawData, err := fetchMachineInfo(cfgDirectory, realm, defaultMode(realm, mode))
 	if err != nil {
 		return err
 	}
@@ -429,66 +531,93 @@ func streamMachineLogs(cfgDirectory, machine, source string, follow bool, tail i
 		return err
 	}
 	return runUntilInterrupted("Stopping log stream...", func(ctx context.Context) error {
-		return deskconn.RunLogs(ctx, mode, realm, cfgDirectory, source, follow, tail, since, os.Stdout)
+		return deskconn.RunLogs(ctx, defaultMode(realm, mode), realm, cfgDirectory, source, follow, tail, since,
+			os.Stdout)
 	})
 }
 
+// machineRealm returns the realm the CLI names machineName's machine by: a standalone
+// machine saved on this client (see useStandaloneMachine), otherwise a managed machine of the
+// account, by its name, alias, ID or the start of its ID.
 func machineRealm(machineName, cfgDirectory string) (string, error) {
-	if standaloneRequested() {
-		return common.StandaloneRealm, nil
+	if machineName == "" {
+		return "", errors.New("no machine given; see desk machine ls")
 	}
-	machines, err := common.MachinesFromCfg(cfgDirectory)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			machines, err := deskconn.FetchMachinesFromCloud(cfgDirectory)
-			if err != nil {
-				return "", err
-			}
-
-			if err := deskconn.CacheMachines(cfgDirectory, machines); err != nil {
-				return "", err
-			}
-
-			return machineRealm(machineName, cfgDirectory)
+	standalone, err := deskconn.FindStandaloneMachine(cfgDirectory, machineName)
+	switch {
+	case err == nil:
+		// Only the cached managed machines: a standalone machine works offline and signed out.
+		managed, _ := common.MachinesFromCfg(cfgDirectory)
+		if machine, ok := deskconn.ManagedMachineConflict(managed, machineName); ok {
+			return "", ambiguousMachineError(machineName, machine)
 		}
+		return useStandaloneMachine(standalone), nil
+	case !errors.Is(err, deskconn.ErrStandaloneMachineNotFound):
 		return "", err
 	}
+	return managedMachineRealm(machineName, cfgDirectory)
+}
 
-	for _, d := range machines {
-		if d.Name == machineName {
-			return d.Realm, nil
+// managedMachineRealm returns the realm of the account's machine machineName refers to,
+// fetching the account's machines if none are cached yet.
+func managedMachineRealm(machineName, cfgDirectory string) (string, error) {
+	machines, err := common.MachinesFromCfg(cfgDirectory)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	// No config.yml yet, or one with only standalone machines: fetch the account's machines,
+	// which says so when signed out.
+	if len(machines) == 0 && (errors.Is(err, os.ErrNotExist) || loggedIn(cfgDirectory)) {
+		machines, err = deskconn.FetchMachinesFromCloud(cfgDirectory)
+		if err != nil {
+			return "", err
 		}
-		if d.Authid == machineName {
-			return d.Realm, nil
-		}
-		if d.Alias == machineName {
-			return d.Realm, nil
+		if err := deskconn.CacheMachines(cfgDirectory, machines); err != nil {
+			return "", err
 		}
 	}
 
+	if d, ok := deskconn.ManagedMachineNamed(machines, machineName); ok {
+		return d.Realm, nil
+	}
 	for _, d := range machines {
 		if strings.HasPrefix(d.Authid, machineName) {
 			return d.Realm, nil
 		}
 	}
 
-	return "", fmt.Errorf("machine not found: %s", machineName)
+	return "", fmt.Errorf("machine not found: %s; see desk machine ls", machineName)
 }
 
-func machineCompletions(cfgDirectory string) func() []string {
-	return func() []string {
-		machines, err := common.MachinesFromCfg(cfgDirectory)
-		if err != nil {
-			return nil
-		}
-		var names []string
+// machineNames are the names of the managed machines cached and the standalone machines
+// saved, for completing a machine argument.
+func machineNames(cfgDirectory string) []string {
+	var names []string
+	if machines, err := common.MachinesFromCfg(cfgDirectory); err == nil {
 		for _, d := range machines {
 			if d.Name != "" {
 				names = append(names, d.Name)
 			}
 		}
-		return names
 	}
+	return append(names, standaloneNames(cfgDirectory)...)
+}
+
+func standaloneNames(cfgDirectory string) []string {
+	machines, _ := deskconn.StandaloneMachines(cfgDirectory)
+	names := make([]string, 0, len(machines))
+	for _, m := range machines {
+		names = append(names, m.Name)
+	}
+	return names
+}
+
+func machineCompletions(cfgDirectory string) func() []string {
+	return func() []string { return machineNames(cfgDirectory) }
+}
+
+func standaloneCompletions(cfgDirectory string) func() []string {
+	return func() []string { return standaloneNames(cfgDirectory) }
 }
 
 func toMiB(b uint64) float64 {
@@ -525,6 +654,15 @@ func updateMachineAlias(cfgDirectory, machineKey, alias string) error {
 	var config common.Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	for _, m := range config.Standalone {
+		if m.Name == machineKey {
+			return fmt.Errorf("%s is a standalone machine: aliases are for managed machines", machineKey)
+		}
+		if m.Name == alias {
+			return fmt.Errorf("alias '%s' already names a standalone machine", alias)
+		}
 	}
 
 	machines := config.Machines

@@ -141,7 +141,7 @@ func (m *Model) headerView() string {
 	info := [][2]string{
 		{"Account:", account},
 		{"Machines:", fmt.Sprint(machines)},
-		{"Profiles:", fmt.Sprint(len(m.profiles))},
+		{"Standalone:", fmt.Sprint(len(m.standalone))},
 		{"Forwards:", fmt.Sprint(m.runningForwards())},
 		{"Daemon:", daemon},
 		{"Version:", m.version},
@@ -251,7 +251,7 @@ func (m *Model) helpLines() []string {
 	}
 	lines := section(strings.ToUpper(m.top().crumb()), m.top().hints(m))
 	general := []topHint{
-		{":machines", "Machines and profiles"}, {":pf", "Port forwards (f on a machine)"}, {"/", hintFilter},
+		{":machines", "Managed and standalone machines"}, {":pf", "Port forwards (f on a machine)"}, {"/", hintFilter},
 		{keyEsc, "Back, or clear the filter"}, {"ctrl-r", "Fetch your machines from the cloud"},
 		{"q", "Quit"},
 	}
@@ -511,7 +511,7 @@ func (d *topConfirm) view(m *Model) string {
 	return m.dialogBox(d.title, []string{m.styles.text.Render(d.message), "", m.buttons([]string{"Yes", "No"}, focused)})
 }
 
-// topPasswordDialog asks for a profile's password.
+// topPasswordDialog asks for a standalone machine's password.
 type topPasswordDialog struct {
 	authID, name string
 	password     string

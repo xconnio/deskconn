@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	labProfile = "lab"
+	labMachine = "lab"
 	bob        = "bob"
 	keyEnter   = "enter"
 	keyEsc     = "esc"
@@ -152,8 +152,8 @@ type driver struct {
 }
 
 // newDriver is desk top on a config with two machines (and an empty entry, which desk ls
-// skips too) and the profiles, on a width×height terminal.
-func newDriver(t *testing.T, profiles ...common.Profile) *driver {
+// skips too) and the standalone machines, on a width×height terminal.
+func newDriver(t *testing.T, standalone ...common.StandaloneMachine) *driver {
 	t.Helper()
 	cfgDirectory := t.TempDir()
 	require.NoError(t, deskconn.CacheMachines(cfgDirectory, []common.Machine{
@@ -161,11 +161,13 @@ func newDriver(t *testing.T, profiles ...common.Profile) *driver {
 		{Authid: "cccc2222dddd", Name: "laptop", Realm: "realm.laptop"},
 		{},
 	}))
-	if len(profiles) == 0 {
-		profiles = []common.Profile{{Name: labProfile, URL: "quic://10.0.0.5:18080", AuthID: bob, PrivateKey: "k"}}
+	if len(standalone) == 0 {
+		standalone = []common.StandaloneMachine{
+			{Name: labMachine, URL: "quic://10.0.0.5:18080", Username: bob, PrivateKey: "k"},
+		}
 	}
-	for _, profile := range profiles {
-		require.NoError(t, deskconn.AddProfile(cfgDirectory, profile))
+	for _, machine := range standalone {
+		require.NoError(t, deskconn.AddStandaloneMachine(cfgDirectory, machine))
 	}
 
 	d := &driver{t: t, remote: newFakeRemote(), msgs: make(chan tea.Msg, 1000)}
@@ -255,7 +257,7 @@ func (d *driver) screen() string {
 	return ansi.Strip(view)
 }
 
-// selected is the name of the machine or profile the cursor is on, as the port forward
+// selected is the name of the machine the cursor is on, as the port forward
 // dialog has it.
 func (d *driver) selected() string {
 	d.t.Helper()
@@ -280,7 +282,7 @@ func requireOrder(t *testing.T, screen string, words ...string) {
 func TestTopMachines(t *testing.T) {
 	d := newDriver(t)
 	screen := d.screen()
-	for _, want := range []string{"Machines[3]", "office", "work", "laptop", labProfile, "quic://10.0.0.5:18080",
+	for _, want := range []string{"Machines[3]", "office", "work", "laptop", labMachine, "quic://10.0.0.5:18080",
 		"key as bob", "<shift-f> Port forward", "<machines>", "Version:  v-test", "Daemon:   not running"} {
 		require.Contains(t, screen, want)
 	}
@@ -310,7 +312,7 @@ func TestTopFilter(t *testing.T) {
 	require.Contains(t, d.screen(), "Machines[3]", "esc clears it")
 
 	d.press("/", "1", "0", ".", "0")
-	require.Contains(t, d.screen(), "Machines(/10.0)[1]", "matches a profile's URL")
+	require.Contains(t, d.screen(), "Machines(/10.0)[1]", "matches a standalone machine's URL")
 	d.press("backspace")
 	require.Contains(t, d.screen(), "Machines(/10.)[1]")
 	d.press(keyEsc)
@@ -326,16 +328,16 @@ func TestTopMove(t *testing.T) {
 	d.press("k")
 	require.Equal(t, "office", d.selected(), "stays on the list at the top")
 	d.press("j", "down")
-	require.Equal(t, labProfile, d.selected())
+	require.Equal(t, labMachine, d.selected())
 	d.press("j")
-	require.Equal(t, labProfile, d.selected(), "and at the bottom")
+	require.Equal(t, labMachine, d.selected(), "and at the bottom")
 	d.press("g")
 	require.Equal(t, "office", d.selected())
 	d.press("G")
-	require.Equal(t, labProfile, d.selected())
+	require.Equal(t, labMachine, d.selected())
 
 	d.press("g", "jj")
-	require.Equal(t, labProfile, d.selected(), "keys that arrive together count one by one")
+	require.Equal(t, labMachine, d.selected(), "keys that arrive together count one by one")
 	d.press("/lab")
 	require.Contains(t, d.screen(), "Machines(/lab)[1]", "the rest of the keys go to the filter")
 }
@@ -395,8 +397,8 @@ func TestTopForwarding(t *testing.T) {
 	require.Contains(t, d.screen(), "on lab, all interfaces", "←/→ turns it around")
 	d.press("9", "0", "0", "0", "tab", "3", "0", "0", "0", keyEnter)
 	require.Contains(t, d.screen(), "Forward lab:9000 → 127.0.0.1:3000: address already in use")
-	require.Equal(t, []string{common.ProfileRealm(labProfile) + " forward 80:80",
-		common.ProfileRealm(labProfile) + " reverse 9000:3000"}, d.remote.forwards)
+	require.Equal(t, []string{common.StandaloneMachineRealm(labMachine) + " forward 80:80",
+		common.StandaloneMachineRealm(labMachine) + " reverse 9000:3000"}, d.remote.forwards)
 	require.Contains(t, d.screen(), "Forwards: 1")
 
 	d.press("f")
@@ -592,7 +594,7 @@ func TestTopLogs(t *testing.T) {
 }
 
 func TestTopPassword(t *testing.T) {
-	d := newDriver(t, common.Profile{Name: "pw", URL: "quic://10.0.0.6:18080", AuthID: "alice"})
+	d := newDriver(t, common.StandaloneMachine{Name: "pw", URL: "quic://10.0.0.6:18080", Username: "alice"})
 	d.remote.set(func(f *fakeRemote) { f.results = resources() })
 	d.press("G", keyEnter)
 	require.Contains(t, d.screen(), "Password for alice on pw")
@@ -605,7 +607,7 @@ func TestTopPassword(t *testing.T) {
 	d.press(keyEnter)
 	require.Contains(t, d.screen(), "Resources(pw)", "then it goes on")
 
-	target, ok := common.StandaloneTargetFor(common.ProfileRealm("pw"))
+	target, ok := common.StandaloneTargetFor(common.StandaloneMachineRealm("pw"))
 	require.True(t, ok)
 	require.False(t, target.NeedsPassword())
 

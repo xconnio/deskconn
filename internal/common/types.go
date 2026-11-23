@@ -36,10 +36,36 @@ type ScreenshotConfig struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 }
 
-// Profile is a standalone machine saved with "desk profile add", to connect to directly
-// with "desk --profile <name>". It authenticates with PrivateKey if set, otherwise as
-// AuthID with a password asked for on each use.
-type Profile struct {
+// StandaloneMachine is a machine served without an account (desk serve --mode standalone),
+// saved on this client with "desk machine add" to connect to directly at URL. It
+// authenticates as Username with PrivateKey if set, otherwise with a password asked for on
+// connecting.
+type StandaloneMachine struct {
+	Name       string `yaml:"name"`
+	URL        string `yaml:"url"`
+	CertHash   string `yaml:"cert_hash,omitempty"`
+	PrivateKey string `yaml:"private_key,omitempty"`
+	Username   string `yaml:"username,omitempty"`
+}
+
+// User is the username machine logs in as: Username, or the current user's.
+func (m StandaloneMachine) User() string {
+	if m.Username != "" {
+		return m.Username
+	}
+	return CurrentUsername()
+}
+
+type Config struct {
+	Machines   []Machine           `yaml:"machines"`
+	Printing   PrintingConfig      `yaml:"printing,omitempty"`
+	Screenshot ScreenshotConfig    `yaml:"screenshot,omitempty"`
+	Standalone []StandaloneMachine `yaml:"standalone,omitempty"`
+}
+
+// legacyProfile is a standalone machine as config.yml saved it before profiles became
+// standalone machines.
+type legacyProfile struct {
 	Name       string `yaml:"name"`
 	URL        string `yaml:"url"`
 	CertHash   string `yaml:"cert_hash,omitempty"`
@@ -47,20 +73,15 @@ type Profile struct {
 	AuthID     string `yaml:"authid,omitempty"`
 }
 
-type Config struct {
-	Machines   []Machine        `yaml:"machines"`
-	Printing   PrintingConfig   `yaml:"printing,omitempty"`
-	Screenshot ScreenshotConfig `yaml:"screenshot,omitempty"`
-	Profiles   []Profile        `yaml:"profiles,omitempty"`
-}
-
 // UnmarshalYAML also accepts the "devices" key that config.yml used before machines were
-// renamed, so existing configs keep working; the next write saves them under "machines".
+// renamed, and the "profiles" key it used before profiles became standalone machines, so
+// existing configs keep working; the next write saves them under "machines" and "standalone".
 func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	type plain Config
 	var raw struct {
 		plain          `yaml:",inline"`
-		LegacyMachines []Machine `yaml:"devices"`
+		LegacyMachines []Machine       `yaml:"devices"`
+		LegacyProfiles []legacyProfile `yaml:"profiles"`
 	}
 	if err := value.Decode(&raw); err != nil {
 		return err
@@ -69,11 +90,17 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	if len(c.Machines) == 0 {
 		c.Machines = raw.LegacyMachines
 	}
+	if len(c.Standalone) == 0 {
+		for _, p := range raw.LegacyProfiles {
+			c.Standalone = append(c.Standalone, StandaloneMachine{Name: p.Name, URL: p.URL, CertHash: p.CertHash,
+				PrivateKey: p.PrivateKey, Username: p.AuthID})
+		}
+	}
 	return nil
 }
 
-// StandaloneTarget is a standalone machine the CLI connects to directly (desk --profile),
-// instead of a machine from the cloud account. It authenticates with PrivateKey if set,
+// StandaloneTarget is a standalone machine the CLI connects to directly, instead of a
+// machine from the cloud account. It authenticates with PrivateKey if set,
 // otherwise as user AuthID with Password, asking ReadPassword for it on first use if empty.
 type StandaloneTarget struct {
 	URL          string // quic://host:port, or https://host:port[/path] for WebTransport
@@ -134,17 +161,14 @@ func (t *StandaloneTarget) NeedsPassword() bool {
 }
 
 // standaloneTargets are the standalone machines this process connects to, by the realm the
-// CLI names each by: StandaloneRealm for desk --profile, ProfileRealm for each of desk top's.
+// CLI names each by (StandaloneMachineRealm).
 var standaloneTargets = struct { //nolint:gochecknoglobals // set from the CLI's flags or desk top
 	sync.Mutex
 	byRealm map[string]*StandaloneTarget
 }{byRealm: map[string]*StandaloneTarget{}}
 
-// SetStandaloneTarget makes StandaloneRealm resolve to target for this process.
-func SetStandaloneTarget(target *StandaloneTarget) { SetStandaloneTargetFor(StandaloneRealm, target) }
-
-// SetStandaloneTargetFor makes realm (StandaloneRealm or a ProfileRealm) resolve to target
-// for this process.
+// SetStandaloneTargetFor makes realm (a StandaloneMachineRealm) resolve to target for this
+// process.
 func SetStandaloneTargetFor(realm string, target *StandaloneTarget) {
 	standaloneTargets.Lock()
 	defer standaloneTargets.Unlock()
@@ -159,12 +183,12 @@ func StandaloneTargetFor(realm string) (*StandaloneTarget, bool) {
 	return target, ok && target != nil
 }
 
-// ProfileRealm is the realm the CLI names profile's standalone machine by, so that one process
-// can use several (desk top). The machine itself serves StandaloneRealm, which connecting
-// to it asks for instead (see ServedRealm).
-func ProfileRealm(profile string) string { return StandaloneRealm + "/" + profile }
+// StandaloneMachineRealm is the realm the CLI names the standalone machine saved as name by,
+// so that one process can use several (desk top). The machine itself serves StandaloneRealm,
+// which connecting to it asks for instead (see ServedRealm).
+func StandaloneMachineRealm(name string) string { return StandaloneRealm + "/" + name }
 
-// ServedRealm is the realm realm's machine serves: StandaloneRealm for a ProfileRealm,
+// ServedRealm is the realm realm's machine serves: StandaloneRealm for a StandaloneMachineRealm,
 // otherwise realm itself.
 func ServedRealm(realm string) string {
 	if strings.HasPrefix(realm, StandaloneRealm+"/") {

@@ -63,12 +63,9 @@ Usage: {{.App.Name}} [flags] <command>
 Commands:
 {{CommandRows .App.Commands "top" "ls" "shell" "file" "port" "vpn" "agent" | FormatTwoColumns}}
 Management:
-{{CommandRows .App.Commands "machine" "app" "auth" "self" "serve" | FormatTwoColumns}}
-Standalone:
-{{CommandRows .App.Commands "profile" "keygen" | FormatTwoColumns}}
+{{CommandRows .App.Commands "machine" "app" "auth" "keygen" "self" "serve" | FormatTwoColumns}}
 Flags:
   --help            Show help
-  --profile NAME    Connect directly to a standalone machine saved as a profile
 
 Run 'desk <command> --help' for details.
 Run 'desk --help-long' for all commands and flags.
@@ -82,9 +79,6 @@ Examples:
 }
 
 func shellHelpExamples() []string {
-	if standaloneRequested() {
-		return []string{"desk shell", "desk shell -- uname -a", "desk shell -A"}
-	}
 	return []string{"desk shell office", "desk shell office -- uname -a", "desk shell -A office"}
 }
 
@@ -127,47 +121,30 @@ func filterHelpFlags(flags, global []*kingpin.FlagModel, wantGlobal bool) []*kin
 func groupHelpExamples(group string) []string {
 	switch group {
 	case "file":
-		if standaloneRequested() {
-			return []string{"desk file ls :/tmp", "desk file cp ./notes.txt :/tmp/notes.txt", "desk file edit :/etc/hosts"}
-		}
 		return []string{
 			"desk file ls office:/tmp",
 			"desk file cp ./notes.txt office:/tmp/notes.txt",
 			"desk file edit office:/etc/hosts",
 		}
 	case "machine":
-		return []string{"desk machine ls", "desk machine info office", "desk machine alias office work"}
+		return []string{
+			"desk machine ls",
+			"desk machine info office",
+			"desk machine add lab --url quic://lab.example.com:18080 --cert-hash <fingerprint> --private-key <key>",
+			"desk machine remove lab",
+		}
 	case "auth":
 		return []string{"desk auth login", "desk auth whoami", "desk auth logout"}
 	case "app":
-		if standaloneRequested() {
-			return []string{"desk app ls", "desk app register ./remote-control", "desk app disable remote-control"}
-		}
 		return []string{"desk app ls office", "desk app register office ./remote-control",
 			"desk app disable office remote-control"}
 	case "port":
-		if standaloneRequested() {
-			return []string{"desk port forward 8080:80", "desk port reverse 9000:3000"}
-		}
 		return []string{"desk port forward office 8080:80", "desk port reverse office 9000:3000"}
 	case "vpn":
-		if standaloneRequested() {
-			return []string{"desk vpn connect", "desk vpn connect --route 203.0.113.10 --route example.com",
-				"desk vpn disconnect", "desk vpn serve", "desk vpn stop"}
-		}
 		return []string{"desk vpn connect office", "desk vpn connect office --route 203.0.113.10 --route example.com",
 			"desk vpn disconnect", "desk vpn serve", "desk vpn stop"}
 	case "agent":
-		if standaloneRequested() {
-			return []string{"desk agent ls", "desk agent pull"}
-		}
 		return []string{"desk agent ls", "desk agent pull office", "desk agent resume <session-id>"}
-	case "profile":
-		return []string{
-			"desk profile add office --url quic://host:18080 --cert-hash <fingerprint> --private-key <key>",
-			"desk --profile office shell",
-			"desk profile ls",
-		}
 	case "self":
 		return []string{"desk self version", "desk self update"}
 	case "serve":
