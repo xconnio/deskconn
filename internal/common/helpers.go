@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -40,17 +39,6 @@ func CfgDirectory() (string, error) {
 	cfgDirectory := filepath.Join(homedir, ".deskconn")
 	if err := os.MkdirAll(cfgDirectory, 0o700); err != nil {
 		return "", err
-	}
-	// Installs from before it was private have it open to others. Windows keeps a user's
-	// profile private by its ACL instead.
-	info, err := os.Stat(cfgDirectory)
-	if err != nil {
-		return "", err
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		if err := os.Chmod(cfgDirectory, 0o700); err != nil {
-			return "", err
-		}
 	}
 	return cfgDirectory, nil
 }

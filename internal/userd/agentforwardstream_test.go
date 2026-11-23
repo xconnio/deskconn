@@ -31,7 +31,7 @@ func TestAgentForwardStartSuccessAndDataRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, sendPortEnvelope(client, common.AgentFwdMsgControl,
-		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey))
+		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart}), sendKey))
 	kind, plaintext, err := recvPortEnvelope(client, receiveKey)
 	require.NoError(t, err)
 	require.Equal(t, common.AgentFwdMsgControl, kind)
@@ -77,7 +77,7 @@ func TestAgentForwardStartFailureReportsError(t *testing.T) {
 
 	// A control message that isn't a "start" op is rejected instead of acked.
 	require.NoError(t, sendPortEnvelope(client, common.AgentFwdMsgControl,
-		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpClose, AuthID: testAuthID}), sendKey))
+		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpClose}), sendKey))
 
 	one := make([]byte, 1)
 	_ = client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
@@ -93,7 +93,7 @@ func TestAgentForwardSocketPathCompareAndDeleteOnCleanup(t *testing.T) {
 	sendKey1, receiveKey1, err := deskconn.StreamClientKeyExchange(client1)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client1, common.AgentFwdMsgControl,
-		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey1))
+		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart}), sendKey1))
 	_, _, err = recvPortEnvelope(client1, receiveKey1)
 	require.NoError(t, err)
 
@@ -107,7 +107,7 @@ func TestAgentForwardSocketPathCompareAndDeleteOnCleanup(t *testing.T) {
 	sendKey2, receiveKey2, err := deskconn.StreamClientKeyExchange(client2)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client2, common.AgentFwdMsgControl,
-		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey2))
+		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart}), sendKey2))
 	_, _, err = recvPortEnvelope(client2, receiveKey2)
 	require.NoError(t, err)
 
@@ -139,7 +139,7 @@ func TestAgentForwardIgnoresPing(t *testing.T) {
 	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client, common.AgentFwdMsgControl,
-		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey))
+		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart}), sendKey))
 	_, _, err = recvPortEnvelope(client, receiveKey)
 	require.NoError(t, err)
 
@@ -171,7 +171,7 @@ func TestAgentForwardConcurrentConnections(t *testing.T) {
 	sendKey, receiveKey, err := deskconn.StreamClientKeyExchange(client)
 	require.NoError(t, err)
 	require.NoError(t, sendPortEnvelope(client, common.AgentFwdMsgControl,
-		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart, AuthID: testAuthID}), sendKey))
+		common.MustJSON(common.AgentForwardMsg{Op: common.AgentFwdOpStart}), sendKey))
 	kind, _, err := recvPortEnvelope(client, receiveKey)
 	require.NoError(t, err)
 	require.Equal(t, common.AgentFwdMsgControl, kind)

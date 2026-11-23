@@ -76,18 +76,6 @@ func TestMachinesFromCfgSuccess(t *testing.T) {
 	require.Equal(t, "org1", machines[0].Organization.ID)
 }
 
-func TestMachinesFromCfgLegacyDevicesKey(t *testing.T) {
-	tmpDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yml"),
-		[]byte("devices:\n  - authid: user1\n    realm: realm1\n"), 0600))
-
-	machines, err := common.MachinesFromCfg(tmpDir)
-	require.NoError(t, err)
-	require.Len(t, machines, 1)
-	require.Equal(t, "user1", machines[0].Authid)
-	require.Equal(t, "realm1", machines[0].Realm)
-}
-
 func TestMachinesFromCfgEmptyMachines(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
@@ -168,7 +156,7 @@ func TestReadCredentialsExpired(t *testing.T) {
 	require.ErrorIs(t, err, common.ErrKeyExpired)
 }
 
-func TestReadCredentialsLegacyNoExpiry(t *testing.T) {
+func TestReadCredentialsNoExpiry(t *testing.T) {
 	tmpDir := t.TempDir()
 	err := os.WriteFile(filepath.Join(tmpDir, "id_ed25519"), []byte("myprivatekey myauthid\n"), 0600)
 	require.NoError(t, err)

@@ -32,9 +32,7 @@ driver that `deskconn vpn connect` uses, adds it to your `PATH`, and registers t
 task, which starts at logon. Use `deskconn` there instead of `desk` — `desk` is reserved by Windows for Display Settings
 (`desk.cpl`) and can't be safely overridden.
 
-On Linux, the daemon's logs are in the journal: `journalctl --user -u deskconn`. Before, the daemon ran as `deskconn-userd`
-(`com.deskconn.deskconn-userd` on macOS). Installing, updating with `desk self update`, or the daemon's first start
-after an update renames it, keeping its environment and the overrides added with `systemctl --user edit`.
+On Linux, the daemon's logs are in the journal: `journalctl --user -u deskconn`.
 
 `deskconn vpn connect` brings up a UAC prompt, and while a tunnel is up Windows asks the tunnel's DNS resolvers first
 (a Linux exit node's own, or public resolvers through a Windows one), though its smart multi-homed name resolution may

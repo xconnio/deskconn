@@ -39,7 +39,6 @@ const standaloneWebSocketAddress = "127.0.0.1:18082"
 // runUserd is the user daemon: the machine's APIs and its connectivity (xconn).
 func runUserd(flags userdFlags, standalone bool) {
 	detachConsole()
-	migrateServiceOnStart()
 
 	fixedUsers, err := standaloneAuth(flags, standalone)
 	if err != nil {
