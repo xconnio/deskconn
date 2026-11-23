@@ -14,6 +14,8 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
+	"github.com/xconnio/deskconn/internal/terminal"
+	"github.com/xconnio/deskconn/internal/userd"
 )
 
 var version = "v0.1.0-beta"
@@ -53,6 +55,8 @@ func main() {
 	agentCmds := registerAgentCommands(app, cfgDirectory)
 	serveCmds := registerServeCommands(app)
 	topCmds := registerTopCommands(app)
+	terminalWorkerCmd := app.Command(userd.TerminalWorkerCommand,
+		"Run a persistent terminal session; the daemon starts these").Hidden()
 
 	if len(os.Args) == 1 {
 		app.Usage(nil)
@@ -86,6 +90,14 @@ func main() {
 			app.Usage(os.Args[1:])
 		}
 		os.Exit(exitUsage)
+	}
+
+	// A terminal worker is handed everything it needs by the daemon that starts it.
+	if parsedCmd == terminalWorkerCmd.FullCommand() {
+		if err := terminal.RunWorker(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
 	}
 
 	if cfgErr != nil && parsedCmd != serveCmds.run.FullCommand() {

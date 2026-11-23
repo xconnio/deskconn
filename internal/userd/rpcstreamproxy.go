@@ -34,7 +34,7 @@ func ProxyStreamHandler(clients *ClientSessions, directory string) xconn.Invocat
 			input = true
 		case common.ProcedureFileListStream, common.ProcedureFileReadStream, common.ProcedureShellStream,
 			common.ProcedurePortForwardStream, common.ProcedurePortReverseStream, common.ProcedureAgentForwardStream,
-			common.ProcedureLogsStream:
+			common.ProcedureLogsStream, common.ProcedureTerminalStream:
 		default:
 			return xconn.NewResultError(common.ErrNotAuthorized, "not a stream endpoint")
 		}

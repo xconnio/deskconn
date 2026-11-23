@@ -32,6 +32,9 @@ func (d *Deskconn) serveStreamOperation(op common.FSOp, stream net.Conn, caller 
 	case common.FSOpLogs:
 		d.handleQUICLogsStream(stream)
 		return
+	case common.FSOpTerminal:
+		d.handleTerminalStream(stream, caller)
+		return
 	}
 
 	sendKey, receiveKey, err := streamServerKeyExchange(stream)

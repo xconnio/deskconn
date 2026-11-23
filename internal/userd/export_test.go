@@ -216,3 +216,8 @@ type DesktopEntry = desktopEntry
 func BuildApps(procs []ProcessInfo, registry map[string]DesktopEntry) []AppInfo {
 	return buildApps(procs, registry)
 }
+
+// ServeTerminalStream serves a persistent terminal request on stream, made by caller.
+func (d *Deskconn) ServeTerminalStream(stream net.Conn, caller string) {
+	d.handleTerminalStream(stream, caller)
+}
