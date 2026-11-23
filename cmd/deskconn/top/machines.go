@@ -8,30 +8,30 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 )
 
-// topMachinesView lists the account's machines, then the profiles.
+// topMachinesView lists the account's managed machines, then the standalone ones.
 type topMachinesView struct {
 	list   topList
 	search string
 	height int // the rows the table had when last drawn, for paging
 }
 
-// topEntry is a row of the machines view: a machine of the account or a profile.
+// topEntry is a row of the machines view: a managed machine of the account or a standalone one.
 type topEntry struct {
-	machine *common.Machine
-	profile *common.Profile
+	machine    *common.Machine
+	standalone *common.StandaloneMachine
 }
 
 func (e topEntry) target() topTarget {
-	if e.profile != nil {
-		return profileTarget(*e.profile)
+	if e.standalone != nil {
+		return standaloneTarget(*e.standalone)
 	}
 	return machineTarget(*e.machine)
 }
 
 func (e topEntry) matches(filter string) bool {
 	var fields []string
-	if e.profile != nil {
-		fields = []string{e.profile.Name, e.profile.URL, e.profile.AuthID}
+	if e.standalone != nil {
+		fields = []string{e.standalone.Name, e.standalone.URL, e.standalone.User()}
 	} else {
 		fields = []string{e.machine.Name, e.machine.Alias, e.machine.Authid}
 	}
@@ -48,7 +48,7 @@ func isEmptyMachine(machine common.Machine) bool {
 	return machine.Name == "" && machine.Authid == "" && machine.Alias == ""
 }
 
-// entries are the machines, then the profiles, that match the filter.
+// entries are the managed machines, then the standalone ones, that match the filter.
 func (v *topMachinesView) entries(m *Model) []topEntry {
 	var entries []topEntry
 	for i := range m.machines {
@@ -57,8 +57,8 @@ func (v *topMachinesView) entries(m *Model) []topEntry {
 			entries = append(entries, entry)
 		}
 	}
-	for i := range m.profiles {
-		if entry := (topEntry{profile: &m.profiles[i]}); entry.matches(v.search) {
+	for i := range m.standalone {
+		if entry := (topEntry{standalone: &m.standalone[i]}); entry.matches(v.search) {
 			entries = append(entries, entry)
 		}
 	}
@@ -137,14 +137,14 @@ func (v *topMachinesView) body(m *Model, width, height int) []string {
 	}
 
 	columns := []topColumn{
-		{title: "NAME", max: 32}, {title: "KIND"}, {title: "ALIAS", max: 24}, {title: "ID"},
+		{title: "NAME", max: 32}, {title: "MODE"}, {title: "ALIAS", max: 24}, {title: "ID"},
 		{title: "ADDRESS", max: 48}, {title: "LOGIN", max: 24}, {title: "CONNECTED"},
 	}
 	rows := make([]topRow, 0, len(entries))
 	for _, entry := range entries {
-		if profile := entry.profile; profile != nil {
+		if standalone := entry.standalone; standalone != nil {
 			rows = append(rows, topRow{style: m.styles.text, cells: []string{
-				profile.Name, "profile", "", "", profile.URL, profileLogin(*profile), "",
+				standalone.Name, "standalone", "", "", standalone.URL, standaloneLogin(*standalone), "",
 			}})
 			continue
 		}
@@ -155,19 +155,16 @@ func (v *topMachinesView) body(m *Model, width, height int) []string {
 			style = m.styles.good
 		}
 		rows = append(rows, topRow{style: style, cells: []string{
-			machine.Name, topMachine, machine.Alias, common.ShortID(machine.Authid), "via the cloud", "account", since,
+			machine.Name, "managed", machine.Alias, common.ShortID(machine.Authid), "via the cloud", "account", since,
 		}})
 	}
 	return m.table(columns, rows, &v.list, width, height)
 }
 
-// profileLogin is how profile logs in, e.g. "key as bob".
-func profileLogin(profile common.Profile) string {
-	as := profile.AuthID
-	if as == "" {
-		as = common.CurrentUsername()
-	}
-	if profile.PrivateKey != "" {
+// standaloneLogin is how machine logs in, e.g. "key as bob".
+func standaloneLogin(machine common.StandaloneMachine) string {
+	as := machine.User()
+	if machine.PrivateKey != "" {
 		return "key as " + as
 	}
 	return "password as " + as
@@ -181,16 +178,16 @@ func (v *topMachinesView) emptyLines(m *Model) []string {
 		return []string{m.styles.dim.Render("Fetching your machines…")}
 	case !m.loggedIn:
 		return []string{
-			m.styles.text.Render("No machines or profiles yet."),
+			m.styles.text.Render("No machines yet."),
 			"",
-			m.styles.dim.Render("Log in with `desk auth login`, or add a standalone machine with `desk profile add`."),
+			m.styles.dim.Render("Log in with `desk auth login`, or add a standalone machine with `desk machine add`."),
 		}
 	default:
 		return []string{
-			m.styles.text.Render("No machines or profiles yet."),
+			m.styles.text.Render("No machines yet."),
 			"",
 			m.styles.dim.Render("Press ctrl-r to fetch your machines, or add a standalone machine with " +
-				"`desk profile add`."),
+				"`desk machine add`."),
 		}
 	}
 }

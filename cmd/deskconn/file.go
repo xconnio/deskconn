@@ -151,7 +151,7 @@ func listFiles(cfgDirectory, target, mode string) error {
 	if path != "" {
 		args = append(args, path)
 	}
-	return deskconn.RunExec(context.Background(), mode, realm, cfgDirectory, "", args)
+	return deskconn.RunExec(context.Background(), defaultMode(realm, mode), realm, cfgDirectory, "", args)
 }
 
 func moveFile(cfgDirectory, src, dst, mode string) error {
@@ -223,6 +223,7 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 // the local daemon, or when the daemon isn't running, over p2p, falling back to quic.
 func transferFiles(cfgDirectory, realm, mode string, transfer func(common.StreamSession) error) error {
 	ctx := context.Background()
+	mode = defaultMode(realm, mode)
 	viaQUIC := func() error {
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
@@ -280,7 +281,7 @@ func catFile(cfgDirectory, target, mode string) error {
 	if err != nil {
 		return err
 	}
-	switch mode {
+	switch defaultMode(realm, mode) {
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -372,7 +373,7 @@ func editFile(cfgDirectory, target, mode string) error {
 }
 
 func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
-	switch mode {
+	switch defaultMode(realm, mode) {
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -397,7 +398,7 @@ func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 }
 
 func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
-	switch mode {
+	switch defaultMode(realm, mode) {
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
@@ -426,15 +427,9 @@ func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload 
 
 func machinePathCompletions(cfgDirectory string) func() []string {
 	return func() []string {
-		machines, err := common.MachinesFromCfg(cfgDirectory)
-		if err != nil {
-			return nil
-		}
-		var names []string
-		for _, d := range machines {
-			if d.Name != "" {
-				names = append(names, d.Name+":")
-			}
+		names := machineNames(cfgDirectory)
+		for i, name := range names {
+			names[i] = name + ":"
 		}
 		return names
 	}
@@ -466,7 +461,9 @@ func currentCompletionArg() string {
 func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	machine, path := parseMachinePath(current)
 	realm, err := machineRealm(machine, cfgDirectory)
-	if err != nil {
+	// Remote paths complete through the daemon's connection, which standalone machines
+	// don't have; connecting here could ask for a password.
+	if err != nil || isStandaloneRealm(realm) {
 		return nil
 	}
 

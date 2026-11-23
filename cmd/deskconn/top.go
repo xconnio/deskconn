@@ -1,8 +1,6 @@
 package main
 
 import (
-	"errors"
-
 	"github.com/alecthomas/kingpin/v2"
 
 	"github.com/xconnio/deskconn/cmd/deskconn/top"
@@ -14,7 +12,7 @@ type topCommands struct {
 
 func registerTopCommands(app *kingpin.Application) *topCommands {
 	return &topCommands{
-		top: app.Command("top", "Interactive view of your machines and profiles"),
+		top: app.Command("top", "Interactive view of your managed and standalone machines"),
 	}
 }
 
@@ -22,10 +20,6 @@ func dispatchTopCommand(parsedCmd string, cmds *topCommands, cfgDirectory string
 	if parsedCmd != cmds.top.FullCommand() {
 		return false
 	}
-	err := errors.New("desk top lists every profile; run it without --profile")
-	if !standaloneRequested() {
-		err = top.Run(cfgDirectory, version)
-	}
-	exitOnErr(err)
+	exitOnErr(top.Run(cfgDirectory, version))
 	return true
 }

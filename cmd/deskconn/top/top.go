@@ -1,5 +1,5 @@
 // Package top is desk top: a terminal UI, like k9s, over the account's machines and the
-// standalone profiles, showing their resources and logs and running shells and port forwards
+// standalone ones, showing their resources and logs and running shells and port forwards
 // on them.
 package top
 
@@ -21,7 +21,7 @@ import (
 )
 
 // Run runs desk top: a full-screen list of the account's machines and the standalone
-// profiles (from cfgDirectory), whose resources, logs, shells and port forwards it shows and
+// machines (from cfgDirectory), whose resources, logs, shells and port forwards it shows and
 // runs itself. version is desk's, for the header.
 func Run(cfgDirectory, version string) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
@@ -50,8 +50,8 @@ type Model struct {
 	height       int
 
 	machines   []common.Machine
-	profiles   []common.Profile
-	targets    map[string]*common.StandaloneTarget // the profiles', by name
+	standalone []common.StandaloneMachine
+	targets    map[string]*common.StandaloneTarget // the standalone machines', by name
 	connected  map[string]any                      // the daemon's connected machines, by realm
 	daemonUp   bool
 	loggedIn   bool
@@ -72,7 +72,7 @@ type Model struct {
 	flashID  int
 }
 
-// NewModel is desk top on the machines and profiles config.yml in cfgDirectory has, doing
+// NewModel is desk top on the managed and standalone machines config.yml in cfgDirectory has, doing
 // what it does on them through remote. version is desk's, for the header.
 func NewModel(cfgDirectory, version string, remote Remote) *Model {
 	m := &Model{
@@ -87,26 +87,22 @@ func NewModel(cfgDirectory, version string, remote Remote) *Model {
 	return m
 }
 
-// load reads the machines and profiles config.yml has, as the starting point.
+// load reads the managed and standalone machines config.yml has, as the starting point.
 func (m *Model) load() {
 	_, _, err := common.ReadCredentials(m.cfgDirectory)
 	m.loggedIn = err == nil
 	if machines, err := common.MachinesFromCfg(m.cfgDirectory); err == nil {
 		m.machines = machines
 	}
-	if profiles, err := deskconn.Profiles(m.cfgDirectory); err == nil {
-		m.profiles = profiles
+	if standalone, err := deskconn.StandaloneMachines(m.cfgDirectory); err == nil {
+		m.standalone = standalone
 	}
-	for _, profile := range m.profiles {
-		authID := profile.AuthID
-		if authID == "" {
-			authID = common.CurrentUsername()
-		}
+	for _, machine := range m.standalone {
 		// Without ReadPassword: desk top asks for a password itself, before connecting.
-		target := &common.StandaloneTarget{URL: profile.URL, CertHash: profile.CertHash, AuthID: authID,
-			PrivateKey: profile.PrivateKey}
-		m.targets[profile.Name] = target
-		common.SetStandaloneTargetFor(common.ProfileRealm(profile.Name), target)
+		target := &common.StandaloneTarget{URL: machine.URL, CertHash: machine.CertHash, AuthID: machine.User(),
+			PrivateKey: machine.PrivateKey}
+		m.targets[machine.Name] = target
+		common.SetStandaloneTargetFor(common.StandaloneMachineRealm(machine.Name), target)
 	}
 }
 

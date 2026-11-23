@@ -194,29 +194,29 @@ func TestStandaloneTargetReadsPasswordOnce(t *testing.T) {
 	require.Equal(t, 1, reads)
 }
 
-func TestProfileRealms(t *testing.T) {
+func TestStandaloneMachineRealms(t *testing.T) {
 	const otherUser = "dave"
 	url, _, certHash := startStandalone(t, nil, map[string]string{testUser: testPassword, otherUser: "pa55"})
-	common.SetStandaloneTargetFor(common.ProfileRealm("one"),
+	common.SetStandaloneTargetFor(common.StandaloneMachineRealm("one"),
 		&common.StandaloneTarget{URL: url, CertHash: certHash, AuthID: testUser, Password: testPassword})
-	common.SetStandaloneTargetFor(common.ProfileRealm("two"),
+	common.SetStandaloneTargetFor(common.StandaloneMachineRealm("two"),
 		&common.StandaloneTarget{URL: url, CertHash: certHash, AuthID: otherUser, Password: "pa55"})
 	t.Cleanup(func() {
-		common.SetStandaloneTargetFor(common.ProfileRealm("one"), nil)
-		common.SetStandaloneTargetFor(common.ProfileRealm("two"), nil)
+		common.SetStandaloneTargetFor(common.StandaloneMachineRealm("one"), nil)
+		common.SetStandaloneTargetFor(common.StandaloneMachineRealm("two"), nil)
 	})
 
 	_, ok := common.StandaloneTargetFor(common.StandaloneRealm)
-	require.False(t, ok, "desk --profile's target is apart from desk top's")
-	require.Equal(t, common.StandaloneRealm, common.ServedRealm(common.ProfileRealm("one")))
+	require.False(t, ok, "only the machines named are targets")
+	require.Equal(t, common.StandaloneRealm, common.ServedRealm(common.StandaloneMachineRealm("one")))
 	require.Equal(t, "realm.office", common.ServedRealm("realm.office"))
 
 	// Both at once, each as its own user, on the realm the machine serves.
-	for profile, user := range map[string]string{"one": testUser, "two": otherUser} {
-		conn, err := common.ConnectMachineRealmQUIC(context.Background(), common.ProfileRealm(profile), t.TempDir())
-		require.NoError(t, err, profile)
+	for name, user := range map[string]string{"one": testUser, "two": otherUser} {
+		conn, err := common.ConnectMachineRealmQUIC(context.Background(), common.StandaloneMachineRealm(name), t.TempDir())
+		require.NoError(t, err, name)
 		t.Cleanup(func() { _ = conn.Close() })
-		require.Equal(t, user, conn.Details().AuthID(), profile)
-		require.Equal(t, common.StandaloneRealm, conn.Details().Realm(), profile)
+		require.Equal(t, user, conn.Details().AuthID(), name)
+		require.Equal(t, common.StandaloneRealm, conn.Details().Realm(), name)
 	}
 }

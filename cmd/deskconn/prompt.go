@@ -92,15 +92,15 @@ func readOTP() (string, error) {
 	return otp, nil
 }
 
-// readStandalonePassword prompts for authID's password on the standalone machine, for a
-// profile saved without a private key, when a command first connects.
-func readStandalonePassword(authID string) (string, error) {
+// readStandalonePassword prompts for username's password on the standalone machine saved as
+// name without a private key, when a command first connects.
+func readStandalonePassword(name, username string) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
-		return "", fmt.Errorf("the password for %s can only be typed in a terminal; to connect without one, "+
-			"save the profile with --private-key (see `desk keygen`)", authID)
+		return "", fmt.Errorf("the password for %s on %s can only be typed in a terminal; to connect without one, "+
+			"add the machine with --private-key (see `desk keygen`)", username, name)
 	}
 
-	fmt.Fprintf(os.Stderr, "Password for %s: ", authID)
+	fmt.Fprintf(os.Stderr, "Password for %s on %s: ", username, name)
 	pwd, err := term.ReadPassword(int(os.Stdin.Fd())) // #nosec
 	fmt.Fprint(os.Stderr, "\r\n")
 	if err != nil {

@@ -194,7 +194,7 @@ func runUserd(flags userdFlags, standalone bool) {
 
 // newStandaloneConfig serves the standalone machine realm over transport (see the transport*
 // constants) with the certificate in certFile/keyFile, or else a self-signed one kept in
-// cfgDirectory, whose fingerprint clients pin with desk profile add --cert-hash.
+// cfgDirectory, whose fingerprint clients pin with desk machine add --cert-hash.
 func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
 	keyFile string) (*xconnd.StandaloneConfig, error) {
 	var cert tls.Certificate
@@ -209,7 +209,7 @@ func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
 		return nil, err
 	}
 	fmt.Printf("standalone: certificate SHA-256 fingerprint %s (clients that don't trust its issuer "+
-		"pin it with desk profile add --cert-hash %s)\n", common.CertificateFingerprint(cert),
+		"pin it with desk machine add --cert-hash %s)\n", common.CertificateFingerprint(cert),
 		common.CertificateFingerprint(cert))
 
 	config := &xconnd.StandaloneConfig{

@@ -17,19 +17,19 @@ import (
 	"github.com/xconnio/xconn/bindings/go"
 )
 
-// topTarget is a machine desk top acts on: one of the account's, or a profile's.
+// topTarget is a machine desk top acts on: a managed one of the account's, or a standalone one.
 type topTarget struct {
-	name    string
-	realm   string
-	profile string // the profile's name, or "" for a machine of the account
+	name       string
+	realm      string
+	standalone string // the standalone machine's name, or "" for a managed machine
 }
 
 func machineTarget(machine common.Machine) topTarget {
 	return topTarget{name: machine.Name, realm: machine.Realm}
 }
 
-func profileTarget(profile common.Profile) topTarget {
-	return topTarget{name: profile.Name, realm: common.ProfileRealm(profile.Name), profile: profile.Name}
+func standaloneTarget(machine common.StandaloneMachine) topTarget {
+	return topTarget{name: machine.Name, realm: common.StandaloneMachineRealm(machine.Name), standalone: machine.Name}
 }
 
 // streamMode is the --mode a shell, logs or port forward to target uses: for a machine of
@@ -37,16 +37,16 @@ func profileTarget(profile common.Profile) topTarget {
 // upgraded it, which it starts on connecting), otherwise a connection of its own through the
 // router (which, unlike trying a direct one first, doesn't print on the way).
 func (m *Model) streamMode(target topTarget) string {
-	if target.profile == "" && m.daemonUp {
+	if target.standalone == "" && m.daemonUp {
 		return ""
 	}
 	return deskconn.ModeRouted
 }
 
-// withTarget runs action on target, asking for the profile's password first if it's needed
+// withTarget runs action on target, asking for the standalone machine's password first if it's needed
 // and not known yet.
 func (m *Model) withTarget(target topTarget, action func() tea.Cmd) tea.Cmd {
-	standalone := m.targets[target.profile]
+	standalone := m.targets[target.standalone]
 	if standalone == nil || !standalone.NeedsPassword() {
 		return action()
 	}
@@ -61,10 +61,10 @@ func (m *Model) withTarget(target topTarget, action func() tea.Cmd) tea.Cmd {
 	return nil
 }
 
-// failed reports err from doing what to target, forgetting the profile's password if it may
+// failed reports err from doing what to target, forgetting the standalone machine's password if it may
 // have been the wrong one, so it's asked for again next time.
 func (m *Model) failed(target topTarget, what string, err error) tea.Cmd {
-	if standalone := m.targets[target.profile]; standalone != nil && standalone.PrivateKey == "" &&
+	if standalone := m.targets[target.standalone]; standalone != nil && standalone.PrivateKey == "" &&
 		strings.Contains(strings.ToLower(err.Error()), "auth") {
 		standalone.SetPassword("")
 	}
@@ -152,7 +152,7 @@ type Remote interface {
 
 // topSessions are the real Remote. Calls to a machine of the account go through the local
 // daemon when it's running, on its connection to the machine: P2P once it has upgraded it,
-// and with the keys already exchanged. Otherwise, and for profiles, they go on connections
+// and with the keys already exchanged. Otherwise, and for standalone machines, they go on connections
 // of desk top's own, one per machine, kept for as long as they work.
 type topSessions struct {
 	cfgDirectory string

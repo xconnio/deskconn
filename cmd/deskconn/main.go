@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -36,11 +35,7 @@ func main() {
 
 	app := kingpin.New("desk", "Control your machines remotely.")
 	configureHelp(app)
-	profileName := app.Flag("profile", "Connect directly to the standalone machine saved as this profile "+
-		"(see `desk profile add`) instead of a machine on your account").
-		HintAction(profileCompletions(cfgDirectory)).String()
-
-	profileCmds := registerProfileCommands(app, cfgDirectory)
+	keygenCmd := app.Command("keygen", "Generate a key pair for logging in to standalone machines")
 	machineCmds := registerMachineCommands(app, cfgDirectory)
 	authCmds := registerAuthCommands(app)
 	fileCmds := registerFileCommands(app, cfgDirectory)
@@ -61,7 +56,7 @@ func main() {
 	// A command given without the subcommand or machine it needs gets its usage, as
 	// an invalid command line.
 	if len(os.Args) == 2 {
-		if os.Args[1] == "shell" && !standaloneRequested() {
+		if os.Args[1] == "shell" {
 			app.Usage(os.Args[1:])
 			os.Exit(exitUsage)
 		}
@@ -92,16 +87,12 @@ func main() {
 		log.Fatal(cfgErr)
 	}
 
-	if *profileName != "" {
-		exitOnErr(useProfile(cfgDirectory, *profileName))
-		if machineCmds.accountOnly(parsedCmd) {
-			exitOnErr(&usageError{msg: fmt.Sprintf(
-				"%s is not available with --profile (it works on machines of your account)", parsedCmd)})
-		}
+	if parsedCmd == keygenCmd.FullCommand() {
+		exitOnErr(printKeyPair())
+		return
 	}
 
-	_ = dispatchProfileCommand(parsedCmd, profileCmds, cfgDirectory) ||
-		dispatchMachineCommand(parsedCmd, machineCmds, cfgDirectory) ||
+	_ = dispatchMachineCommand(parsedCmd, machineCmds, cfgDirectory) ||
 		dispatchAuthCommand(parsedCmd, authCmds, cfgDirectory) ||
 		dispatchFileCommand(parsedCmd, fileCmds, cfgDirectory) ||
 		dispatchShellCommand(parsedCmd, shellCmds, cfgDirectory) ||
@@ -150,36 +141,13 @@ func runUntilInterrupted(stopMessage string, run func(ctx context.Context) error
 	}
 }
 
-// standaloneRequested reports whether the CLI is pointed at a standalone machine
-// (--profile). It has to be known before the command line is parsed: machine arguments
-// aren't defined then.
-func standaloneRequested() bool {
-	for _, arg := range os.Args[1:] {
-		if arg == "--" {
-			break
-		}
-		if arg == "--profile" || strings.HasPrefix(arg, "--profile=") {
-			return true
-		}
-	}
-	return false
-}
-
-// machineArg defines cmd's machine argument. With --profile there is only one machine, so
-// the argument isn't defined at all and the result is empty.
+// machineArg defines cmd's machine argument: a managed or standalone machine.
 func machineArg(cmd *kingpin.CmdClause, help, cfgDirectory string) *string {
-	if standaloneRequested() {
-		return new(string)
-	}
 	return cmd.Arg("machine", help).Required().HintAction(machineCompletions(cfgDirectory)).String()
 }
 
-// modeFlag defines cmd's --mode flag. With --profile it defaults to a direct connection: the
-// local daemon that some commands go through by default doesn't know the standalone machine.
+// modeFlag defines cmd's --mode flag. Left out, a managed machine is reached through the
+// local daemon and a standalone one, which the daemon doesn't know, routed (see defaultMode).
 func modeFlag(cmd *kingpin.CmdClause, help string) *string {
-	flag := cmd.Flag("mode", help)
-	if standaloneRequested() {
-		flag = flag.Default(ModeRouted)
-	}
-	return flag.Enum(ModeRouted, ModeDirect)
+	return cmd.Flag("mode", help).Enum(ModeRouted, ModeDirect)
 }
