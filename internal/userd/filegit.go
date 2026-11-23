@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -74,6 +75,36 @@ func repoStatus(repo *git.Repository) (git.Status, gitignore.Matcher, error) {
 	return st, gitignore.NewMatcher(append(patterns, wt.Excludes...)), nil
 }
 
+// trackedPaths returns every path in the index (files) and every directory
+// holding at least one of them (dirs; "." is never added). A directory not in
+// dirs has no tracked content, so it can be reported as a single entry.
+func trackedPaths(repo *git.Repository) (files, dirs map[string]bool, err error) {
+	idx, err := repo.Storer.Index()
+	if err != nil {
+		return nil, nil, err
+	}
+	files = make(map[string]bool, len(idx.Entries))
+	dirs = make(map[string]bool)
+	for _, e := range idx.Entries {
+		files[e.Name] = true
+		for d := path.Dir(e.Name); d != "." && !dirs[d]; d = path.Dir(d) {
+			dirs[d] = true
+		}
+	}
+	return files, dirs, nil
+}
+
+// topUntrackedDir returns the highest ancestor of relSlash with no tracked
+// content, like `git status`'s "?? build/", or "" if its parent is tracked.
+// dirs is closed upward, so the climb stops at the first tracked dir.
+func topUntrackedDir(relSlash string, dirs map[string]bool) string {
+	top := ""
+	for d := path.Dir(relSlash); d != "." && !dirs[d]; d = path.Dir(d) {
+		top = d
+	}
+	return top
+}
+
 func classifyStatus(fs *git.FileStatus) (string, bool) {
 	switch {
 	case fs.Staging == git.Untracked:
@@ -87,10 +118,12 @@ func classifyStatus(fs *git.FileStatus) (string, bool) {
 	}
 }
 
-// ignoredEntries lists each gitignored file under repoRoot, matching `git
-// status --ignored=matching`.
-// ponytail: full filesystem walk, slow on a huge ignored tree (node_modules).
-func ignoredEntries(repoRoot string, st git.Status, matcher gitignore.Matcher) ([]GitStatusEntry, error) {
+// ignoredEntries lists gitignored paths under repoRoot, matching plain `git
+// status --ignored`: an ignored directory is one entry, not one per file inside
+// it, so a big node_modules doesn't blow past the 16MB WAMP message limit. A
+// matching directory that still holds tracked (force-added) files is walked
+// into instead, so those files aren't mislabeled.
+func ignoredEntries(repoRoot string, files, dirs map[string]bool, matcher gitignore.Matcher) ([]GitStatusEntry, error) {
 	var entries []GitStatusEntry
 	err := filepath.WalkDir(repoRoot, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -99,21 +132,22 @@ func ignoredEntries(repoRoot string, st git.Status, matcher gitignore.Matcher) (
 		if p == repoRoot {
 			return nil
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
-				return fs.SkipDir
-			}
-			return nil
+		if d.IsDir() && d.Name() == ".git" {
+			return fs.SkipDir
 		}
 		rel, err := filepath.Rel(repoRoot, p)
 		if err != nil {
 			return err
 		}
 		relSlash := filepath.ToSlash(rel)
-		if _, tracked := st[relSlash]; tracked {
+		if d.IsDir() {
+			if !dirs[relSlash] && matcher.Match(strings.Split(relSlash, "/"), true) {
+				entries = append(entries, GitStatusEntry{Path: p, Status: "ignored"})
+				return fs.SkipDir
+			}
 			return nil
 		}
-		if matcher.Match(strings.Split(relSlash, "/"), false) {
+		if !files[relSlash] && matcher.Match(strings.Split(relSlash, "/"), false) {
 			entries = append(entries, GitStatusEntry{Path: p, Status: "ignored"})
 		}
 		return nil
@@ -140,11 +174,27 @@ func (f *FileBrowser) GitStatus(pathArg string) (*GitStatusResult, error) {
 		return nil, err
 	}
 
+	files, dirs, err := trackedPaths(repo)
+	if err != nil {
+		return nil, err
+	}
+
 	var entries []GitStatusEntry
+	untrackedDirs := map[string]bool{}
 	for relSlash, fileStatus := range st {
 		status, ok := classifyStatus(fileStatus)
 		if !ok {
 			continue
+		}
+		// A wholly untracked folder is one entry, not one per file inside it.
+		if status == "untracked" {
+			if top := topUntrackedDir(relSlash, dirs); top != "" {
+				if untrackedDirs[top] {
+					continue
+				}
+				untrackedDirs[top] = true
+				relSlash = top
+			}
 		}
 		entries = append(entries, GitStatusEntry{
 			Path:   filepath.Join(repoRoot, filepath.FromSlash(relSlash)),
@@ -152,7 +202,7 @@ func (f *FileBrowser) GitStatus(pathArg string) (*GitStatusResult, error) {
 		})
 	}
 
-	ignored, err := ignoredEntries(repoRoot, st, matcher)
+	ignored, err := ignoredEntries(repoRoot, files, dirs, matcher)
 	if err != nil {
 		return nil, err
 	}
@@ -191,11 +241,14 @@ func (f *FileBrowser) GitOriginal(pathArg string) (*GitOriginalResult, error) {
 		return nil, err
 	}
 
-	if fileStatus, tracked := st[relSlash]; tracked {
-		if fileStatus.Staging == git.Untracked {
-			return &GitOriginalResult{IsRepo: true, IsNew: true, Untracked: true}, nil
-		}
-	} else if matcher.Match(strings.Split(relSlash, "/"), false) {
+	files, _, err := trackedPaths(repo)
+	if err != nil {
+		return nil, err
+	}
+
+	if fileStatus, changed := st[relSlash]; changed && fileStatus.Staging == git.Untracked {
+		return &GitOriginalResult{IsRepo: true, IsNew: true, Untracked: true}, nil
+	} else if !changed && !files[relSlash] && matcher.Match(strings.Split(relSlash, "/"), false) {
 		return &GitOriginalResult{IsRepo: true, IsNew: true, Ignored: true}, nil
 	}
 
