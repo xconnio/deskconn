@@ -29,7 +29,6 @@ const (
 	keyEsc     = "esc"
 	width      = 120
 	height     = 30
-	authFailed = "wamp.error.authentication_failed"
 )
 
 // fakeRemote stands in for the machines desk top acts on.
@@ -152,8 +151,8 @@ type driver struct {
 }
 
 // newDriver is desk top on a config with two machines (and an empty entry, which desk ls
-// skips too) and the standalone machines, on a width×height terminal.
-func newDriver(t *testing.T, standalone ...common.StandaloneMachine) *driver {
+// skips too) and a standalone machine, on a width×height terminal.
+func newDriver(t *testing.T) *driver {
 	t.Helper()
 	cfgDirectory := t.TempDir()
 	require.NoError(t, deskconn.CacheMachines(cfgDirectory, []common.Machine{
@@ -161,14 +160,8 @@ func newDriver(t *testing.T, standalone ...common.StandaloneMachine) *driver {
 		{Authid: "cccc2222dddd", Name: "laptop", Realm: "realm.laptop"},
 		{},
 	}))
-	if len(standalone) == 0 {
-		standalone = []common.StandaloneMachine{
-			{Name: labMachine, URL: "quic://10.0.0.5:18080", Username: bob, PrivateKey: "k"},
-		}
-	}
-	for _, machine := range standalone {
-		require.NoError(t, deskconn.AddStandaloneMachine(cfgDirectory, machine))
-	}
+	require.NoError(t, deskconn.AddStandaloneMachine(cfgDirectory, common.StandaloneMachine{
+		Name: labMachine, URL: "quic://10.0.0.5:18080", Username: bob, PrivateKey: "k"}))
 
 	d := &driver{t: t, remote: newFakeRemote(), msgs: make(chan tea.Msg, 1000)}
 	d.m = top.NewModel(cfgDirectory, "v-test", d.remote)
@@ -591,45 +584,4 @@ func TestTopLogs(t *testing.T) {
 	close(d.remote.logLines)
 	d.settle()
 	require.Contains(t, d.screen(), "The log ended: no such file. Press r to start it again.")
-}
-
-func TestTopPassword(t *testing.T) {
-	d := newDriver(t, common.StandaloneMachine{Name: "pw", URL: "quic://10.0.0.6:18080", Username: "alice"})
-	d.remote.set(func(f *fakeRemote) { f.results = resources() })
-	d.press("G", keyEnter)
-	require.Contains(t, d.screen(), "Password for alice on pw")
-	require.Empty(t, d.remote.callsOf(common.ProcedureMachineInfo), "not connecting yet")
-
-	d.press(keyEnter)
-	require.Contains(t, d.screen(), "Password for alice on pw", "not without a password")
-	d.press("s", "e", "c", "r", "e", "t")
-	require.NotContains(t, d.screen(), "secret", "the password isn't shown")
-	d.press(keyEnter)
-	require.Contains(t, d.screen(), "Resources(pw)", "then it goes on")
-
-	target, ok := common.StandaloneTargetFor(common.StandaloneMachineRealm("pw"))
-	require.True(t, ok)
-	require.False(t, target.NeedsPassword())
-
-	// Refused for its password: back to the machines, closing what was opened over the
-	// resources too, and the password forgotten.
-	d.press("-", "l")
-	require.Contains(t, d.screen(), "<resources>   <logs>")
-	d.remote.set(func(f *fakeRemote) { f.err = errors.New(authFailed) })
-	d.wait(2500 * time.Millisecond)
-	screen := d.screen()
-	require.Contains(t, screen, "Machines[3]")
-	require.Contains(t, screen, "Resources of pw: "+authFailed)
-	require.True(t, target.NeedsPassword())
-
-	d.press("p")
-	require.Contains(t, d.screen(), "Password for alice on pw", "asked for again")
-	d.press("x", keyEnter)
-	require.Contains(t, d.screen(), "Ping pw: "+authFailed)
-	require.True(t, target.NeedsPassword(), "a ping refused for it forgets it too")
-
-	d.remote.set(func(f *fakeRemote) { f.err = errors.New("timeout") })
-	d.press("p", "y", keyEnter)
-	require.Contains(t, d.screen(), "Ping pw: timeout")
-	require.False(t, target.NeedsPassword(), "but not a failure that isn't about it")
 }

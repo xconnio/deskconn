@@ -414,13 +414,7 @@ func (c *ClientSessions) connectAndUpgrade(ctx context.Context, realm, cfgDirect
 // upgradeToWebRTC negotiates a WebRTC session using quicSess for signaling. On success, it atomically
 // replaces the stored session, retires the QUIC connection, starts the reconnect loop.
 func (c *ClientSessions) upgradeToWebRTC(quicSess *quicConn, realm, cfgDirectory string) {
-	authid, privKey, err := common.ReadCredentials(cfgDirectory)
-	if err != nil {
-		log.Printf("p2p upgrade %s: %v", realm, err)
-		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
-		return
-	}
-	authenticator, err := xconnauth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
+	authenticator, err := machineAuthenticator(realm, cfgDirectory)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)
 		c.reconnectLoop(quicSess.Session, quicSess.Connection(), realm, cfgDirectory)
@@ -428,7 +422,7 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *quicConn, realm, cfgDirectory
 	}
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, realm, authenticator, cancel)
+	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, common.ServedRealm(realm), authenticator, cancel)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)
 		cancel()
@@ -450,6 +444,19 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *quicConn, realm, cfgDirectory
 	common.SafeGo(func() { c.reconnectLoop(webrtcSess.Session, nil, realm, cfgDirectory) }) //nolint
 }
 
+// machineAuthenticator is what the daemon logs in to realm's machine with: a standalone
+// machine's saved key or password (connectMachine loaded it), otherwise the account's login.
+func machineAuthenticator(realm, cfgDirectory string) (xconnauth.ClientAuthenticator, error) {
+	if target, ok := common.StandaloneTargetFor(realm); ok {
+		return target.Authenticator()
+	}
+	authid, privKey, err := common.ReadCredentials(cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+	return xconnauth.NewCryptoSignAuthenticator(authid, privKey, map[string]any{})
+}
+
 // reconnectLoop waits for session to disconnect then reconnects via QUIC and retries the P2P upgrade.
 // conn is non-nil for QUIC sessions (closed on disconnect); nil for WebRTC sessions.
 func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ Close() error },
@@ -466,7 +473,8 @@ func (c *ClientSessions) reconnectLoop(session *xconn.Session, conn interface{ C
 
 	retryDelay := 1 * time.Second
 	maxDelay := 30 * time.Second
-	for c.LoggedIn() && !c.isDisconnected(realm) {
+	// A standalone machine doesn't need the account: signing out leaves it connected.
+	for (c.LoggedIn() || common.IsStandaloneMachineRealm(realm)) && !c.isDisconnected(realm) {
 		c.DeleteMachineSession(realm)
 		machineConn, err := c.connectMachine(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -507,10 +515,11 @@ func (c *ClientSessions) forget(realm string, session *xconn.Session) bool {
 	return true
 }
 
-// connectMachine connects to realm's machine through the router, failing with
-// ErrMachineOffline unless the machine answers on the connection.
+// connectMachine connects to realm's machine through the router, or directly to a standalone
+// machine saved in config.yml, failing with ErrMachineOffline unless the machine answers on
+// the connection.
 func (c *ClientSessions) connectMachine(ctx context.Context, realm, cfgDirectory string) (*common.MachineConn, error) {
-	conn, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	conn, err := connectMachineQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -520,6 +529,17 @@ func (c *ClientSessions) connectMachine(ctx context.Context, realm, cfgDirectory
 		return nil, err
 	}
 	return conn, nil
+}
+
+// connectMachineQUIC is common.ConnectMachineRealmQUIC with, for a standalone machine, its
+// address and login read afresh from config.yml, which this process learns them from.
+func connectMachineQUIC(ctx context.Context, realm, cfgDirectory string) (*common.MachineConn, error) {
+	if common.IsStandaloneMachineRealm(realm) {
+		if err := common.LoadStandaloneTarget(cfgDirectory, realm); err != nil {
+			return nil, err
+		}
+	}
+	return common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 }
 
 // machineTransports returns what raw streams to realm's machine can be opened on, connecting
@@ -563,11 +583,18 @@ func (c *ClientSessions) Login() {
 	c.loggedIn = true
 }
 
+// Logout closes the connections to the account's machines; those to standalone machines,
+// which don't log in with the account, stay.
 func (c *ClientSessions) Logout() {
 	c.Lock()
 	c.loggedIn = false
-	sessions := c.sessions
-	c.sessions = make(map[string]*machineSession)
+	sessions := make(map[string]*machineSession)
+	for realm, session := range c.sessions {
+		if !common.IsStandaloneMachineRealm(realm) {
+			sessions[realm] = session
+			delete(c.sessions, realm)
+		}
+	}
 	c.Unlock()
 
 	for _, session := range sessions {

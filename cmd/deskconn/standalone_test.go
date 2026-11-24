@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,12 +43,23 @@ func TestAddStandaloneMachine(t *testing.T) {
 	require.NoError(t, addStandaloneMachine(dir, common.StandaloneMachine{Name: testLab, URL: testMachineURL,
 		PrivateKey: privateKey}))
 	require.NoError(t, addStandaloneMachine(dir, common.StandaloneMachine{Name: "web",
-		URL: "https://host:443", Username: alice}))
+		URL: "https://host:443", Username: alice, PrivateKey: privateKey}))
 	lab, err := deskconn.FindStandaloneMachine(dir, testLab)
 	require.NoError(t, err)
 	require.Equal(t, common.CurrentUsername(), lab.Username, "the username defaults to the current user's")
 	require.ErrorContains(t, addStandaloneMachine(dir, common.StandaloneMachine{Name: testLab,
-		URL: "quic://other:18080"}), "already exists")
+		URL: "quic://other:18080", PrivateKey: privateKey}), "already exists")
+}
+
+// Without a private key, desk machine add asks for the password to save, so that connecting
+// never has to: where it can't ask (not a terminal, as here), it refuses the machine.
+func TestAddStandaloneMachineNeedsKeyOrPassword(t *testing.T) {
+	dir := t.TempDir()
+	err := addStandaloneMachine(dir, common.StandaloneMachine{Name: testLab, URL: testMachineURL})
+	require.ErrorContains(t, err, "needs a private key or a password")
+	machines, err := deskconn.StandaloneMachines(dir)
+	require.NoError(t, err)
+	require.Empty(t, machines)
 }
 
 func TestStandaloneMachineResolution(t *testing.T) {
@@ -61,7 +74,6 @@ func TestStandaloneMachineResolution(t *testing.T) {
 	realm, err := machineRealm(testOffice, dir)
 	require.NoError(t, err)
 	require.Equal(t, testRealm, realm)
-	require.Equal(t, "", defaultMode(realm, ""), "managed machines go through the daemon by default")
 
 	realm, err = machineRealm(testLab, dir)
 	require.NoError(t, err)
@@ -70,8 +82,6 @@ func TestStandaloneMachineResolution(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, alice, target.AuthID)
 	require.Equal(t, testMachineURL, target.URL)
-	require.Equal(t, ModeRouted, defaultMode(realm, ""), "the daemon doesn't know standalone machines")
-	require.Equal(t, ModeDirect, defaultMode(realm, ModeDirect))
 
 	require.Contains(t, machineNames(dir), testOffice)
 	require.Contains(t, machineNames(dir), testLab)
@@ -146,20 +156,16 @@ func TestStandaloneAndManagedStayApart(t *testing.T) {
 	lab2, err := machineRealm("lab2", dir)
 	require.NoError(t, err)
 
-	require.False(t, isStandaloneRealm(office), "a managed machine never gets a standalone target")
-	require.True(t, isStandaloneRealm(lab))
+	_, standalone := common.StandaloneTargetFor(office)
+	require.False(t, standalone, "a managed machine never gets a standalone target")
+	_, standalone = common.StandaloneTargetFor(lab)
+	require.True(t, standalone)
 	require.NotEqual(t, lab, lab2)
 	t1, _ := common.StandaloneTargetFor(lab)
 	t2, _ := common.StandaloneTargetFor(lab2)
 	require.Equal(t, alice, t1.AuthID)
 	require.Equal(t, "bob", t2.AuthID)
 
-	for _, mode := range []string{"", ModeRouted, ModeDirect} {
-		require.Equal(t, mode, defaultMode(office, mode), "managed machines keep their mode")
-	}
-	require.Equal(t, ModeRouted, defaultMode(lab, ""), "standalone machines never go through the daemon")
-
-	require.ErrorContains(t, connectMachine(dir, testLab), "persistent connections are for managed machines")
 	require.ErrorContains(t, updateMachineAlias(dir, testLab, "x"), "aliases are for managed machines")
 	require.ErrorContains(t, updateMachineAlias(dir, testOffice, testLab), "already names a standalone machine")
 }
@@ -179,4 +185,30 @@ func TestRemoveStandaloneMachine(t *testing.T) {
 	machines, err := deskconn.StandaloneMachines(dir)
 	require.NoError(t, err)
 	require.Empty(t, machines)
+}
+
+// A standalone machine goes through the daemon's persistent connection while the daemon is
+// running, and otherwise on a connection of its own, needing no daemon; a managed machine
+// always goes through the daemon by default. A given --mode is always kept.
+func TestStandaloneDefaultModeFollowsDaemon(t *testing.T) {
+	dir := t.TempDir()
+	lab := common.StandaloneMachineRealm(testLab)
+
+	require.Equal(t, ModeRouted, defaultMode(dir, lab, ""), "no daemon")
+	require.Equal(t, "", defaultMode(dir, testRealm, ""), "managed machines always use the daemon")
+	require.Equal(t, ModeDirect, defaultMode(dir, lab, ModeDirect))
+
+	socket := filepath.Join(dir, "deskconn.sock")
+	listener, err := net.Listen("unix", socket)
+	require.NoError(t, err)
+	require.Equal(t, "", defaultMode(dir, lab, ""), "the daemon is running")
+	require.Equal(t, ModeRouted, defaultMode(dir, lab, ModeRouted))
+
+	// Left behind by a daemon that's gone: refused, so it's not mistaken for a running one.
+	if l, ok := listener.(*net.UnixListener); ok {
+		l.SetUnlinkOnClose(false)
+	}
+	require.NoError(t, listener.Close())
+	require.FileExists(t, socket)
+	require.Equal(t, ModeRouted, defaultMode(dir, lab, ""), "a stale socket")
 }

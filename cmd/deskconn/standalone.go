@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
@@ -27,7 +29,8 @@ func printKeyPair() error {
 }
 
 // addStandaloneMachine checks machine's name, URL, certificate fingerprint and private key,
-// then saves it, without connecting: the machine may well be offline.
+// asks for its password if it has no private key, then saves it, without connecting: the
+// machine may well be offline. Saving one of them is what lets connecting never ask.
 func addStandaloneMachine(cfgDirectory string, machine common.StandaloneMachine) error {
 	if strings.TrimSpace(machine.Name) == "" || strings.ContainsAny(machine.Name, " \t\n:") {
 		return &usageError{msg: "machine name can't be empty or contain spaces or ':'"}
@@ -45,6 +48,12 @@ func addStandaloneMachine(cfgDirectory string, machine common.StandaloneMachine)
 		if _, err := auth.NewCryptoSignAuthenticator(machine.Username, machine.PrivateKey, nil); err != nil {
 			return errors.New("invalid private key: expected the hex private key `desk keygen` prints")
 		}
+	} else {
+		password, err := readStandalonePassword(machine.Name, machine.Username)
+		if err != nil {
+			return err
+		}
+		machine.Password = password
 	}
 
 	if err := deskconn.AddStandaloneMachine(cfgDirectory, machine); err != nil {
@@ -69,35 +78,54 @@ func removeStandaloneMachine(cfgDirectory, name string) error {
 	if err != nil {
 		return err
 	}
+	disconnectRemovedMachine(cfgDirectory, name)
 	fmt.Printf("Removed standalone machine %q.\n", name)
 	return nil
 }
 
-// useStandaloneMachine makes machine's realm resolve to it for this process, asking for its
-// password on first connecting if it has no private key, and returns that realm.
+// disconnectRemovedMachine has the local daemon, if it's running, drop its connection to the
+// standalone machine just removed as name: one added again under that name, maybe with
+// another URL or login, gets a connection of its own rather than the old one.
+func disconnectRemovedMachine(cfgDirectory, name string) {
+	if !common.DaemonRunning(cfgDirectory) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := common.ConnectDaemon(ctx, cfgDirectory)
+	if err != nil {
+		return
+	}
+	defer func() { _ = session.Leave() }()
+	kwargs := map[string]any{common.DisconnectKwargRealm: common.StandaloneMachineRealm(name)}
+	if err := session.Call(common.ProcedureDisconnect).Kwargs(kwargs).ExecuteContext(ctx).Err; err != nil {
+		fmt.Fprintf(os.Stderr, "warning: the local daemon may still be connected to %s: %v\n", name, err)
+	}
+}
+
+// useStandaloneMachine makes machine's realm resolve to it for this process, and returns
+// that realm.
 func useStandaloneMachine(machine common.StandaloneMachine) string {
 	realm := common.StandaloneMachineRealm(machine.Name)
-	if _, ok := common.StandaloneTargetFor(realm); ok {
-		return realm
+	if _, ok := common.StandaloneTargetFor(realm); !ok {
+		common.SetStandaloneTargetFor(realm, machine.Target())
 	}
-	username := machine.User()
-	common.SetStandaloneTargetFor(realm, &common.StandaloneTarget{URL: machine.URL, CertHash: machine.CertHash,
-		AuthID: username, PrivateKey: machine.PrivateKey,
-		ReadPassword: func() (string, error) { return readStandalonePassword(machine.Name, username) }})
 	return realm
 }
 
-// isStandaloneRealm reports whether realm is a standalone machine's, which this process
-// connects to itself: the local daemon only knows the account's machines.
-func isStandaloneRealm(realm string) bool {
-	_, ok := common.StandaloneTargetFor(realm)
-	return ok
+// throughDaemon reports whether realm's machine is reached through the local daemon's
+// persistent connection by default: a managed machine's always, a standalone machine's while
+// the daemon is running. Without the daemon, a standalone machine is reached on a connection
+// of its own, as it was before the daemon could keep one: it needs neither daemon nor cloud.
+func throughDaemon(cfgDirectory, realm string) bool {
+	return !common.IsStandaloneMachineRealm(realm) || common.DaemonRunning(cfgDirectory)
 }
 
-// defaultMode is the --mode to reach realm's machine with: mode if given, otherwise a routed
-// connection of its own for a standalone machine, which the daemon (the default) can't reach.
-func defaultMode(realm, mode string) string {
-	if mode == "" && isStandaloneRealm(realm) {
+// defaultMode is the --mode to reach realm's machine with: mode if given, otherwise "" (the
+// local daemon's persistent connection), or routed (a connection of its own) for a standalone
+// machine while the daemon isn't running (see throughDaemon).
+func defaultMode(cfgDirectory, realm, mode string) string {
+	if mode == "" && !throughDaemon(cfgDirectory, realm) {
 		return ModeRouted
 	}
 	return mode

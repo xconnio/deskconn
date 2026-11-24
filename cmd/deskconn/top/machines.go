@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/xconnio/deskconn/internal/common"
 )
@@ -111,11 +112,11 @@ func (v *topMachinesView) key(m *Model, key string) (tea.Cmd, bool) {
 	target := entry.target()
 	switch key {
 	case keyEnter:
-		return m.withTarget(target, func() tea.Cmd { return m.push(newTopResourcesView(target)) }), true
+		return m.push(newTopResourcesView(target)), true
 	case "s":
 		return m.shell(target), true
 	case "l":
-		return m.withTarget(target, func() tea.Cmd { return m.push(newTopLogsView(m, target)) }), true
+		return m.push(newTopLogsView(m, target)), true
 	case "F":
 		m.dialog = newTopForwardDialog(target)
 		return nil, true
@@ -143,22 +144,29 @@ func (v *topMachinesView) body(m *Model, width, height int) []string {
 	rows := make([]topRow, 0, len(entries))
 	for _, entry := range entries {
 		if standalone := entry.standalone; standalone != nil {
-			rows = append(rows, topRow{style: m.styles.text, cells: []string{
-				standalone.Name, "standalone", "", "", standalone.URL, standaloneLogin(*standalone), "",
+			since := common.ConnectedSince(m.connected, common.StandaloneMachineRealm(standalone.Name))
+			rows = append(rows, topRow{style: m.connectedStyle(since), cells: []string{
+				standalone.Name, "standalone", "", "", standalone.URL, standaloneLogin(*standalone), since,
 			}})
 			continue
 		}
 		machine := entry.machine
 		since := common.ConnectedSince(m.connected, machine.Realm)
-		style := m.styles.text
-		if since != "" {
-			style = m.styles.good
-		}
+		style := m.connectedStyle(since)
 		rows = append(rows, topRow{style: style, cells: []string{
 			machine.Name, "managed", machine.Alias, common.ShortID(machine.Authid), "via the cloud", "account", since,
 		}})
 	}
 	return m.table(columns, rows, &v.list, width, height)
+}
+
+// connectedStyle is how a machine's row looks: highlighted while the daemon is connected to it
+// (since isn't empty).
+func (m *Model) connectedStyle(since string) lipgloss.Style {
+	if since != "" {
+		return m.styles.good
+	}
+	return m.styles.text
 }
 
 // standaloneLogin is how machine logs in, e.g. "key as bob".

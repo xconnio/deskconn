@@ -30,8 +30,14 @@ desk file cp ./notes.txt office:/tmp/notes.txt
 ```
 
 `--username` defaults to your user name on the client. Leave out `--private-key` to be asked for the user's
-password on connecting, and `--cert-hash` to verify the machine's certificate against the system's trusted CAs
-instead of pinning it. `desk machine remove office` removes the machine from the client again.
+password instead, which `desk machine add` saves in `~/.deskconn/config.yml` (readable only by you) beside any
+private key, so connecting never asks. Leave out `--cert-hash` to verify the machine's certificate against the
+system's trusted CAs instead of pinning it. `desk machine remove office` removes the machine from the client again.
+
+While the local daemon (`desk serve`) runs, commands reach a standalone machine through its persistent connection,
+as they do a machine of your account: `desk machine connect office` connects ahead of time, `desk ls` shows since
+when, and the daemon reconnects if the machine goes away, signed in or not. Without the daemon, each command
+connects on its own.
 
 A standalone machine's name can't be a name, alias or the start of an ID of one of your account's machines. If one
 of those gets the same name later, the CLI refuses to guess and `desk ls` warns about it: reach the managed machine

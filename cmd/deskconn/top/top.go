@@ -51,8 +51,7 @@ type Model struct {
 
 	machines   []common.Machine
 	standalone []common.StandaloneMachine
-	targets    map[string]*common.StandaloneTarget // the standalone machines', by name
-	connected  map[string]any                      // the daemon's connected machines, by realm
+	connected  map[string]any // the daemon's connected machines, by realm
 	daemonUp   bool
 	loggedIn   bool
 	refreshing bool
@@ -79,7 +78,6 @@ func NewModel(cfgDirectory, version string, remote Remote) *Model {
 		cfgDirectory: cfgDirectory,
 		version:      version,
 		styles:       newTopStyles(),
-		targets:      map[string]*common.StandaloneTarget{},
 		remote:       remote,
 	}
 	m.load()
@@ -98,11 +96,7 @@ func (m *Model) load() {
 		m.standalone = standalone
 	}
 	for _, machine := range m.standalone {
-		// Without ReadPassword: desk top asks for a password itself, before connecting.
-		target := &common.StandaloneTarget{URL: machine.URL, CertHash: machine.CertHash, AuthID: machine.User(),
-			PrivateKey: machine.PrivateKey}
-		m.targets[machine.Name] = target
-		common.SetStandaloneTargetFor(common.StandaloneMachineRealm(machine.Name), target)
+		common.SetStandaloneTargetFor(common.StandaloneMachineRealm(machine.Name), machine.Target())
 	}
 }
 
@@ -235,14 +229,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case topShellDoneMsg:
 		var cmd tea.Cmd
 		if msg.err != nil {
-			cmd = m.failed(msg.target, "Shell on "+msg.target.name, msg.err)
+			cmd = m.flashErrorf("Shell on %s: %v", msg.target.name, msg.err)
 		} else {
 			cmd = m.setFlash("Shell on "+msg.target.name+" ended.", false)
 		}
 		return m, tea.Batch(cmd, m.fetchConnected())
 	case topPingMsg:
 		if msg.err != nil {
-			return m, m.failed(msg.target, "Ping "+msg.target.name, msg.err)
+			return m, m.flashErrorf("Ping %s: %v", msg.target.name, msg.err)
 		}
 		return m, m.setFlash(fmt.Sprintf("%s replied in %s.", msg.target.name, msg.rtt.Round(time.Millisecond)), false)
 	case topForwardEndedMsg:

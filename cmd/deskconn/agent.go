@@ -144,7 +144,7 @@ func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, err
 
 	var session *xconn.Session
 	var closeFn func()
-	switch defaultMode(realm, mode) {
+	switch defaultMode(cfgDirectory, realm, mode) {
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -351,7 +351,7 @@ func runAgentResumeRemote(cfgDirectory, machine, tool, sessionID, mode string) e
 	// path is relative to home, so the project matches whatever home is on the machine; the
 	// machine runs the agent as the user's own shell finds it (see userd's userCommand).
 	cmdName, args := agentResumeCommand(tool, sessionID)
-	return deskconn.RunExec(context.Background(), defaultMode(realm, mode), realm, cfgDirectory, path,
+	return deskconn.RunExec(context.Background(), defaultMode(cfgDirectory, realm, mode), realm, cfgDirectory, path,
 		append([]string{cmdName}, args...))
 }
 

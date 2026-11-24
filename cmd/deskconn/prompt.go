@@ -92,12 +92,13 @@ func readOTP() (string, error) {
 	return otp, nil
 }
 
-// readStandalonePassword prompts for username's password on the standalone machine saved as
-// name without a private key, when a command first connects.
+// readStandalonePassword prompts for username's password on the standalone machine being
+// added as name without a private key, for desk machine add to save.
 func readStandalonePassword(name, username string) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) { // #nosec
-		return "", fmt.Errorf("the password for %s on %s can only be typed in a terminal; to connect without one, "+
-			"add the machine with --private-key (see `desk keygen`)", username, name)
+		return "", &usageError{msg: fmt.Sprintf("%s needs a private key or a password: pass --private-key "+
+			"(see `desk keygen`), or run desk machine add in a terminal to type the password for %s",
+			name, username)}
 	}
 
 	fmt.Fprintf(os.Stderr, "Password for %s on %s: ", username, name)
@@ -105,6 +106,9 @@ func readStandalonePassword(name, username string) (string, error) {
 	fmt.Fprint(os.Stderr, "\r\n")
 	if err != nil {
 		return "", err
+	}
+	if len(pwd) == 0 {
+		return "", &usageError{msg: "the password can't be empty"}
 	}
 
 	return string(pwd), nil

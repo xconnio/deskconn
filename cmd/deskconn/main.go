@@ -158,8 +158,9 @@ func machineArg(cmd *kingpin.CmdClause, help, cfgDirectory string) *string {
 	return cmd.Arg("machine", help).Required().HintAction(machineCompletions(cfgDirectory)).String()
 }
 
-// modeFlag defines cmd's --mode flag. Left out, a managed machine is reached through the
-// local daemon and a standalone one, which the daemon doesn't know, routed (see defaultMode).
+// modeFlag defines cmd's --mode flag. Left out, a machine is reached through the local
+// daemon's persistent connection, or a standalone one routed while the daemon isn't running
+// (see defaultMode).
 func modeFlag(cmd *kingpin.CmdClause, help string) *string {
 	return cmd.Flag("mode", help).Enum(ModeRouted, ModeDirect)
 }

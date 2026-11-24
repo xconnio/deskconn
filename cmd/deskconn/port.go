@@ -74,9 +74,10 @@ func forwardPort(cfgDirectory, machine, mapping, mode string) error {
 		return err
 	}
 
+	mode = defaultMode(cfgDirectory, realm, mode)
 	fmt.Printf("Forwarding 127.0.0.1:%s -> %s:%s\n", localPort, machine, remotePort)
 	return runUntilInterrupted("Stopping port forwarding...", func(ctx context.Context) error {
-		return deskconn.RunPortForward(ctx, defaultMode(realm, mode), realm, cfgDirectory, remotePort, localPort)
+		return deskconn.RunPortForward(ctx, mode, realm, cfgDirectory, remotePort, localPort)
 	})
 }
 
@@ -90,8 +91,9 @@ func reversePort(cfgDirectory, machine, mapping, mode string) error {
 		return err
 	}
 
+	mode = defaultMode(cfgDirectory, realm, mode)
 	fmt.Printf("Reverse forwarding %s:%s -> 127.0.0.1:%s\n", machine, remotePort, localPort)
 	return runUntilInterrupted("Stopping reverse port forwarding...", func(ctx context.Context) error {
-		return deskconn.RunPortReverse(ctx, defaultMode(realm, mode), realm, cfgDirectory, remotePort, localPort)
+		return deskconn.RunPortReverse(ctx, mode, realm, cfgDirectory, remotePort, localPort)
 	})
 }

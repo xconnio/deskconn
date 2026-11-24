@@ -60,7 +60,7 @@ type (
 )
 
 func newTopLogsView(m *Model, target topTarget) *topLogsView {
-	return &topLogsView{target: target, mode: m.streamMode(target), remote: m.remote, follow: true}
+	return &topLogsView{target: target, mode: m.streamMode(), remote: m.remote, follow: true}
 }
 
 func (v *topLogsView) start(m *Model) tea.Cmd {
@@ -174,7 +174,7 @@ func (v *topLogsView) handle(m *Model, msg tea.Msg) (tea.Cmd, bool) {
 			v.err = msg.err
 			if strings.Contains(strings.ToLower(msg.err.Error()), "auth") {
 				m.closeView(v)
-				return m.failed(v.target, "Logs of "+v.target.name, msg.err), true
+				return m.flashErrorf("Logs of %s: %v", v.target.name, msg.err), true
 			}
 		}
 		return nil, true

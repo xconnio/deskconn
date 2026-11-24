@@ -50,17 +50,40 @@ func UnixSocketURI(path string) string {
 }
 
 func MachinesFromCfg(cfgDirectory string) ([]Machine, error) {
-	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+	config, err := readCfg(cfgDirectory)
 	if err != nil {
 		return []Machine{}, err
 	}
-
-	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return []Machine{}, err
-	}
-
 	return config.Machines, nil
+}
+
+func readCfg(cfgDirectory string) (Config, error) {
+	var config Config
+	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+	if err != nil {
+		return config, err
+	}
+	err = yaml.Unmarshal(data, &config)
+	return config, err
+}
+
+// LoadStandaloneTarget makes realm, a StandaloneMachineRealm, resolve to the standalone
+// machine config.yml saves under its name, read afresh: for the local daemon, which only
+// knows of standalone machines from there.
+func LoadStandaloneTarget(cfgDirectory, realm string) error {
+	name := strings.TrimPrefix(realm, StandaloneRealm+"/")
+	config, err := readCfg(cfgDirectory)
+	if err != nil {
+		return fmt.Errorf("read standalone machine %s: %w", name, err)
+	}
+	for _, machine := range config.Standalone {
+		if machine.Name != name {
+			continue
+		}
+		SetStandaloneTargetFor(realm, machine.Target())
+		return nil
+	}
+	return fmt.Errorf("no standalone machine named %s", name)
 }
 
 func ReadCredentials(cfgDirectory string) (string, string, error) {

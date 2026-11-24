@@ -54,7 +54,7 @@ All credentials and configuration are stored under `~/.deskconn/`:
 | `credentials.json`      | Machine attach credentials (realm, authid, keypair) used by the daemon  |
 | `id_ed25519`            | CLI private key, username, and key expiry                               |
 | `id_ed25519.pub`        | CLI public key, username, and account name                              |
-| `config.yml`            | Machine list and aliases, and standalone machines (`desk machine add`) with their private keys |
+| `config.yml`            | Machine list and aliases, and standalone machines (`desk machine add`) with their private keys or passwords |
 | `standalone-users.db`   | Standalone mode's users added through its API, with their keys and salted password hashes |
 | `principals.json`       | Local CryptoSign principals (used by the local WAMP router)             |
 | `capabilities.json`     | Which apps the machine's owner and admins have enabled or disabled      |
