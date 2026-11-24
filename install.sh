@@ -172,17 +172,24 @@ Environment=WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
         return
     fi
 
-    # Shells without a login session (root in a container, "su" without "-l", ...)
-    # have no user bus. Enable lingering so this user's systemd instance runs
-    # (and starts at boot without a login), then point systemctl at it.
-    if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
-        echo "No user session found, enabling lingering for $(id -un)..."
-        loginctl enable-linger "$(id -un)"
+    # SSH sessions can lack the environment needed to reach the user manager.
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
         export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-        for _ in $(seq 1 20); do
-            [ -S "$XDG_RUNTIME_DIR/bus" ] && break
-            sleep 0.5
-        done
+        unset DBUS_SESSION_BUS_ADDRESS
+
+        if ! systemctl --user show-environment >/dev/null 2>&1 &&
+            loginctl enable-linger "$(id -un)"; then
+            for _ in $(seq 1 20); do
+                systemctl --user show-environment >/dev/null 2>&1 && break
+                sleep 0.5
+            done
+        fi
+
+        if ! systemctl --user show-environment >/dev/null; then
+            echo "Could not reach the systemd user manager. Skipping service setup." >&2
+            echo "Start the daemon manually with:  $EXEC_DIR/deskconn serve --mode user"
+            return 0
+        fi
     fi
 
     mkdir -p "$systemd_user_dir"
