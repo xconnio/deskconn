@@ -23,8 +23,17 @@ const TerminalWorkerCommand = "terminal-worker"
 // terminalRequestTimeout bounds a terminal request before the stream becomes an attachment.
 const terminalRequestTimeout = 30 * time.Second
 
+// terminalDetachTimeout bounds waiting for a session to let go of a detaching attachment.
+const terminalDetachTimeout = 5 * time.Second
+
 func newTerminalManager(cfgDirectory string) *terminal.Manager {
 	return terminal.NewManager(filepath.Join(cfgDirectory, "terminals"), TerminalWorkerCommand)
+}
+
+// SetTerminalHistoryLimits sets the output history each new persistent terminal session
+// keeps, and that they may all keep (see terminal.Manager.SetHistoryLimits).
+func (d *Deskconn) SetTerminalHistoryLimits(perSession, total int) {
+	d.terminals.SetHistoryLimits(perSession, total)
 }
 
 // terminalOwner is the owner caller's sessions are recorded with: its authenticated
@@ -99,7 +108,8 @@ func (d *Deskconn) handleTerminalStream(stream net.Conn, caller string) {
 // the session an attach request names.
 func (d *Deskconn) openTerminal(ctx context.Context, owner, caller string, req common.TerminalControlMsg) (
 	string, *terminal.Attachment, error) {
-	opts := terminal.AttachOptions{Cols: req.Cols, Rows: req.Rows, Takeover: req.Takeover, Token: req.Token}
+	opts := terminal.AttachOptions{Cols: req.Cols, Rows: req.Rows, Takeover: req.Takeover, Token: req.Token,
+		Since: req.Since}
 	if req.Op == common.TerminalOpAttach {
 		attachment, err := d.terminals.Attach(ctx, owner, req.Session, opts)
 		return req.Session, attachment, err
@@ -186,6 +196,8 @@ func (ts *terminalStream) refuseErr(err error) error {
 		return ts.refuse(common.TerminalErrAttached, err.Error())
 	case errors.Is(err, terminal.ErrUnavailable):
 		return ts.refuse(common.TerminalErrUnavailable, err.Error())
+	case errors.Is(err, terminal.ErrLimit):
+		return ts.refuse(common.TerminalErrLimit, err.Error())
 	default:
 		return ts.refuse(common.TerminalErrFailed, err.Error())
 	}
@@ -195,7 +207,8 @@ func (ts *terminalStream) refuseErr(err error) error {
 // client's stream ending, however, only detaches: the session runs on.
 func (ts *terminalStream) relay(id string, attachment *terminal.Attachment) {
 	defer attachment.Close()
-	if err := ts.sendControl(common.TerminalControlMsg{Session: id, Token: attachment.Token()}); err != nil {
+	if err := ts.sendControl(common.TerminalControlMsg{Session: id, Token: attachment.Token(),
+		Offset: attachment.Offset, Snapshot: attachment.Snapshot, HistoryGap: attachment.HistoryGap}); err != nil {
 		return
 	}
 
@@ -224,6 +237,7 @@ func (ts *terminalStream) relay(id string, attachment *terminal.Attachment) {
 		}
 	}()
 
+	detached := false
 	for {
 		_ = ts.stream.SetReadDeadline(time.Now().Add(common.ShellIdleTimeout))
 		kind, payload, err := ts.recv()
@@ -243,8 +257,16 @@ func (ts *terminalStream) relay(id string, attachment *terminal.Attachment) {
 		if msg.Op == common.TerminalOpSize {
 			_ = attachment.Resize(msg.Cols, msg.Rows)
 		} else if msg.Op == common.TerminalOpDetach {
-			_ = attachment.Detach()
+			detached = attachment.Detach() == nil
 			break
+		}
+	}
+	if detached {
+		// The client's stream ends once the session has let go of the attachment, for it to
+		// attach again right away.
+		select {
+		case <-outputDone:
+		case <-time.After(terminalDetachTimeout):
 		}
 	}
 	_ = attachment.Close()

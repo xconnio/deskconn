@@ -118,6 +118,7 @@ func runUserd(flags userdFlags, standalone bool) {
 	}
 
 	deskconnApis := userd.NewDeskconn(isDesktop, cfgDirectory)
+	deskconnApis.SetTerminalHistoryLimits(int(*flags.terminalHistory), int(*flags.terminalHistoryTotal))
 	if standaloneUsers != nil {
 		deskconnApis.ServeStandaloneUsers(standaloneUsers)
 	}

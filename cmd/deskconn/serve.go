@@ -6,7 +6,10 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
+	"github.com/alecthomas/units"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/xconnio/deskconn/internal/terminal"
 )
 
 // What "desk serve" runs (--mode).
@@ -31,6 +34,11 @@ type userdFlags struct {
 	standaloneCert      *string
 	standaloneKey       *string
 	standaloneUsers     *[]string
+
+	// terminalHistory and terminalHistoryTotal bound the output history of persistent
+	// terminal sessions (see terminal.Manager.SetHistoryLimits).
+	terminalHistory      *units.Base2Bytes
+	terminalHistoryTotal *units.Base2Bytes
 
 	// configPath and configUsers are the --config file and its users (see serveCommands.apply).
 	configPath  string
@@ -96,6 +104,12 @@ func registerServeCommands(app *kingpin.Application) *serveCommands {
 		standaloneUsers: runCmd.Flag("user", "username:password allowed to connect in standalone mode; repeat for "+
 			"more. Users who log in with keys go in a --config file (see desk serve init)").
 			Envar("DESKCONND_USERS").Strings(),
+		terminalHistory: runCmd.Flag("terminal-history", "Output history each persistent terminal session "+
+			"keeps, to restore its screen with on attaching again; 0 keeps none").
+			Default(units.Base2Bytes(terminal.DefaultHistoryLimit).String()).Bytes(),
+		terminalHistoryTotal: runCmd.Flag("terminal-history-total", "Output history all persistent terminal "+
+			"sessions may keep: once it's spent, new sessions get less, then none starts").
+			Default(units.Base2Bytes(terminal.DefaultHistoryTotal).String()).Bytes(),
 	}
 	configPath := runCmd.Flag("config", "YAML file to read the mode and the standalone settings from (see "+
 		"the README); flags given as well override it, and --user adds to its users").

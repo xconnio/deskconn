@@ -24,6 +24,19 @@ var (
 	ErrAttached = errors.New("the terminal session is attached elsewhere; take it over to attach here")
 	// ErrUnavailable is a session whose worker can't be reached.
 	ErrUnavailable = errors.New("the terminal session is unavailable")
+	// ErrLimit is a new session refused, as the sessions running have the machine's history
+	// budget.
+	ErrLimit = errors.New("too many terminal sessions: the machine's limit on their output history is reached; " +
+		"end one to start another")
+)
+
+const (
+	// DefaultHistoryLimit is the output history a session keeps by default.
+	DefaultHistoryLimit = 16 << 20
+	// DefaultHistoryTotal is the history all of a daemon's sessions may keep by default.
+	DefaultHistoryTotal = 256 << 20
+	// minHistoryLimit is the least history a session starts with once the total runs low.
+	minHistoryLimit = 1 << 20
 )
 
 const (
@@ -45,6 +58,11 @@ type Manager struct {
 	// launch starts a worker, for it to outlive this process (see launch_*.go).
 	launch   func(exe string, args []string, id string) (*startedWorker, error)
 	launcher launcher
+
+	// createMu serializes creating sessions, for each to take its share of historyTotal.
+	createMu     sync.Mutex
+	historyLimit int
+	historyTotal int
 }
 
 // NewManager manages the sessions in dir, starting each worker as this executable's
@@ -56,9 +74,20 @@ func NewManager(dir string, workerArgs ...string) *Manager {
 			exe, err := os.Executable()
 			return exe, workerArgs, err
 		},
+		historyLimit: DefaultHistoryLimit,
+		historyTotal: DefaultHistoryTotal,
 	}
 	m.launch = m.launcher.launch
 	return m
+}
+
+// SetHistoryLimits sets the output history each new session keeps, and that all sessions
+// may keep: a new session gets less once the total runs low, and none starts once it's
+// spent. A limit of 0 keeps no history.
+func (m *Manager) SetHistoryLimits(perSession, total int) {
+	m.createMu.Lock()
+	defer m.createMu.Unlock()
+	m.historyLimit, m.historyTotal = max(perSession, 0), max(total, 0)
 }
 
 // CreateOptions is a new session's shell.
@@ -89,12 +118,45 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 	if err != nil {
 		return "", err
 	}
+	m.createMu.Lock()
+	defer m.createMu.Unlock()
+	historyLimit, err := m.newHistoryLimit(ctx)
+	if err != nil {
+		return "", err
+	}
 	spec := Spec{Dir: m.dir, ID: id, Owner: opts.Owner, Secret: secret, Command: opts.Command, Args: opts.Args,
-		Env: opts.Env, WorkDir: opts.WorkDir, Cols: opts.Cols, Rows: opts.Rows}
+		Env: opts.Env, WorkDir: opts.WorkDir, Cols: opts.Cols, Rows: opts.Rows, HistoryLimit: historyLimit}
 	if err := m.spawn(ctx, spec); err != nil {
 		return "", err
 	}
 	return id, nil
+}
+
+// newHistoryLimit is the history a new session may keep: the per-session limit, or what's
+// left of the total, which the running sessions' limits count against. createMu is held.
+func (m *Manager) newHistoryLimit(ctx context.Context) (int, error) {
+	if m.historyLimit == 0 {
+		return 0, nil
+	}
+	ids, err := recordIDs(m.dir)
+	if err != nil {
+		return 0, err
+	}
+	left := m.historyTotal
+	for _, id := range ids {
+		rec, err := readRecord(m.dir, id)
+		if err != nil {
+			continue
+		}
+		if _, err := m.info(ctx, rec); err == nil || !errors.Is(err, ErrNotFound) {
+			left -= rec.HistoryLimit
+		}
+	}
+	limit := min(m.historyLimit, left)
+	if limit < min(m.historyLimit, minHistoryLimit) {
+		return 0, ErrLimit
+	}
+	return limit, nil
 }
 
 func (m *Manager) spawn(ctx context.Context, spec Spec) error {
@@ -266,6 +328,9 @@ type AttachOptions struct {
 	// Token is an earlier attachment's, whose client this is reconnecting: it replaces that
 	// attachment without a takeover.
 	Token string
+	// Since is the output offset the client has seen up to, for the history restored to
+	// leave out what it has; nil restores all of it.
+	Since *uint64
 }
 
 // Attach makes the caller owner's session id's attachment.
@@ -275,11 +340,12 @@ func (m *Manager) Attach(ctx context.Context, owner, id string, opts AttachOptio
 		return nil, err
 	}
 	conn, reply, err := m.request(ctx, rec, message{Op: opAttach, Cols: opts.Cols, Rows: opts.Rows,
-		Takeover: opts.Takeover, Token: opts.Token})
+		Takeover: opts.Takeover, Token: opts.Token, Since: opts.Since})
 	if err != nil {
 		return nil, err
 	}
-	return &Attachment{conn: conn, token: reply.Token}, nil
+	return &Attachment{conn: conn, token: reply.Token, Offset: reply.Offset, Snapshot: reply.Snapshot,
+		HistoryGap: reply.HistoryGap}, nil
 }
 
 // request connects to rec's worker and makes req, returning the connection and the reply.
@@ -341,10 +407,19 @@ func workerGone(err error) bool {
 
 // Attachment is a connection controlling a session: its output and end come from Next,
 // its input goes to Write.
+//
+// Its output starts with Snapshot bytes restoring the session's screen as it was at output
+// offset Offset; the session's output from there follows. A client that counts the output
+// after the snapshot knows the offset it's seen up to, to attach again with as Since.
 type Attachment struct {
 	conn    net.Conn
 	token   string
 	writeMu sync.Mutex
+
+	Offset   uint64
+	Snapshot int
+	// HistoryGap tells that history the snapshot would have restored is gone.
+	HistoryGap bool
 }
 
 // Token identifies this attachment, for its client to attach again without a takeover.
@@ -394,11 +469,10 @@ func (a *Attachment) Resize(cols, rows uint16) error {
 	return a.send(func(w io.Writer) error { return writeControl(w, message{Op: opSize, Cols: cols, Rows: rows}) })
 }
 
-// Detach leaves the session running without this attachment, and closes it.
+// Detach leaves the session running without this attachment. Next ends once the session
+// has let go of it: attaching again after that finds it detached. Close it then.
 func (a *Attachment) Detach() error {
-	err := a.send(func(w io.Writer) error { return writeControl(w, message{Op: opDetach}) })
-	_ = a.conn.Close()
-	return err
+	return a.send(func(w io.Writer) error { return writeControl(w, message{Op: opDetach}) })
 }
 
 // Close ends the attachment, which detaches it.

@@ -165,10 +165,15 @@ func TestTerminalSessionSurvivesDisconnect(t *testing.T) {
 	s = watchTerminal(ts)
 	require.Equal(t, pid, askPID(t, ts, s, "resumed"), "the same shell")
 
-	// Detaching explicitly leaves it running too.
+	// Detaching explicitly leaves it running too, and once the stream ends, it's detached:
+	// attaching again right away needs no takeover.
 	require.NoError(t, ts.SendControl(common.TerminalControlMsg{Op: common.TerminalOpDetach}))
 	<-s.ended
 	require.Nil(t, s.exit)
+	ts, _, err = openTerminal(t, d, terminalOwner,
+		common.TerminalControlMsg{Op: common.TerminalOpAttach, Session: reply.Session, Cols: 80, Rows: 24})
+	require.NoError(t, err)
+	ts.Close()
 	require.Len(t, listTerminals(t, d, terminalOwner), 1)
 
 	ts, _, err = openTerminal(t, d, terminalOwner,
@@ -193,13 +198,29 @@ func TestTerminalSessionSurvivesDaemonRestart(t *testing.T) {
 	require.Len(t, sessions, 1)
 	require.Equal(t, reply.Session, sessions[0].ID)
 
-	ts, _, err = openTerminal(t, restarted, terminalOwner,
+	ts, again, err := openTerminal(t, restarted, terminalOwner,
 		common.TerminalControlMsg{Op: common.TerminalOpAttach, Session: reply.Session, Cols: 80, Rows: 24})
 	require.NoError(t, err)
+	require.Positive(t, again.Snapshot, "the screen is restored")
+	require.Positive(t, again.Offset)
 	s = watchTerminal(ts)
+	s.waitFor(t, "before="+strconv.Itoa(pid))
 	s.waitFor(t, "long-command-finished")
 	require.Equal(t, pid, askPID(t, ts, s, "after"))
 	ts.Close()
+}
+
+func TestTerminalHistoryLimit(t *testing.T) {
+	d, _ := terminalDaemon(t)
+	d.SetTerminalHistoryLimits(1<<20, 1<<20)
+	ts, _, err := openTerminal(t, d, terminalOwner,
+		common.TerminalControlMsg{Op: common.TerminalOpCreate, Cols: 80, Rows: 24})
+	require.NoError(t, err)
+	ts.Close()
+	_, _, err = openTerminal(t, d, terminalOwner,
+		common.TerminalControlMsg{Op: common.TerminalOpCreate, Cols: 80, Rows: 24})
+	require.True(t, deskconn.IsTerminalError(err, common.TerminalErrLimit), "%v", err)
+	require.Len(t, listTerminals(t, d, terminalOwner), 1)
 }
 
 func TestTerminalSessionExit(t *testing.T) {

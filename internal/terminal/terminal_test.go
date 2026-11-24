@@ -150,7 +150,7 @@ func TestCreateAttachDetachResume(t *testing.T) {
 	require.True(t, ValidID(id))
 
 	a, s := attach(t, m, id, AttachOptions{Cols: 80, Rows: 24})
-	s.waitFor(t, `\$ `) // the first prompt is held for the first attachment
+	s.waitFor(t, `\$ `) // the first prompt, restored on attaching
 	pid := shellPID(t, a, s, "first")
 	require.NoError(t, a.Write([]byte("export KEPT=yes; sleep 1000 &\n")))
 	s.waitFor(t, `\[1\] \d+`)
@@ -257,7 +257,7 @@ func TestDetachedShellExitEndsSession(t *testing.T) {
 	require.Eventually(t, func() bool {
 		_, err := os.Stat(m.RecordPath(id))
 		return os.IsNotExist(err)
-	}, InitialOutputHold+waitTime, 50*time.Millisecond, "a shell exiting with nothing attached ends the session")
+	}, waitTime, 50*time.Millisecond, "a shell exiting with nothing attached ends the session")
 }
 
 func TestTerminateKillsSessionProcesses(t *testing.T) {
@@ -351,7 +351,7 @@ func TestDetachedOutputDoesNotBlock(t *testing.T) {
 	_, err := m.Create(ctx, opts)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { _, err := os.Stat(marker); return err == nil },
-		InitialOutputHold+60*time.Second, 100*time.Millisecond, "the command runs to the end unwatched")
+		60*time.Second, 100*time.Millisecond, "the command runs to the end unwatched")
 }
 
 func TestUnstartableCommand(t *testing.T) {
