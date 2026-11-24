@@ -27,6 +27,8 @@ type record struct {
 	// Secret authenticates a connection to the worker, as a second check after the
 	// terminals directory being private to its user.
 	Secret string `json:"secret"`
+	// HistoryLimit is the session's share of the history budget (see Manager.Create).
+	HistoryLimit int `json:"history_limit,omitempty"`
 }
 
 const (
