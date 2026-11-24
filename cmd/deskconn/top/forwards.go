@@ -55,19 +55,17 @@ func (f *topForward) dest() string {
 
 // startForward forwards connections to listen on to port to on the other side.
 func (m *Model) startForward(target topTarget, reverse bool, listen, to string) tea.Cmd {
-	return m.withTarget(target, func() tea.Cmd {
-		ctx, cancel := context.WithCancel(context.Background())
-		forward := &topForward{id: m.newID(), target: target, reverse: reverse, listen: listen, to: to,
-			started: time.Now(), cancel: cancel}
-		m.forwards = append(m.forwards, forward)
-		mode, realm, remote := m.streamMode(target), target.realm, m.remote
-		run := func() tea.Msg {
-			err := remote.Forward(ctx, mode, realm, reverse, listen, to)
-			return topForwardEndedMsg{id: forward.id, err: err}
-		}
-		message := fmt.Sprintf("Forwarding %s → %s. See them all with f.", forward.from(), forward.dest())
-		return tea.Batch(run, m.setFlash(message, false))
-	})
+	ctx, cancel := context.WithCancel(context.Background())
+	forward := &topForward{id: m.newID(), target: target, reverse: reverse, listen: listen, to: to,
+		started: time.Now(), cancel: cancel}
+	m.forwards = append(m.forwards, forward)
+	mode, realm, remote := m.streamMode(), target.realm, m.remote
+	run := func() tea.Msg {
+		err := remote.Forward(ctx, mode, realm, reverse, listen, to)
+		return topForwardEndedMsg{id: forward.id, err: err}
+	}
+	message := fmt.Sprintf("Forwarding %s → %s. See them all with f.", forward.from(), forward.dest())
+	return tea.Batch(run, m.setFlash(message, false))
 }
 
 func (m *Model) forwardEnded(msg topForwardEndedMsg) tea.Cmd {
@@ -85,7 +83,7 @@ func (m *Model) forwardEnded(msg topForwardEndedMsg) tea.Cmd {
 	if msg.err == nil {
 		forward.err = errors.New("the machine ended it")
 	}
-	return m.failed(forward.target, fmt.Sprintf("Forward %s → %s", forward.from(), forward.dest()), forward.err)
+	return m.flashErrorf("Forward %s → %s: %v", forward.from(), forward.dest(), forward.err)
 }
 
 func (m *Model) runningForwards() int {

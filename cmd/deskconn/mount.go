@@ -16,7 +16,7 @@ func mountFiles(cfgDirectory, target, mountpoint, mode string, readOnly, debug b
 		return err
 	}
 
-	mode = defaultMode(realm, mode)
+	mode = defaultMode(cfgDirectory, realm, mode)
 	connect := func(ctx context.Context) (*deskconn.MountConnection, error) {
 		switch mode {
 		case ModeRouted:

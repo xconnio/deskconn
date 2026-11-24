@@ -43,6 +43,7 @@ type StandaloneMachine struct {
 	URL        string `yaml:"url"`
 	CertHash   string `yaml:"cert_hash,omitempty"`
 	PrivateKey string `yaml:"private_key,omitempty"`
+	Password   string `yaml:"password,omitempty"` // when there's no PrivateKey
 	Username   string `yaml:"username,omitempty"`
 }
 
@@ -54,6 +55,12 @@ func (m StandaloneMachine) User() string {
 	return CurrentUsername()
 }
 
+// Target returns the target to connect to m with.
+func (m StandaloneMachine) Target() *StandaloneTarget {
+	return &StandaloneTarget{Name: m.Name, URL: m.URL, CertHash: m.CertHash, AuthID: m.User(),
+		PrivateKey: m.PrivateKey, Password: m.Password}
+}
+
 type Config struct {
 	Machines   []Machine           `yaml:"machines"`
 	Printing   PrintingConfig      `yaml:"printing,omitempty"`
@@ -62,64 +69,33 @@ type Config struct {
 }
 
 // StandaloneTarget is a standalone machine the CLI connects to directly, instead of a
-// machine from the cloud account. It authenticates with PrivateKey if set,
-// otherwise as user AuthID with Password, asking ReadPassword for it on first use if empty.
+// machine from the cloud account. It authenticates with PrivateKey if set, otherwise as user
+// AuthID with Password: desk machine add saves one of them, so connecting never asks.
 type StandaloneTarget struct {
-	URL          string // quic://host:port, or https://host:port[/path] for WebTransport
-	CertHash     string // SHA-256 fingerprint to pin the machine's certificate to, if set
-	AuthID       string
-	PrivateKey   string // hex ed25519 seed
-	Password     string
-	ReadPassword func() (string, error)
-
-	mu sync.Mutex
+	Name       string // what it's saved as in config.yml
+	URL        string // quic://host:port, or https://host:port[/path] for WebTransport
+	CertHash   string // SHA-256 fingerprint to pin the machine's certificate to, if set
+	AuthID     string
+	PrivateKey string // hex ed25519 seed
+	Password   string
 }
 
 // Authenticator returns a new client authenticator for target: cryptosign with its private
 // key, or wampcra with its password.
 func (t *StandaloneTarget) Authenticator() (auth.ClientAuthenticator, error) {
-	if t.PrivateKey == "" {
-		password, err := t.password()
+	switch {
+	case t.PrivateKey != "":
+		authenticator, err := auth.NewCryptoSignAuthenticator(t.AuthID, t.PrivateKey, map[string]any{})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid private key: %w", err)
 		}
-		return auth.NewWAMPCRAAuthenticator(t.AuthID, password, map[string]any{}), nil
+		return authenticator, nil
+	case t.Password != "":
+		return auth.NewWAMPCRAAuthenticator(t.AuthID, t.Password, map[string]any{}), nil
+	default:
+		return nil, fmt.Errorf("standalone machine %s has no saved private key or password; add it again with "+
+			"one: desk machine remove %s, then desk machine add %s --url %s", t.Name, t.Name, t.Name, t.URL)
 	}
-	authenticator, err := auth.NewCryptoSignAuthenticator(t.AuthID, t.PrivateKey, map[string]any{})
-	if err != nil {
-		return nil, fmt.Errorf("invalid private key: %w", err)
-	}
-	return authenticator, nil
-}
-
-// password returns target's password, reading it with ReadPassword the first time it's
-// needed, so commands that never connect don't ask for it.
-func (t *StandaloneTarget) password() (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.Password == "" && t.ReadPassword != nil {
-		password, err := t.ReadPassword()
-		if err != nil {
-			return "", err
-		}
-		t.Password = password
-	}
-	return t.Password, nil
-}
-
-// SetPassword sets the password target connects with, for one asked for other than by
-// ReadPassword (desk top), or "" to forget a wrong one.
-func (t *StandaloneTarget) SetPassword(password string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.Password = password
-}
-
-// NeedsPassword reports whether target connects with a password it doesn't have yet.
-func (t *StandaloneTarget) NeedsPassword() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.PrivateKey == "" && t.Password == ""
 }
 
 // standaloneTargets are the standalone machines this process connects to, by the realm the
@@ -145,6 +121,11 @@ func StandaloneTargetFor(realm string) (*StandaloneTarget, bool) {
 	return target, ok && target != nil
 }
 
+// IsStandaloneMachineRealm reports whether realm is a StandaloneMachineRealm.
+func IsStandaloneMachineRealm(realm string) bool {
+	return strings.HasPrefix(realm, StandaloneRealm+"/")
+}
+
 // StandaloneMachineRealm is the realm the CLI names the standalone machine saved as name by,
 // so that one process can use several (desk top). The machine itself serves StandaloneRealm,
 // which connecting to it asks for instead (see ServedRealm).
@@ -153,7 +134,7 @@ func StandaloneMachineRealm(name string) string { return StandaloneRealm + "/" +
 // ServedRealm is the realm realm's machine serves: StandaloneRealm for a StandaloneMachineRealm,
 // otherwise realm itself.
 func ServedRealm(realm string) string {
-	if strings.HasPrefix(realm, StandaloneRealm+"/") {
+	if IsStandaloneMachineRealm(realm) {
 		return StandaloneRealm
 	}
 	return realm

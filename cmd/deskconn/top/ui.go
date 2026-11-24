@@ -510,39 +510,3 @@ func (d *topConfirm) view(m *Model) string {
 	}
 	return m.dialogBox(d.title, []string{m.styles.text.Render(d.message), "", m.buttons([]string{"Yes", "No"}, focused)})
 }
-
-// topPasswordDialog asks for a standalone machine's password.
-type topPasswordDialog struct {
-	authID, name string
-	password     string
-	entered      func(password string) tea.Cmd
-}
-
-func (d *topPasswordDialog) update(m *Model, msg tea.KeyMsg) tea.Cmd {
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.dialog = nil
-	case tea.KeyEnter:
-		if d.password == "" {
-			return nil
-		}
-		m.dialog = nil
-		return d.entered(d.password)
-	case tea.KeyBackspace:
-		if d.password != "" {
-			d.password = string([]rune(d.password)[:len([]rune(d.password))-1])
-		}
-	case tea.KeyRunes, tea.KeySpace:
-		d.password += string(msg.Runes)
-	}
-	return nil
-}
-
-func (d *topPasswordDialog) view(m *Model) string {
-	return m.dialogBox("Password", []string{
-		m.styles.text.Render(fmt.Sprintf("Password for %s on %s:", d.authID, d.name)),
-		m.styles.bold.Render(strings.Repeat("•", len([]rune(d.password)))) + m.styles.accent.Render("█"),
-		"",
-		m.styles.dim.Render("enter connects · esc cancels"),
-	})
-}

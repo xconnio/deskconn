@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/user"
 	"path/filepath"
 	"time"
@@ -21,6 +22,17 @@ func DaemonURI(cfgDirectory string) string {
 // ConnectDaemon joins the current user's local daemon on each supported platform.
 func ConnectDaemon(ctx context.Context, cfgDirectory string) (*xconn.Session, error) {
 	return connectivity.ConnectApp(ctx, filepath.Join(cfgDirectory, "deskconn.sock"), LocalRealm)
+}
+
+// DaemonRunning reports whether the current user's local daemon is listening on its socket:
+// a socket left behind by one that's gone refuses the connection.
+func DaemonRunning(cfgDirectory string) bool {
+	conn, err := net.DialTimeout("unix", filepath.Join(cfgDirectory, "deskconn.sock"), time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // CurrentUsername is the username a standalone machine logs in as unless --username says otherwise.

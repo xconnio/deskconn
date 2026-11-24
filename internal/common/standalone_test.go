@@ -3,6 +3,7 @@ package common_test
 import (
 	"context"
 	"crypto/tls"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -177,21 +178,13 @@ func TestStandaloneAuthenticatorKeysOnly(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestStandaloneTargetReadsPasswordOnce(t *testing.T) {
-	url, _, certHash := startStandalone(t, nil, map[string]string{testUser: testPassword})
-	reads := 0
-	target := &common.StandaloneTarget{URL: url, CertHash: certHash,
-		AuthID: testUser, ReadPassword: func() (string, error) {
-			reads++
-			return testPassword, nil
-		}}
-
-	for range 2 {
-		conn, err := connectStandalone(t, target)
-		require.NoError(t, err)
-		_ = conn.Close()
-	}
-	require.Equal(t, 1, reads)
+// A target saved with neither a private key nor a password (by an older desk machine add)
+// can't log in, and says how to fix that rather than asking for a password.
+func TestStandaloneTargetWithoutLogin(t *testing.T) {
+	target := common.StandaloneMachine{Name: "lab", URL: "quic://lab:18080"}.Target()
+	_, err := target.Authenticator()
+	require.ErrorContains(t, err, "standalone machine lab has no saved private key or password")
+	require.ErrorContains(t, err, "desk machine add lab --url quic://lab:18080")
 }
 
 func TestStandaloneMachineRealms(t *testing.T) {
@@ -219,4 +212,42 @@ func TestStandaloneMachineRealms(t *testing.T) {
 		require.Equal(t, user, conn.Details().AuthID(), name)
 		require.Equal(t, common.StandaloneRealm, conn.Details().Realm(), name)
 	}
+}
+
+// The daemon learns a standalone machine, and how to log in to it, from config.yml.
+func TestLoadStandaloneTarget(t *testing.T) {
+	dir := t.TempDir()
+	config := `standalone:
+  - name: keyed
+    url: quic://lab:18080
+    private_key: cd
+  - name: passworded
+    url: quic://lab:18080
+    username: dave
+    password: secret
+  - name: asks
+    url: quic://lab:18080
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yml"), []byte(config), 0600))
+	t.Cleanup(func() {
+		for _, name := range []string{"keyed", "passworded", "asks"} {
+			common.SetStandaloneTargetFor(common.StandaloneMachineRealm(name), nil)
+		}
+	})
+
+	passworded := common.StandaloneMachineRealm("passworded")
+	require.NoError(t, common.LoadStandaloneTarget(dir, passworded))
+	target, ok := common.StandaloneTargetFor(passworded)
+	require.True(t, ok)
+	require.Equal(t, "dave", target.AuthID)
+	require.Equal(t, "secret", target.Password)
+
+	require.NoError(t, common.LoadStandaloneTarget(dir, common.StandaloneMachineRealm("keyed")))
+	asks := common.StandaloneMachineRealm("asks")
+	require.NoError(t, common.LoadStandaloneTarget(dir, asks))
+	target, _ = common.StandaloneTargetFor(asks)
+	_, err := target.Authenticator()
+	require.ErrorContains(t, err, "no saved private key or password", "connecting fails, without asking")
+	require.ErrorContains(t, common.LoadStandaloneTarget(dir, common.StandaloneMachineRealm("nope")),
+		"no standalone machine named nope")
 }

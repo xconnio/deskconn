@@ -150,7 +150,7 @@ func (v *topResourcesView) handle(m *Model, msg tea.Msg) (tea.Cmd, bool) {
 			if strings.Contains(strings.ToLower(msg.err.Error()), "auth") {
 				// A wrong password: asking again beats retrying it.
 				m.closeView(v)
-				return m.failed(v.target, "Resources of "+v.target.name, msg.err), true
+				return m.flashErrorf("Resources of %s: %v", v.target.name, msg.err), true
 			}
 			if v.pendingErr == nil {
 				v.pendingErr = msg.err

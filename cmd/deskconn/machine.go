@@ -95,7 +95,7 @@ func registerMachineCommands(app *kingpin.Application, cfgDirectory string) *mac
 	cmds.addCertHash = cmds.add.Flag("cert-hash", "SHA-256 fingerprint of the machine's certificate, "+
 		"as `desk serve` prints it, to trust it even if self-signed (default: verify against trusted CAs)").String()
 	cmds.addKey = cmds.add.Flag("private-key", "Private key (hex) to log in with; see `desk keygen`. "+
-		"Without it, a password is asked for on connecting").String()
+		"Without it, the password is asked for and saved").String()
 
 	cmds.remove = machineCmd.Command("remove", "Remove a standalone machine from this client")
 	cmds.removeName = cmds.remove.Arg("name", "Name of the standalone machine").Required().
@@ -201,22 +201,11 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 		return nil
 	}
 
-	// Only managed machines connect through the daemon.
-	var connectedMachines map[string]any
-	if len(managed) > 0 {
-		session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = session.Leave() }()
-		machinesCallResp := session.Call(common.ProcedureConnectedMachines).Execute()
-		if machinesCallResp.Err != nil {
-			return machinesCallResp.Err
-		}
-		var ok bool
-		if connectedMachines, ok = machinesCallResp.Args[0].(map[string]any); !ok {
-			return errors.New("expected a map of strings")
-		}
+	// The daemon's connections, to managed machines and standalone ones; standalone machines
+	// work without the daemon too, so listing only them doesn't need it running.
+	connectedMachines, err := daemonConnectedMachines(cfgDirectory)
+	if err != nil && len(managed) > 0 {
+		return err
 	}
 
 	tableHeader := []string{"ID", "NAME", "MODE", "ALIAS", "CONNECTED SINCE"}
@@ -234,7 +223,8 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 		_ = table.Append(row)
 	}
 	for _, m := range standalone {
-		row := []any{"", m.Name, modeStandalone, "", ""}
+		row := []any{"", m.Name, modeStandalone, "",
+			common.ConnectedSince(connectedMachines, common.StandaloneMachineRealm(m.Name))}
 		if detailed {
 			row = append(row, "", "", m.URL)
 		}
@@ -252,6 +242,25 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 		return deskconn.CacheMachines(cfgDirectory, managed)
 	}
 	return nil
+}
+
+// daemonConnectedMachines returns when the local daemon connected to each machine it's
+// connected to, by realm.
+func daemonConnectedMachines(cfgDirectory string) (map[string]any, error) {
+	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = session.Leave() }()
+	resp := session.Call(common.ProcedureConnectedMachines).Execute()
+	if resp.Err != nil {
+		return nil, resp.Err
+	}
+	connected, ok := resp.Args[0].(map[string]any)
+	if !ok {
+		return nil, errors.New("expected a map of strings")
+	}
+	return connected, nil
 }
 
 // managedMachinesToList returns the account's machines desk ls shows, and whether they were
@@ -361,10 +370,10 @@ pingLoop:
 }
 
 // machinePinger returns a func that pings realm's machine once and returns the round trip
-// in milliseconds: through the daemon for a managed machine, otherwise over a connection of
-// its own, which the returned close func closes.
+// in milliseconds: through the daemon (see throughDaemon), otherwise over a connection of its
+// own, which the returned close func closes.
 func machinePinger(cfgDirectory, realm string) (func() (int64, error), func(), error) {
-	if isStandaloneRealm(realm) {
+	if !throughDaemon(cfgDirectory, realm) {
 		conn, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, nil, err
@@ -392,20 +401,10 @@ func machinePinger(cfgDirectory, realm string) (func() (int64, error), func(), e
 	}, func() { _ = localSession.Leave() }, nil
 }
 
-// errPersistentStandalone is why desk machine connect and disconnect don't take a standalone
-// machine: they manage the daemon's connections, which are to managed machines only.
-func errPersistentStandalone(machine string) error {
-	return fmt.Errorf("%s is a standalone machine: persistent connections are for managed machines; "+
-		"commands connect to a standalone machine on each use", machine)
-}
-
 func connectMachine(cfgDirectory, machine string) error {
 	realm, err := machineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
-	}
-	if isStandaloneRealm(realm) {
-		return errPersistentStandalone(machine)
 	}
 	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
@@ -438,9 +437,6 @@ func disconnectMachine(cfgDirectory, machine string, all bool) error {
 	if err != nil {
 		return err
 	}
-	if isStandaloneRealm(realm) {
-		return errPersistentStandalone(machine)
-	}
 	kwargs := map[string]any{common.DisconnectKwargRealm: realm}
 	if err := session.Call(common.ProcedureDisconnect).Kwargs(kwargs).Execute().Err; err != nil {
 		return err
@@ -454,7 +450,7 @@ func showMachineInfo(cfgDirectory, machine, mode string) error {
 	if err != nil {
 		return err
 	}
-	rawData, err := fetchMachineInfo(cfgDirectory, realm, defaultMode(realm, mode))
+	rawData, err := fetchMachineInfo(cfgDirectory, realm, defaultMode(cfgDirectory, realm, mode))
 	if err != nil {
 		return err
 	}
@@ -531,7 +527,7 @@ func streamMachineLogs(cfgDirectory, machine, source string, follow bool, tail i
 		return err
 	}
 	return runUntilInterrupted("Stopping log stream...", func(ctx context.Context) error {
-		return deskconn.RunLogs(ctx, defaultMode(realm, mode), realm, cfgDirectory, source, follow, tail, since,
+		return deskconn.RunLogs(ctx, defaultMode(cfgDirectory, realm, mode), realm, cfgDirectory, source, follow, tail, since,
 			os.Stdout)
 	})
 }

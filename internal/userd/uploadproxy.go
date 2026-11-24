@@ -50,6 +50,11 @@ func ProxyUploadHandler(clients *ClientSessions, directory string) xconn.Invocat
 func uploadSession(ctx context.Context, clients *ClientSessions, realm, directory, mode string) (
 	common.StreamSession, func(), error,
 ) {
+	if mode != "" && common.IsStandaloneMachineRealm(realm) {
+		if err := common.LoadStandaloneTarget(directory, realm); err != nil {
+			return nil, nil, err
+		}
+	}
 	switch mode {
 	case deskconn.ModeDirect:
 		session, err := deskconn.ConnectMachineRealmP2PSession(ctx, realm, directory)

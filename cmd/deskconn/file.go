@@ -152,7 +152,7 @@ func listFiles(cfgDirectory, target, mode string) error {
 	if path != "" {
 		args = append(args, path)
 	}
-	return deskconn.RunExec(context.Background(), defaultMode(realm, mode), realm, cfgDirectory, "", args)
+	return deskconn.RunExec(context.Background(), defaultMode(cfgDirectory, realm, mode), realm, cfgDirectory, "", args)
 }
 
 func moveFile(cfgDirectory, src, dst, mode string) error {
@@ -201,7 +201,7 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 		if err != nil {
 			return err
 		}
-		if _, standalone := common.StandaloneTargetFor(realm); !standalone && !recursive {
+		if throughDaemon(cfgDirectory, realm) && !recursive {
 			info, err := os.Lstat(src)
 			if err != nil {
 				return err
@@ -270,7 +270,7 @@ func uploadViaDaemon(directory, realm, source, destination, mode string, streams
 // the local daemon, or when the daemon isn't running, over p2p, falling back to quic.
 func transferFiles(cfgDirectory, realm, mode string, transfer func(common.StreamSession) error) error {
 	ctx := context.Background()
-	mode = defaultMode(realm, mode)
+	mode = defaultMode(cfgDirectory, realm, mode)
 	viaQUIC := func() error {
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
@@ -328,7 +328,7 @@ func catFile(cfgDirectory, target, mode string) error {
 	if err != nil {
 		return err
 	}
-	switch defaultMode(realm, mode) {
+	switch defaultMode(cfgDirectory, realm, mode) {
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -420,7 +420,7 @@ func editFile(cfgDirectory, target, mode string) error {
 }
 
 func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
-	switch defaultMode(realm, mode) {
+	switch defaultMode(cfgDirectory, realm, mode) {
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
@@ -445,7 +445,7 @@ func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 }
 
 func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
-	switch defaultMode(realm, mode) {
+	switch defaultMode(cfgDirectory, realm, mode) {
 	case ModeRouted:
 		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
@@ -508,9 +508,9 @@ func currentCompletionArg() string {
 func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	machine, path := parseMachinePath(current)
 	realm, err := machineRealm(machine, cfgDirectory)
-	// Remote paths complete through the daemon's connection, which standalone machines
-	// don't have; connecting here could ask for a password.
-	if err != nil || isStandaloneRealm(realm) {
+	// Remote paths complete through the daemon's connection, so not for a standalone machine
+	// while it isn't running.
+	if err != nil || !throughDaemon(cfgDirectory, realm) {
 		return nil
 	}
 

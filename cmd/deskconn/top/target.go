@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,43 +31,15 @@ func standaloneTarget(machine common.StandaloneMachine) topTarget {
 	return topTarget{name: machine.Name, realm: common.StandaloneMachineRealm(machine.Name), standalone: machine.Name}
 }
 
-// streamMode is the --mode a shell, logs or port forward to target uses: for a machine of
-// the account, the daemon's connection to it when the daemon is running (P2P once it has
-// upgraded it, which it starts on connecting), otherwise a connection of its own through the
-// router (which, unlike trying a direct one first, doesn't print on the way).
-func (m *Model) streamMode(target topTarget) string {
-	if target.standalone == "" && m.daemonUp {
+// streamMode is the --mode a shell, logs or port forward uses: the daemon's
+// connection to it when the daemon is running (P2P once it has upgraded it, which it starts
+// on connecting), otherwise a connection of its own through the router (which, unlike trying
+// a direct one first, doesn't print on the way).
+func (m *Model) streamMode() string {
+	if m.daemonUp {
 		return ""
 	}
 	return deskconn.ModeRouted
-}
-
-// withTarget runs action on target, asking for the standalone machine's password first if it's needed
-// and not known yet.
-func (m *Model) withTarget(target topTarget, action func() tea.Cmd) tea.Cmd {
-	standalone := m.targets[target.standalone]
-	if standalone == nil || !standalone.NeedsPassword() {
-		return action()
-	}
-	m.dialog = &topPasswordDialog{
-		authID: standalone.AuthID,
-		name:   target.name,
-		entered: func(password string) tea.Cmd {
-			standalone.SetPassword(password)
-			return action()
-		},
-	}
-	return nil
-}
-
-// failed reports err from doing what to target, forgetting the standalone machine's password if it may
-// have been the wrong one, so it's asked for again next time.
-func (m *Model) failed(target topTarget, what string, err error) tea.Cmd {
-	if standalone := m.targets[target.standalone]; standalone != nil && standalone.PrivateKey == "" &&
-		strings.Contains(strings.ToLower(err.Error()), "auth") {
-		standalone.SetPassword("")
-	}
-	return m.flashErrorf("%s: %v", what, err)
 }
 
 // fetchConnected asks the local daemon which machines it holds connections to. Without a
@@ -93,21 +64,17 @@ func (m *Model) fetchConnected() tea.Cmd {
 
 // ping times a call to target's machine.
 func (m *Model) ping(target topTarget) tea.Cmd {
-	return m.withTarget(target, func() tea.Cmd {
-		return tea.Batch(m.setFlash("Pinging "+target.name+"…", false), func() tea.Msg {
-			start := time.Now()
-			err := m.remote.Ping(target.realm)
-			return topPingMsg{target: target, rtt: time.Since(start), err: err}
-		})
+	return tea.Batch(m.setFlash("Pinging "+target.name+"…", false), func() tea.Msg {
+		start := time.Now()
+		err := m.remote.Ping(target.realm)
+		return topPingMsg{target: target, rtt: time.Since(start), err: err}
 	})
 }
 
 // shell opens a shell on target in the terminal, which desk top hands over until it ends.
 func (m *Model) shell(target topTarget) tea.Cmd {
-	return m.withTarget(target, func() tea.Cmd {
-		shell := &topShell{target: target, mode: m.streamMode(target), cfgDirectory: m.cfgDirectory}
-		return tea.Exec(shell, func(err error) tea.Msg { return topShellDoneMsg{target: target, err: err} })
-	})
+	shell := &topShell{target: target, mode: m.streamMode(), cfgDirectory: m.cfgDirectory}
+	return tea.Exec(shell, func(err error) tea.Msg { return topShellDoneMsg{target: target, err: err} })
 }
 
 // topShell runs a shell on a machine, as desk shell does, in the terminal tea.Exec hands it.
@@ -150,10 +117,10 @@ type Remote interface {
 	Close()
 }
 
-// topSessions are the real Remote. Calls to a machine of the account go through the local
-// daemon when it's running, on its connection to the machine: P2P once it has upgraded it,
-// and with the keys already exchanged. Otherwise, and for standalone machines, they go on connections
-// of desk top's own, one per machine, kept for as long as they work.
+// topSessions are the real Remote. Calls go through the local daemon when it's running, on
+// its connection to the machine: P2P once it has upgraded it, and with the keys already
+// exchanged. Otherwise they go on connections of desk top's own, one per machine, kept for as
+// long as they work.
 type topSessions struct {
 	cfgDirectory string
 
@@ -186,12 +153,9 @@ const (
 	topDaemonTimeout = 2 * time.Second
 )
 
-// viaDaemon returns the local daemon's session if calls to realm's machine go through it:
-// for a machine of the account, while the daemon is running.
-func (s *topSessions) viaDaemon(realm string) *xconn.Session {
-	if _, standalone := common.StandaloneTargetFor(realm); standalone {
-		return nil
-	}
+// viaDaemon returns the local daemon's session while the daemon is running, which calls to
+// machines then go through.
+func (s *topSessions) viaDaemon() *xconn.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.daemon != nil && s.daemon.Connected() {
@@ -310,7 +274,7 @@ func (s *topSessions) Call(realm, procedure string, args, result any) error {
 			return err
 		}
 	}
-	if daemon := s.viaDaemon(realm); daemon != nil {
+	if daemon := s.viaDaemon(); daemon != nil {
 		resp, err := s.proxy(daemon, realm, common.ProcedureProxyFileOp, realm, procedure, payload)
 		if err != nil {
 			return err
@@ -341,7 +305,7 @@ func (s *topSessions) drop(realm string) {
 }
 
 func (s *topSessions) Ping(realm string) error {
-	if daemon := s.viaDaemon(realm); daemon != nil {
+	if daemon := s.viaDaemon(); daemon != nil {
 		_, err := s.proxy(daemon, realm, common.ProcedureProxyPing, realm)
 		return err
 	}
