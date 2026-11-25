@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -226,9 +225,6 @@ func cloudCycle(
 	client := &api.Client{SerializerSpec: api.CBORSerializerSpec, Authenticator: authenticator}
 	device, err := connection.OpenSession(initialization, credentials.Realm, client)
 	if err != nil {
-		if strings.Contains(err.Error(), "wamp.error.no_such_realm") {
-			return true, nil
-		}
 		return false, err
 	}
 	defer device.Close()

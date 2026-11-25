@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,8 +98,17 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	runContext, stop := context.WithCancel(ctx)
 	defer stop()
 	finished := make(chan error, 1)
+	missingRealm := make(chan struct{}, 2)
 	config := &app.CloudConfig{
-		OnError: func(err error) { t.Logf("cloud retry: %v", err) },
+		OnError: func(err error) {
+			t.Logf("cloud retry: %v", err)
+			if strings.Contains(err.Error(), "wamp.error.no_such_realm") {
+				select {
+				case missingRealm <- struct{}{}:
+				default:
+				}
+			}
+		},
 		Address: listener.Address, TLSConfig: &tls.Config{ServerName: "localhost", MinVersion: tls.VersionTLS13},
 		RootCertificates: [][]byte{listener.Certificate}, Realm: cloudRealm, MachineID: "machine",
 		CredentialsFile: credentialsPath, PrincipalsFile: principalsPath,
@@ -246,12 +256,16 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 		return reply.Err == nil && reply.ArgStringOr(0, "") == "reattached"
 	}, 3*time.Second, time.Millisecond)
 	cloudRouter.RemoveRealm(deviceRealm)
-	require.Eventually(
-		t,
-		func() bool { _, err := os.Stat(credentialsPath); return os.IsNotExist(err) },
-		3*time.Second,
-		time.Millisecond,
-	)
+	for range 2 {
+		select {
+		case <-missingRealm:
+		case <-ctx.Done():
+			t.Fatal("edge did not retry while its realm was missing")
+		}
+	}
+	savedCredentials, err := os.ReadFile(credentialsPath)
+	require.NoError(t, err)
+	require.Equal(t, data, savedCredentials)
 	stop()
 	select {
 	case err := <-finished:
