@@ -130,6 +130,7 @@ func TestCLICreateDetachResume(t *testing.T) {
 	d, _ := terminalDaemon(t)
 	first := runCLITerminal(t, d, common.TerminalControlMsg{Op: common.TerminalOpCreate})
 	pid := first.pid(t, "created")
+	require.NotContains(t, first.output.String(), "\x1b[2J", "a new session leaves the terminal's screen as it is")
 	first.typeKeys(t, "printf '\\033[?1049h\\033[?2004hin full screen'\n")
 	first.waitFor(t, "in full screen")
 
