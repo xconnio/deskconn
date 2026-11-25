@@ -107,5 +107,5 @@ jobs:
         run: |
           ci/prepare-release-sdk.sh "$RUNNER_TEMP/xconn-sdk" darwin_arm64
           export PKG_CONFIG_PATH="$RUNNER_TEMP/xconn-sdk/darwin_arm64/lib/pkgconfig"
-          go test -tags xconn_static -timeout=180s ./internal/common ./internal/connectivity ./internal/userd ./cmd/deskconn
+          go test -tags xconn_static -timeout=180s ./internal/common ./internal/connectivity ./internal/terminal ./internal/userd ./cmd/deskconn
           XCONN_RELEASE_SDK="$RUNNER_TEMP/xconn-sdk" ci/build-macos-release.sh "$RUNNER_TEMP/macos-release"
