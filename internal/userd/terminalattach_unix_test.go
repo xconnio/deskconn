@@ -34,6 +34,7 @@ type cliTerminal struct {
 	err     error
 
 	mu      sync.Mutex
+	daemon  *userd.Deskconn
 	servers []net.Conn // the machine's end of each connection
 	offline bool       // the machine can't be reached
 }
@@ -58,7 +59,7 @@ func (l *lockedBuffer) String() string {
 func runCLITerminal(t *testing.T, d *userd.Deskconn, req common.TerminalControlMsg) *cliTerminal {
 	t.Helper()
 	keys, input := io.Pipe()
-	c := &cliTerminal{keys: input, output: &lockedBuffer{}, done: make(chan struct{})}
+	c := &cliTerminal{keys: input, output: &lockedBuffer{}, done: make(chan struct{}), daemon: d}
 	dial := func(ctx context.Context, req common.TerminalControlMsg) (
 		*deskconn.TerminalStream, common.TerminalControlMsg, error) {
 		c.mu.Lock()
@@ -68,6 +69,7 @@ func runCLITerminal(t *testing.T, d *userd.Deskconn, req common.TerminalControlM
 		}
 		client, server := net.Pipe()
 		c.servers = append(c.servers, server)
+		d := c.daemon
 		c.mu.Unlock()
 		go d.ServeTerminalStream(server, terminalOwner) //nolint:contextcheck // serves as long as the stream
 		return deskconn.StartTerminal(ctx, client, func() { _ = client.Close() }, req)

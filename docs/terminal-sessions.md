@@ -152,13 +152,59 @@ that started it. Version 2 added the snapshot; a version 1 worker's attachment h
 `attach` never creates a session. Input sent while a connection is breaking isn't replayed: whatever
 didn't reach the machine is lost, so a command is never run twice.
 
+## Validation
+
+The tests run real workers, shells and, for the client, `desk shell`'s attachment, against a daemon
+in the test process; restarting the daemon is starting another on the same directory. The
+end-to-end scenarios are `internal/userd/terminalscenarios_unix_test.go`; the rest are in
+`internal/terminal` and `internal/userd`.
+
+| Scenario | Automated | Notes |
+| --- | --- | --- |
+| Connection drops during a long command | `TestScenarioOutputAcrossReconnect`, `TestCLIReconnects` | Every line arrives; only the screen redrawn is repeated |
+| Keys typed while reconnecting | `TestScenarioInputWhileReconnectingIsDropped` | Dropped, never run later |
+| Daemon restarts, updates or is killed during a command | `TestScenarioDaemonRestartWhileCommandRuns`, `TestTerminalSessionSurvivesDaemonRestart` | Kill and update: real-device checklist |
+| Over 16 MiB of output while detached | `TestScenarioOutputPastHistoryLimitWhileDetached`, `TestDetachedOutputDoesNotBlock` | Command never blocks; `history_gap` reported |
+| Resources reclaimed when sessions end | `TestScenarioEndedSessionsFreeTheirHistory`, `TestShellExitEndsSession` | |
+| Vim, htop on the alternate screen | `TestVimRestoresAlternateScreen`, `TestCLICreateDetachResume` | htop: real-device checklist |
+| Takeover by the same user | `TestCLITakeover`, `TestTerminalSessionOwnership` | |
+| Another user | `TestTerminalSessionOwnership`, `TestOtherOwnersSessionsAreHidden` | Reported as `not_found` |
+| Worker failure, machine reboot | `TestScenarioWorkerFailureEndsTheSession`, `TestDeadWorkerIsUnavailable` | No replacement shell |
+| Shell exits, session terminated | `TestCLICreateDetachResume`, `TestTerminalSessionExit`, `TestTerminateKillsSessionProcesses` | |
+| Routed and direct transports | — | Real-device checklist; an attachment doesn't move between them |
+| Client sleeps and resumes | `TestCLIReconnects` (a drop) | Reattached within 5 minutes; after that, `--resume` |
+| Browser refresh, mobile app restart | — | Gap: the web and mobile apps don't use persistent sessions yet |
+| Access revoked, attached or detached | — | Gap: revocation isn't built (it needs per-key identities) |
+
+### Real-device checklist
+
+On each platform, against a machine running the new daemon (`desk shell MACHINE --list` works),
+in `desk shell MACHINE`:
+
+1. Run `for i in $(seq 1000); do echo count-$i; sleep 0.5; done`, detach (Ctrl+] then d), and
+   `--resume` a minute later: the count went on, and count-1 is in the terminal's scrollback.
+2. With it attached, take the network away for a minute and give it back: `desk shell` says it's
+   reconnecting, then shows the same shell (`echo $$` is the same as before), with nothing missed.
+3. Restart the daemon (`systemctl --user restart deskconn`; on macOS and Windows, the service's
+   equivalent), then kill it (`systemctl --user kill -s SIGKILL --kill-whom=main deskconn`), then
+   update it (`desk self update`): each time, the session reconnects to the same shell.
+4. Run `htop` or `vim`, detach, resume: it's as it was, and quitting it returns to the shell's screen.
+5. From a second terminal, `--resume` fails with `add --takeover`; `--resume ID --takeover`
+   attaches, and the first terminal says it was taken over.
+6. Repeat 1 with `--mode routed` and `--mode direct`.
+7. `exit 3` ends `desk shell` with status 3; `--terminate ID` ends a detached session; `--list` then
+   shows neither.
+8. Reboot the machine with a session detached: `--list` is empty, and `--resume ID` fails with
+   "no session".
+
 ## Platform status
 
 | | Linux | macOS | Windows |
 | --- | --- | --- | --- |
 | Worker survives daemon restart and kill | Validated with a systemd user service: `systemctl kill -s SIGKILL --kill-whom=all`, `systemctl restart`, and a binary update | Not validated: workers lead their own process group, which launchd's job cleanup leaves alone | Not validated: breakaway from the task's job, if the job allows it |
 | Terminate reaches the whole session | Validated, including jobs in their own process groups | Process group only: there's no `/proc` to find the rest of the session | Job object (not validated) |
-| Automated tests | `internal/terminal`, `internal/userd` (real worker processes, and Vim) | Same tests; not run in CI here | Build only (the screen's tests are platform-independent) |
+| Automated tests | `internal/terminal`, `internal/userd` (real worker processes, and Vim), in CI | Same tests, in CI | Build only (the screen's tests are platform-independent) |
+| Real-device checklist | 1, 4, 5, 7 and the restart in 3, against a standalone daemon; the rest not run | Not run | Not run |
 
 Known gaps:
 

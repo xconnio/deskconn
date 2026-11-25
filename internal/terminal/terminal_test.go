@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -275,8 +276,13 @@ func TestTerminateKillsSessionProcesses(t *testing.T) {
 
 	require.ErrorIs(t, m.Terminate(ctx, "mallory", id), ErrNotFound, "only the owner can terminate it")
 	require.NoError(t, m.Terminate(ctx, owner, id))
-	require.Eventually(t, func() bool { return !alive(pid) && !alive(job) }, waitTime, 20*time.Millisecond,
-		"terminating kills the shell and its jobs")
+	// On macOS, terminating reaches the shell's process group only: no /proc to find the job.
+	killsJob := runtime.GOOS == "linux"
+	if !killsJob {
+		t.Cleanup(func() { _ = syscall.Kill(job, syscall.SIGKILL) })
+	}
+	require.Eventually(t, func() bool { return !alive(pid) && (!killsJob || !alive(job)) }, waitTime,
+		20*time.Millisecond, "terminating kills the shell and its jobs")
 	require.Eventually(t, func() bool {
 		_, err := os.Stat(m.SocketPath(id))
 		return os.IsNotExist(err)
