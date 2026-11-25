@@ -1,0 +1,271 @@
+# Production configuration for the Deskconn Cloud Router.
+version: '1'
+
+config:
+  loglevel: info
+
+realms:
+  - name: com.deskconn
+    meta_api: true
+    disclose_caller: true
+    roles:
+      - name: 'xconnio:deskconn:router'
+        permissions:
+          - uri: 'com.deskconn.realm.list'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.cra.verify'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.cryptosign.verify'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.realm.add'
+            match: exact
+            allow_register: true
+          - uri: 'com.deskconn.realm.remove'
+            match: exact
+            allow_register: true
+      - name: 'xconnio:deskconn:cloud:service:account'
+        permissions:
+          - uri: 'com.deskconn.'
+            match: prefix
+            allow_register: true
+          - uri: 'com.deskconn.realm.add'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.realm.remove'
+            match: exact
+            allow_call: true
+          - uri: 'wamp.session.kill_by_authid'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.desktop.*.key.add'
+            match: wildcard
+            allow_publish: true
+          - uri: 'com.deskconn.desktop.*.key.remove'
+            match: wildcard
+            allow_publish: true
+          - uri: 'com.deskconn.desktop.*.detach'
+            match: wildcard
+            allow_publish: true
+      - name: 'xconnio:deskconn:app:web'
+        permissions: &signup
+          - uri: 'com.deskconn.account.create'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.verify'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.otp.resend'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.password.forget'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.password.reset'
+            match: exact
+            allow_call: true
+      - name: 'xconnio:deskconn:app:mobile'
+        permissions: *signup
+      - name: 'xconnio:deskconn:ci'
+        permissions:
+          - uri: 'com.deskconn.app.update'
+            match: exact
+            allow_call: true
+      - name: 'user:cra'
+        permissions:
+          - uri: 'com.deskconn.account.login'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.login.verify'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.desktop.attach'
+            match: exact
+            allow_call: true
+      - name: 'user:cryptosign'
+        permissions:
+          - uri: 'com.deskconn.webrtc.'
+            match: prefix
+            allow_call: true
+            allow_register: true
+            allow_subscribe: true
+            allow_publish: true
+          - uri: 'com.deskconn.organization.'
+            match: prefix
+            allow_call: true
+          - uri: 'com.deskconn.account.principal.'
+            match: prefix
+            allow_call: true
+          - uri: 'com.deskconn.desktop.access.'
+            match: prefix
+            allow_call: true
+          - uri: 'com.deskconn.desktop.invitation.'
+            match: prefix
+            allow_call: true
+          - uri: 'com.deskconn.device.'
+            match: prefix
+            allow_call: true
+          - uri: 'com.deskconn.app.'
+            match: prefix
+            allow_call: true
+          - uri: 'com.deskconn.account.get'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.update'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.delete'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.desktop.list'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.desktop.update'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.desktop.access'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.desktop.detach'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.coturn.credentials.create'
+            match: exact
+            allow_call: true
+
+realm_source:
+  control_realm: com.deskconn
+  role: 'xconnio:deskconn:router'
+  list: com.deskconn.realm.list
+  add: com.deskconn.realm.add
+  remove: com.deskconn.realm.remove
+  authentication:
+    wampcra: com.deskconn.account.cra.verify
+    cryptosign: com.deskconn.account.cryptosign.verify
+    control_roles:
+      - 'user:cra'
+      - 'user:cryptosign'
+    realm_roles:
+      - name: 'user:member'
+        permissions:
+          - &machine_call
+            uri: 'com.deskconn.'
+            match: prefix
+            allow_call: true
+          - &machine_remotecontrol
+            uri: 'com.deskconn.remotecontrol.'
+            match: prefix
+            allow_call: true
+          - &machine_media
+            uri: 'com.deskconn.media.'
+            match: prefix
+            allow_call: true
+          - &machine_publish_candidate
+            uri: 'com.deskconn.webrtc.answerer.on_candidate'
+            match: exact
+            allow_publish: true
+          - &machine_subscribe_candidate
+            uri: 'com.deskconn.webrtc.offerer.on_candidate'
+            match: exact
+            allow_subscribe: true
+      - name: 'user:owner'
+        permissions: &machine_admin
+          - *machine_call
+          - *machine_remotecontrol
+          - *machine_media
+          - *machine_publish_candidate
+          - *machine_subscribe_candidate
+          - uri: 'com.deskconn.admin.'
+            match: prefix
+            allow_call: true
+      - name: 'user:admin'
+        permissions: *machine_admin
+    realm_machine_role:
+      name: 'xconnio:deskconn:desktop:{authid}'
+      permissions:
+        - uri: 'com.deskconn.'
+          match: prefix
+          allow_register: true
+        - uri: 'com.deskconn.admin.'
+          match: prefix
+          allow_register: true
+        - uri: 'com.deskconn.remotecontrol.'
+          match: prefix
+          allow_register: true
+        - uri: 'com.deskconn.media.'
+          match: prefix
+          allow_register: true
+        - uri: 'com.deskconn.webrtc.answerer.on_candidate'
+          match: exact
+          allow_subscribe: true
+        - uri: 'wamp.session.on_leave'
+          match: exact
+          allow_subscribe: true
+        - uri: 'com.deskconn.webrtc.offerer.on_candidate'
+          match: exact
+          allow_publish: true
+        - uri: 'com.deskconn.desktop.detach'
+          match: exact
+          allow_call: true
+    control_machine_role:
+      name: 'xconnio:deskconn:desktop:{authid}'
+      permissions:
+        - uri: 'com.deskconn.desktop.access.key.list'
+          match: exact
+          allow_call: true
+        - uri: 'com.deskconn.coturn.credentials.create'
+          match: exact
+          allow_call: true
+        - uri: 'com.deskconn.desktop.{authid}.key.add'
+          match: exact
+          allow_subscribe: true
+        - uri: 'com.deskconn.desktop.{authid}.key.remove'
+          match: exact
+          allow_subscribe: true
+        - uri: 'com.deskconn.desktop.{authid}.detach'
+          match: exact
+          allow_subscribe: true
+
+transports:
+  - type: rawsocket
+    listener: tcp
+    address: 0.0.0.0:8084
+    serializers: [json, cbor, msgpack]
+  - type: quic
+    listener: udp
+    address: '0.0.0.0:8081'
+    tls:
+      certificate: /etc/letsencrypt/live/api.deskconn.com/fullchain.pem
+      key: /etc/letsencrypt/live/api.deskconn.com/privkey.pem
+  - type: webtransport
+    listener: udp
+    address: '0.0.0.0:8082'
+    path: /wamp
+    tls:
+      certificate: /etc/letsencrypt/live/api.deskconn.com/fullchain.pem
+      key: /etc/letsencrypt/live/api.deskconn.com/privkey.pem
+
+authenticators:
+  cryptosign:
+    - authid: deskconn-account-service
+      realm: com.deskconn
+      role: 'xconnio:deskconn:cloud:service:account'
+      authorized_keys:
+        - 'c98fb454dfda50be26b74818d3c20caf6810970b9de4a01fe5cd6282603400f1'
+    - authid: deskconn-web-app
+      realm: com.deskconn
+      role: 'xconnio:deskconn:app:web'
+      authorized_keys:
+        - 'f71727af7b6fa2007d59253486a4dd24d9c18df64a1f5dfa17785530214ec781'
+    - authid: deskconn-mobile-app
+      realm: com.deskconn
+      role: 'xconnio:deskconn:app:mobile'
+      authorized_keys:
+        - 'c318732cd9dadb040ce79dc2559bfb7d7de8187d10d14b62393261e6cae1c216'
+    - authid: deskconn-ci
+      realm: com.deskconn
+      role: 'xconnio:deskconn:ci'
+      authorized_keys:
+        - 'af12b0d04d8e2e468e31115d6c7ca665ff39d7dd78455ae2e3f73f61962e16bb'

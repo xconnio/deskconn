@@ -1,0 +1,56 @@
+name: Deploy Deskconn Cloud Router
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-router-production
+
+jobs:
+  deploy:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    environment: cloud-router-production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v7
+        with:
+          repository: xconnio/xconn
+          ref: 2386ce960c6d8b255d00d3d1bbbe90570e97f8bd
+          path: xconn-source
+          persist-credentials: false
+
+      - name: Build XConn
+        working-directory: xconn-source
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          cargo +1.99.0 build --release --locked -p xconn --features router --bin xconn
+
+      - name: Deploy to production
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$RUNNER_TEMP/cloud-router-key"
+          hosts="$RUNNER_TEMP/cloud-router-known-hosts"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          printf '%s\n' "$VPS_SSH_KEY" > "$key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$hosts"
+          ssh_options=(-i "$key" -o IdentitiesOnly=yes -o BatchMode=yes
+            -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$hosts")
+          target="$VPS_USER@$VPS_HOST"
+          release_dir=$(ssh "${ssh_options[@]}" "$target" 'umask 077; mktemp -d /root/deskconn-cloud-router.XXXXXXXX')
+          [[ "$release_dir" =~ ^/root/deskconn-cloud-router\.[a-zA-Z0-9]{8}$ ]]
+          scp "${ssh_options[@]}" deploy/cloud-router/{router.yaml,deploy.sh} \
+            xconn-source/target/release/xconn "$target:$release_dir/"
+          ssh "${ssh_options[@]}" "$target" "bash '$release_dir/deploy.sh'"
