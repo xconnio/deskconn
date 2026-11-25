@@ -109,3 +109,11 @@ func (m *Manager) HistoryLimit(id string) (int, error) {
 	rec, err := readRecord(m.dir, id)
 	return rec.HistoryLimit, err
 }
+
+// Modes is the screen's modes, but for the cursor's position and the title.
+func (s *screen) Modes() string {
+	return fmt.Sprintf("pen=%+v origin=%v charsets=%v/%v region=%d-%d wrap=%v ins=%v lnm=%v vis=%v style=%d "+
+		"keypad=%v modkeys=%d kitty=%d modes=%v", s.cur.pen, s.cur.origin, s.cur.charsets, s.cur.shifted,
+		s.top, s.bottom, s.autowrap, s.insert, s.newline, s.cursorVisible, s.cursorStyle, s.appKeypad,
+		s.modifyKeys, len(s.kittyKeys), s.privateModes)
+}

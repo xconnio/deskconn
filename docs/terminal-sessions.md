@@ -4,8 +4,33 @@ A persistent terminal session keeps its shell, and everything running in it, thr
 disconnecting, the network dropping, and the DeskConn daemon restarting, updating or crashing. A
 client detaches and attaches again later, from the same or another client of the same user.
 
-This is the machine side, with restoring the screen on attach. The client controls (`desk shell
---resume` and the like) and access revocation build on it.
+`desk shell MACHINE` opens one. Access revocation is yet to build on it.
+
+## Using it
+
+```
+desk shell office                              # a new session
+desk shell office --list                       # your sessions there
+desk shell office --resume ID                  # attach to one
+desk shell office --resume ID --takeover       # attach to one attached elsewhere, detaching it there
+desk shell office --terminate ID               # end one and its processes
+```
+
+- **Ctrl+] then d** detaches: the session runs on, and `desk shell` prints the command to resume it.
+  Ctrl+] typed twice sends one Ctrl+]; followed by any other key, it's sent along with that key. Ctrl+C,
+  Ctrl+D and `exit` go to the shell as ever.
+- **A lost connection is attached again**, to the same session, for up to 5 minutes: `desk shell` says
+  it's reconnecting, and the keys typed meanwhile are dropped. It attaches with `since`, so only the
+  history it missed is sent, and says so if some of that is gone. A dead connection is noticed when
+  its transport gives up on it, which takes QUIC about 30 s.
+- **Every `desk shell MACHINE` creates a session**; only `--resume` attaches to one, and it never creates
+  one. Another attachment taking over ends `desk shell` with status 1; the shell exiting, with its status.
+- Leaving the session, `desk shell` returns the local terminal to its normal screen and turns off the
+  modes the session's programs set (mouse reporting, bracketed paste, keypad modes and the like), as it
+  tracks them from the output.
+- `desk shell MACHINE COMMAND` is unchanged: the command runs without a session, and ends with its
+  connection. So does `desk shell MACHINE` with input that isn't a terminal (a pipe, a file), and, with
+  a warning, on a machine without persistent sessions (an older DeskConn).
 
 ## How it works
 
@@ -141,7 +166,10 @@ Known gaps:
   since Windows locks a running executable, and that includes workers. Keeping them needs the
   installer to stop only the daemon and move the locked executable aside.
 - **Agent forwarding** (`desk shell -A`) points `SSH_AUTH_SOCK` at the forwarding of the connection
-  that created the session; it doesn't follow later attachments.
+  that created the session; it doesn't follow later attachments, so `-A` goes with new sessions only.
+- **An attachment stays on the connection it started on.** Today's shell moves to a direct (WebRTC)
+  connection once there is one; an attachment doesn't, but attaching again uses the daemon's connection
+  as it is then.
 - Machine reboots, and a worker failing, end the session: attaching then fails with `not_found`, and
   no replacement shell is started.
 - **While detached, terminal queries go unanswered.** A program asking the terminal something (its

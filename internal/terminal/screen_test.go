@@ -255,3 +255,24 @@ func BenchmarkScreen(b *testing.B) {
 		s.Write(chunk)
 	}
 }
+
+func TestMirrorReset(t *testing.T) {
+	for _, out := range sessionOutput {
+		t.Run(fmt.Sprintf("%q", out), func(t *testing.T) {
+			m := NewMirror(40, 12)
+			s := NewScreen(40, 12, historyLimit)
+			for _, o := range sessionOutput {
+				m.Write([]byte(o))
+				s.Write([]byte(o))
+				if o == out {
+					break
+				}
+			}
+			s.Write(m.Reset())
+			// What the session's output set is off, as on a fresh terminal.
+			fresh := NewScreen(40, 12, historyLimit)
+			require.False(t, s.AltActive())
+			require.Equal(t, fresh.Modes(), s.Modes())
+		})
+	}
+}

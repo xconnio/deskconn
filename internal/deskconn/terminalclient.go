@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 // TerminalError is a machine refusing a terminal request, with its common.TerminalErr code.
@@ -122,4 +123,96 @@ func (ts *TerminalStream) Recv() (kind byte, msg common.TerminalControlMsg, outp
 // Close closes the stream. For an attachment, that detaches it: the session runs on.
 func (ts *TerminalStream) Close() {
 	ts.closeOnce.Do(ts.cleanup)
+}
+
+// ErrTerminalUnsupported is a machine without persistent terminal sessions: its DeskConn is
+// older, or its terminal app is disabled.
+var ErrTerminalUnsupported = errors.New("the machine has no persistent terminal sessions")
+
+// openTerminalStream opens a stream to realm's machine's terminal sessions, over the
+// connection mode selects, as runStreamCommand does (without moving it to P2P later: an
+// attachment that loses its connection attaches again over whichever the daemon has).
+func openTerminalStream(ctx context.Context, mode, realm, cfgDirectory string) (net.Conn, func(), error) {
+	var session common.StreamSession
+	var release func()
+	transport := "QUIC"
+	switch mode {
+	case ModeDirect:
+		p2p, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
+		if err != nil {
+			return nil, nil, err
+		}
+		session, release, transport = p2p, func() { _ = p2p.Close() }, "WebRTC"
+	default:
+		if mode != ModeRouted {
+			daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
+			if err == nil {
+				session, release, transport = daemon, func() { _ = daemon.Close() }, "local daemon"
+				break
+			} else if !errors.Is(err, ErrDaemonUnavailable) {
+				return nil, nil, err
+			}
+		}
+		quic, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+		if err != nil {
+			return nil, nil, err
+		}
+		session, release = quic, func() { _ = quic.Connection().Close() }
+	}
+	stream, err := common.OpenRPCStream(ctx, session, common.ProcedureTerminalStream, false)
+	if err != nil {
+		release()
+		var application *xconn.Error
+		if errors.As(err, &application) && application.URI == common.ErrNoSuchProcedure {
+			return nil, nil, ErrTerminalUnsupported
+		}
+		return nil, nil, fmt.Errorf("open terminal RPC %s for realm %q via %s: %w",
+			common.ProcedureTerminalStream, realm, transport, err)
+	}
+	return stream, release, nil
+}
+
+// TerminalDial is the TerminalDialer of realm's machine, over the connection mode selects.
+// Failing to reach the machine is a *ConnectionError.
+func TerminalDial(mode, realm, cfgDirectory string) TerminalDialer {
+	return func(ctx context.Context, req common.TerminalControlMsg) (
+		*TerminalStream, common.TerminalControlMsg, error) {
+		// ctx and a timeout bound setup; the stream, once open, lasts until it's closed.
+		setupCtx, finishSetup, cancel := shellSetupContext(context.WithoutCancel(ctx), shellSetupTimeout)
+		stopAbort := context.AfterFunc(ctx, cancel)
+		stream, release, err := openTerminalStream(setupCtx, mode, realm, cfgDirectory)
+		var ts *TerminalStream
+		var reply common.TerminalControlMsg
+		if err == nil {
+			ts, reply, err = StartTerminal(setupCtx, stream, func() { _ = stream.Close(); release(); cancel() }, req)
+		}
+		aborted := !stopAbort()
+		if setupErr := finishSetup(); (setupErr != nil || aborted) && err == nil {
+			ts.Close()
+			err = fmt.Errorf("terminal connection setup: %w", context.Cause(setupCtx))
+		}
+		if err != nil {
+			cancel()
+			var refused *TerminalError
+			if errors.As(err, &refused) || errors.Is(err, ErrTerminalUnsupported) {
+				return nil, reply, err
+			}
+			return nil, reply, &ConnectionError{Err: err}
+		}
+		return ts, reply, nil
+	}
+}
+
+// TerminalRequest makes req, a list or a terminate, of realm's machine.
+func TerminalRequest(ctx context.Context, mode, realm, cfgDirectory string, req common.TerminalControlMsg) (
+	common.TerminalControlMsg, error) {
+	if _, err := clientAuthenticator(realm, cfgDirectory); err != nil {
+		return common.TerminalControlMsg{}, err
+	}
+	ts, reply, err := TerminalDial(mode, realm, cfgDirectory)(ctx, req)
+	if err != nil {
+		return reply, err
+	}
+	ts.Close()
+	return reply, nil
 }

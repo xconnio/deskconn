@@ -79,7 +79,13 @@ Examples:
 }
 
 func shellHelpExamples() []string {
-	return []string{"desk shell office", "desk shell office -- uname -a", "desk shell -A office"}
+	return []string{
+		"desk shell office                  # a new session; Ctrl+] then d detaches",
+		"desk shell office --list",
+		"desk shell office --resume ID",
+		"desk shell office -- uname -a",
+		"desk shell -A office",
+	}
 }
 
 func commandHelpRows(commands []*kingpin.CmdModel, names ...string) [][2]string {
