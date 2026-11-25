@@ -25,6 +25,7 @@ desk shell office --terminate ID               # end one and its processes
   its transport gives up on it, which takes QUIC about 30 s.
 - **Every `desk shell MACHINE` creates a session**; only `--resume` attaches to one, and it never creates
   one. Another attachment taking over ends `desk shell` with status 1; the shell exiting, with its status.
+  A new session starts below what the terminal shows, as a plain shell does; attaching again redraws it.
 - Leaving the session, `desk shell` returns the local terminal to its normal screen and turns off the
   modes the session's programs set (mouse reporting, bracketed paste, keypad modes and the like), as it
   tracks them from the output.

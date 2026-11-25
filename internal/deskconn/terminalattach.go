@@ -105,12 +105,14 @@ func (a *TerminalAttachment) Run(ctx context.Context, req common.TerminalControl
 	go a.pingLoop(pingDone)
 
 	gapNotice := "older output of this session is no longer kept"
+	// A new session has no screen to restore: the terminal's is left as it is.
+	restore := req.Op != common.TerminalOpCreate
 	for {
-		seen, end, exitCode, err := a.attached(ts, reply, gapNotice)
+		seen, end, exitCode, err := a.attached(ts, reply, gapNotice, restore)
 		if err == nil {
 			return end, session, exitCode, nil
 		}
-		gapNotice = "some output while disconnected is no longer kept"
+		gapNotice, restore = "some output while disconnected is no longer kept", true
 
 		a.notice("connection lost; reconnecting (Ctrl+] d detaches)")
 		ts, reply, err = a.reconnect(ctx, common.TerminalControlMsg{Op: common.TerminalOpAttach,
@@ -133,9 +135,10 @@ func (a *TerminalAttachment) Run(ctx context.Context, req common.TerminalControl
 var errTerminalDetached = errors.New("detached")
 
 // attached runs an attachment until it ends, or its connection does (err set). seen is the
-// output offset the terminal has then seen up to.
-func (a *TerminalAttachment) attached(ts *TerminalStream, reply common.TerminalControlMsg, gapNotice string) (
-	seen uint64, end TerminalEnd, exitCode int, err error) {
+// output offset the terminal has then seen up to. Unless restore is set, the snapshot isn't
+// written to the terminal.
+func (a *TerminalAttachment) attached(ts *TerminalStream, reply common.TerminalControlMsg, gapNotice string,
+	restore bool) (seen uint64, end TerminalEnd, exitCode int, err error) {
 	a.mu.Lock()
 	if a.detaching {
 		a.mu.Unlock()
@@ -172,15 +175,17 @@ func (a *TerminalAttachment) attached(ts *TerminalStream, reply common.TerminalC
 			return seen, 0, 0, err
 		}
 		if kind == common.ShellMsgData {
-			a.outMu.Lock()
-			_, _ = a.output.Write(output)
-			a.mirror.Write(output)
-			a.outMu.Unlock()
-			if n := min(snapshot, len(output)); n > 0 {
-				snapshot -= n
-				output = output[n:]
+			n := min(snapshot, len(output))
+			snapshot -= n
+			shown := output
+			if !restore {
+				shown = output[n:]
 			}
-			seen += uint64(len(output))
+			a.outMu.Lock()
+			_, _ = a.output.Write(shown)
+			a.mirror.Write(shown)
+			a.outMu.Unlock()
+			seen += uint64(len(output[n:]))
 			continue
 		}
 		switch msg.Op {
