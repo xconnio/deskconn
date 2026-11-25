@@ -34,10 +34,16 @@ type client struct {
 
 func attachClient(t *testing.T, m *Manager, id string, cols, rows int, opts AttachOptions) *client {
 	t.Helper()
+	return attachScreen(t, m, id, NewScreen(cols, rows, 64<<20), cols, rows, opts)
+}
+
+// attachScreen attaches a client showing screen, a terminal that was attached before.
+func attachScreen(t *testing.T, m *Manager, id string, screen *Screen, cols, rows int, opts AttachOptions) *client {
+	t.Helper()
 	opts.Cols, opts.Rows = uint16(cols), uint16(rows)
 	a, err := m.Attach(context.Background(), owner, id, opts)
 	require.NoError(t, err)
-	c := &client{a: a, screen: NewScreen(cols, rows, 64<<20), snapshot: a.Snapshot, ended: make(chan struct{})}
+	c := &client{a: a, screen: screen, snapshot: a.Snapshot, ended: make(chan struct{})}
 	go func() {
 		defer close(c.ended)
 		for {
@@ -197,10 +203,7 @@ func TestSnapshotHandover(t *testing.T) {
 	require.NoError(t, c.a.Close())
 	<-c.ended
 	seen := c.seen()
-	again := attachClient(t, m, id, 80, 24, AttachOptions{Since: &seen})
-	again.mu.Lock()
-	again.screen = c.screen
-	again.mu.Unlock()
+	again := attachScreen(t, m, id, c.screen, 80, 24, AttachOptions{Since: &seen, Token: c.a.Token()})
 	again.waitText(t, `done\n\$$`)
 	require.Greater(t, again.seen(), again.a.Offset+10000, "output went on after the second snapshot")
 

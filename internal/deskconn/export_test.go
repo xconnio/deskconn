@@ -36,3 +36,8 @@ func RunShellStdin(stream net.Conn, key []byte, stdin io.Reader, forwardEOF bool
 var FinishShellHandshake = finishShellHandshake
 
 var ShellSetupContext = shellSetupContext
+
+// DetachKeys finds the detach keys in what the user types.
+type DetachKeys = detachKeys
+
+func (k *detachKeys) Filter(in []byte) ([]byte, bool) { return k.filter(in) }
