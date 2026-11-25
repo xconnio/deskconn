@@ -1,7 +1,9 @@
 package userd
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,11 +27,19 @@ import (
 // and disabled like any other app.
 
 const (
-	manifestRoot      = "app.yaml"
-	manifestMaxFiles  = 64
-	manifestMaxBytes  = 256 << 10
-	manifestMaxNodes  = 10000
-	manifestDirectory = "manifests"
+	manifestRoot     = "app.yaml"
+	manifestMaxFiles = 64
+	// manifestMaxYAMLBytes caps an app's YAML files in all.
+	manifestMaxYAMLBytes = 256 << 10
+	manifestMaxNodes     = 10000
+	manifestDirectory    = "manifests"
+	// manifestIconExtension is the extension of an app's icon files, which are PNG.
+	manifestIconExtension = ".png"
+	// manifestMaxIconBytes caps each of an app's PNG files, and manifestMaxIconsBytes all of
+	// them, as images. With the YAML, an app's files stay well within the router's 1 MiB
+	// message, the PNGs base64 encoded.
+	manifestMaxIconBytes  = 64 << 10
+	manifestMaxIconsBytes = 256 << 10
 )
 
 var manifestIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
@@ -51,6 +61,8 @@ type manifestApp struct {
 	app *app
 	// files are its YAML files by slash-separated path, app.yaml at the root.
 	files map[string]string
+	// icons are the PNG files its icons name, as images, by the same paths.
+	icons map[string][]byte
 	// resolved is app.yaml with screens resolved: a map of screen id to the screen, each
 	// include replaced by its file's contents under block.
 	resolved map[string]any
@@ -75,24 +87,30 @@ func resolveManifest(files map[string]string) (*manifestApp, error) {
 	if len(files) > manifestMaxFiles {
 		return nil, fmt.Errorf("an app can have at most %d files", manifestMaxFiles)
 	}
-	size := 0
+	yamlFiles, pngFiles := map[string]string{}, map[string]string{}
+	yamlSize := 0
 	for name, content := range files {
 		if err := checkManifestPath(name); err != nil {
 			return nil, err
 		}
-		size += len(content)
+		if path.Ext(name) == manifestIconExtension {
+			pngFiles[name] = content
+			continue
+		}
+		yamlFiles[name] = content
+		yamlSize += len(content)
 	}
-	if size > manifestMaxBytes {
-		return nil, fmt.Errorf("an app can have at most %d KiB of YAML", manifestMaxBytes>>10)
+	if yamlSize > manifestMaxYAMLBytes {
+		return nil, fmt.Errorf("an app can have at most %d KiB of YAML", manifestMaxYAMLBytes>>10)
 	}
 
-	r := &manifestResolver{files: files}
+	r := &manifestResolver{files: yamlFiles}
 	root, err := r.load(manifestRoot)
 	if err != nil {
 		return nil, err
 	}
 	var header manifestHeader
-	if err := decodeManifest(files[manifestRoot], &header); err != nil {
+	if err := decodeManifest(yamlFiles[manifestRoot], &header); err != nil {
 		return nil, fmt.Errorf("%s: %w", manifestRoot, err)
 	}
 
@@ -158,6 +176,41 @@ func resolveManifest(files map[string]string) (*manifestApp, error) {
 			}
 		}
 	})
+	// Icons are https URLs, the app's own PNG files or names (see common.ManifestIcons). Only
+	// the PNG files the app's icons name are kept: others, such as a draft screen's that
+	// nothing includes yet, are left out, and don't count against the budget.
+	icons := map[string][]byte{}
+	iconsSize := 0
+	common.ManifestIcons(root, func(icon string) {
+		switch {
+		case common.IsManifestIconFile(icon):
+			if _, ok := icons[icon]; ok {
+				return
+			}
+			content, ok := pngFiles[icon]
+			if !ok {
+				problem("icon %s doesn't exist", icon)
+				return
+			}
+			data, err := decodeManifestPNG(content)
+			if err != nil {
+				problem("%s: %w", icon, err)
+				return
+			}
+			icons[icon] = data
+			iconsSize += len(data)
+		case strings.Contains(icon, "://") && !strings.HasPrefix(icon, "https://"):
+			problem("icon %s must be an https URL or a PNG file in the app", icon)
+		}
+	})
+	if iconsSize > manifestMaxIconsBytes {
+		problem("an app's PNG files can be at most %d KiB in all", manifestMaxIconsBytes>>10)
+	}
+	appSection, _ := root["app"].(map[string]any)
+	appIcon, ok := appSection["icon"].(string)
+	if _, set := appSection["icon"]; set && !ok {
+		problem("app.icon must be one icon, not one per state")
+	}
 	if len(problems) > 0 {
 		return nil, errors.Join(problems...)
 	}
@@ -166,10 +219,12 @@ func resolveManifest(files map[string]string) (*manifestApp, error) {
 		app: &app{
 			ID:          header.App.ID,
 			Name:        header.App.Name,
+			Icon:        appIcon,
 			KeyExchange: header.API.KeyExchange,
 			Requires:    header.Requires,
 		},
-		files:    files,
+		files:    yamlFiles,
+		icons:    icons,
 		resolved: root,
 	}, nil
 }
@@ -187,15 +242,34 @@ func checkReachable(procedure string) error {
 	return nil
 }
 
-// checkManifestPath reports whether name is a YAML file path inside the app's directory.
+// checkManifestPath reports whether name is a YAML or PNG file path inside the app's directory.
 func checkManifestPath(name string) error {
 	if name != path.Clean(name) || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
 		return fmt.Errorf("%s: files must be inside the app's directory", name)
 	}
-	if path.Ext(name) != ".yaml" {
-		return fmt.Errorf("%s: only .yaml files are allowed", name)
+	if ext := path.Ext(name); ext != ".yaml" && ext != manifestIconExtension {
+		return fmt.Errorf("%s: only .yaml and .png files are allowed", name)
 	}
 	return nil
+}
+
+// decodeManifestPNG returns the image in a PNG file as common.ReadManifestFiles gives it.
+func decodeManifestPNG(content string) ([]byte, error) {
+	encoded, ok := strings.CutPrefix(content, common.ManifestPNGPrefix)
+	if !ok {
+		return nil, fmt.Errorf("must be a %s data URI", strings.TrimSuffix(common.ManifestPNGPrefix, ","))
+	}
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("is not valid base64: %w", err)
+	}
+	if !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
+		return nil, errors.New("is not a PNG image")
+	}
+	if len(data) > manifestMaxIconBytes {
+		return nil, fmt.Errorf("can be at most %d KiB", manifestMaxIconBytes>>10)
+	}
+	return data, nil
 }
 
 func decodeManifest(content string, out any) error {
@@ -308,18 +382,26 @@ func loadManifests(directory string) map[string]*manifestApp {
 	return apps
 }
 
-// storeManifest replaces directory's files with files.
-func storeManifest(directory string, files map[string]string) error {
+// storeManifest replaces directory's files with m's.
+func storeManifest(directory string, m *manifestApp) error {
 	tmp := directory + ".tmp"
 	if err := os.RemoveAll(tmp); err != nil {
 		return err
 	}
-	for name, content := range files {
+	write := func(name string, data []byte) error {
 		target := filepath.Join(tmp, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 			return err
 		}
-		if err := os.WriteFile(target, []byte(content), 0600); err != nil {
+		return os.WriteFile(target, data, 0600)
+	}
+	for name, content := range m.files {
+		if err := write(name, []byte(content)); err != nil {
+			return err
+		}
+	}
+	for name, data := range m.icons {
+		if err := write(name, data); err != nil {
 			return err
 		}
 	}
@@ -330,7 +412,8 @@ func storeManifest(directory string, files map[string]string) error {
 }
 
 // handleManifestRegister registers a manifest app, or replaces the one with the same id.
-// Its argument is the app's files as JSON, {"<path>": "<yaml>"}, app.yaml at the root. It
+// Its argument is the app's files as JSON, {"<path>": "<content>"} as common.ReadManifestFiles
+// returns them, app.yaml at the root. It
 // returns the app's id. Only the machine's owner and admins may call it (see
 // ProcedureManifestRegister).
 func (c *capabilities) handleManifestRegister(_ context.Context, inv *xconn.Invocation) *xconn.Result {
@@ -358,7 +441,7 @@ func (c *capabilities) handleManifestRegister(_ context.Context, inv *xconn.Invo
 		return xconn.NewResultError(common.ErrInvalidArgument, fmt.Sprintf("app %s is already registered",
 			m.app.ID))
 	}
-	if err := storeManifest(filepath.Join(c.manifestsPath, m.app.ID), files); err != nil {
+	if err := storeManifest(filepath.Join(c.manifestsPath, m.app.ID), m); err != nil {
 		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
 	c.manifests[m.app.ID] = m
@@ -415,4 +498,32 @@ func (c *capabilities) handleManifestGet(_ context.Context, inv *xconn.Invocatio
 		return xconn.NewResultError(common.ErrInvalidArgument, disabledMessage(id))
 	}
 	return xconn.NewResult(m.resolved)
+}
+
+// handleManifestFile returns one of an enabled manifest app's PNG files, such as an icon:
+// its arguments are the app's id and the file's path from the app's directory.
+func (c *capabilities) handleManifestFile(_ context.Context, inv *xconn.Invocation) *xconn.Result {
+	id, err := inv.ArgString(0)
+	if err != nil {
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
+	}
+	name, err := inv.ArgString(1)
+	if err != nil {
+		return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
+	}
+
+	c.Lock()
+	defer c.Unlock()
+	m, ok := c.manifests[id]
+	if !ok {
+		return xconn.NewResultError(common.ErrInvalidArgument, "manifest app not found: "+id)
+	}
+	if !c.isEnabled(id) {
+		return xconn.NewResultError(common.ErrInvalidArgument, disabledMessage(id))
+	}
+	data, ok := m.icons[name]
+	if !ok {
+		return xconn.NewResultError(common.ErrInvalidArgument, fmt.Sprintf("%s has no PNG file %s", id, name))
+	}
+	return xconn.NewResult(data)
 }

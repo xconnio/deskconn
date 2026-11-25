@@ -1,9 +1,14 @@
 package userd_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,12 +22,33 @@ import (
 	"github.com/xconnio/xconn/bindings/go"
 )
 
-// readManifest returns the Remote Control example's YAML files.
+// readManifest returns the test app's YAML files, with PNG icons of its own
+// for the app and for light's two states.
 func readManifest(t *testing.T) map[string]string {
 	t.Helper()
-	files, err := common.ReadManifestFiles(filepath.Join("testdata", "manifests", "remote-control"))
+	files, err := common.ReadManifestFiles(filepath.Join("testdata", "manifests", "example"))
 	require.NoError(t, err)
+	files["app.yaml"] = strings.Replace(files["app.yaml"],
+		"icon: https://example.com/icons/example.png", "icon: icons/app.png", 1)
+	files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"], "        off: Turn on\n",
+		"        off: Turn on\n      icon:\n        on: icons/light-on.png\n        off: icons/light-off.png\n", 1)
+	for _, name := range testIcons() {
+		files[name] = common.ManifestPNGPrefix + base64.StdEncoding.EncodeToString(testPNG(t))
+	}
 	return files
+}
+
+// testIcons are the PNG files readManifest adds.
+func testIcons() []string {
+	return []string{"icons/app.png", "icons/light-on.png", "icons/light-off.png"}
+}
+
+// testPNG returns a 1x1 PNG image.
+func testPNG(t *testing.T) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	require.NoError(t, png.Encode(&out, image.NewGray(image.Rect(0, 0, 1, 1))))
+	return out.Bytes()
 }
 
 // setupManager starts userd's app layer and returns its session, to register userd on, and
@@ -55,6 +81,7 @@ func decode(t *testing.T, resp *xconn.Result, out any) {
 
 type listedApp struct {
 	ID          string `json:"id"`
+	Icon        string `json:"icon"`
 	Enabled     bool   `json:"enabled"`
 	KeyExchange string `json:"key_exchange"`
 	Manifest    bool   `json:"manifest"`
@@ -82,11 +109,11 @@ func TestManifestApp(t *testing.T) {
 	require.NoError(t, resp.Err)
 	id, err := resp.ArgString(0)
 	require.NoError(t, err)
-	require.Equal(t, "remote-control", id)
+	require.Equal(t, "example", id)
 
 	require.Equal(t, &listedApp{
-		ID: id, Enabled: true, Manifest: true,
-		KeyExchange: "com.deskconn.remotecontrol.key.exchange",
+		ID: id, Icon: "icons/app.png", Enabled: true, Manifest: true,
+		KeyExchange: "com.deskconn.example.key.exchange",
 	}, findApp(t, caller, id))
 	require.False(t, findApp(t, caller, "files").Manifest)
 
@@ -102,23 +129,49 @@ func TestManifestApp(t *testing.T) {
 	require.Len(t, children, 2)
 
 	// app-engine's blocks are left for clients to expand, with their fields.
-	mute := children[1]
-	require.Equal(t, "app-engine/blocks/toggle.yaml", mute["include"])
-	require.Equal(t, "com.deskconn.remotecontrol.audio.ismuted", mute["read"])
-	require.NotContains(t, mute, "block")
+	light := children[1]
+	require.Equal(t, "app-engine/blocks/toggle.yaml", light["include"])
+	require.Equal(t, "com.deskconn.example.light.ison", light["read"])
+	require.NotContains(t, light, "block")
 
-	// Disabled apps can't be fetched.
+	// Icons stay as the app names them; clients fetch its own PNG files one at a time.
+	require.Equal(t, map[string]any{"on": "icons/light-on.png", "off": "icons/light-off.png"}, light["icon"])
+	require.Equal(t, "https://example.com/icons/ping.png", children[0]["icon"])
+	icon := caller.Call(common.ProcedureManifestFile).Args(id, "icons/light-off.png").Execute()
+	require.NoError(t, icon.Err)
+	require.Equal(t, testPNG(t), icon.Args[0])
+	for _, name := range []string{"icons/missing.png", "screens/home.yaml", "../example/icons/app.png"} {
+		require.ErrorContains(t, caller.Call(common.ProcedureManifestFile).Args(id, name).Execute().Err,
+			"example has no PNG file "+name)
+	}
+
+	// Disabled apps can't be fetched, nor their files.
 	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args(id, false).Execute().Err)
 	require.ErrorContains(t, caller.Call(common.ProcedureManifestGet).Args(id).Execute().Err, "disabled")
+	require.ErrorContains(t, caller.Call(common.ProcedureManifestFile).Args(id, "icons/app.png").Execute().Err,
+		"disabled")
 	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args(id, true).Execute().Err)
 
-	// Re-registering replaces the app.
-	require.NoError(t, registerManifest(caller, readManifest(t)).Err)
+	// Re-registering replaces the app. A draft screen nothing includes yet can name a PNG
+	// file, which is sent but not kept.
+	files := readManifest(t)
+	files["screens/draft.yaml"] = "id: draft\nchildren:\n  - icon: icons/draft.png\n"
+	files["icons/draft.png"] = files["icons/app.png"]
+	require.NoError(t, registerManifest(caller, files).Err)
+	require.ErrorContains(t, caller.Call(common.ProcedureManifestFile).Args(id, "icons/draft.png").Execute().Err,
+		"example has no PNG file icons/draft.png")
+	require.NoFileExists(t, filepath.Join(cfgDirectory, "manifests", id, "icons", "draft.png"))
 
-	// The app survives a restart.
+	// The app survives a restart, its PNG files stored as images.
 	callee2, caller2 := setupManager(t)
 	require.NoError(t, userd.NewDeskconn(false, cfgDirectory).Register(callee2))
 	require.NoError(t, caller2.Call(common.ProcedureManifestGet).Args(id).Execute().Err)
+	icon = caller2.Call(common.ProcedureManifestFile).Args(id, "icons/app.png").Execute()
+	require.NoError(t, icon.Err)
+	require.Equal(t, testPNG(t), icon.Args[0])
+	stored, err := os.ReadFile(filepath.Join(cfgDirectory, "manifests", id, "icons", "app.png"))
+	require.NoError(t, err)
+	require.True(t, bytes.HasPrefix(stored, []byte("\x89PNG")))
 
 	require.NoError(t, caller.Call(common.ProcedureManifestUnregister).Args(id).Execute().Err)
 	require.Nil(t, findApp(t, caller, id))
@@ -137,28 +190,28 @@ func TestManifestAppRejected(t *testing.T) {
 		"admin call": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"com.deskconn.remotecontrol.screen.lock", "com.deskconn.admin.capabilities.set", 1)
+					"com.deskconn.example.ping", "com.deskconn.admin.capabilities.set", 1)
 			},
 			err: "call com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"admin read": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"com.deskconn.remotecontrol.audio.ismuted", "com.deskconn.admin.capabilities.set", 1)
+					"com.deskconn.example.light.ison", "com.deskconn.admin.capabilities.set", 1)
 			},
 			err: "read com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"admin toggle": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"com.deskconn.remotecontrol.audio.togglemute", "com.deskconn.admin.capabilities.set", 1)
+					"com.deskconn.example.light.toggle", "com.deskconn.admin.capabilities.set", 1)
 			},
 			err: "toggle com.deskconn.admin.capabilities.set is only for the machine's owner and admins",
 		},
 		"unreachable toggle": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"com.deskconn.remotecontrol.audio.togglemute", "local.deskconn.login", 1)
+					"com.deskconn.example.light.toggle", "local.deskconn.login", 1)
 			},
 			err: `toggle "local.deskconn.login" must be under one of`,
 		},
@@ -176,35 +229,93 @@ func TestManifestAppRejected(t *testing.T) {
 		"unreachable call": {
 			change: func(files map[string]string) {
 				files["screens/home.yaml"] = strings.Replace(files["screens/home.yaml"],
-					"com.deskconn.remotecontrol.screen.lock", "local.deskconn.login", 1)
+					"com.deskconn.example.ping", "local.deskconn.login", 1)
 			},
 			err: `call "local.deskconn.login" must be under one of`,
 		},
 		"include outside the app": {
 			change: func(files map[string]string) {
-				files["screens/home.yaml"] = "id: home\nchildren:\n  - include: ../../other/lock.yaml\n"
+				files["screens/home.yaml"] = "id: home\nchildren:\n  - include: ../../other/ping.yaml\n"
 			},
 			err: "files must be inside the app's directory",
 		},
 		"missing include": {
 			change: func(files map[string]string) {
-				files["screens/home.yaml"] = "id: home\nchildren:\n  - include: ../blocks/lock.yaml\n"
+				files["screens/home.yaml"] = "id: home\nchildren:\n  - include: ../blocks/ping.yaml\n"
 			},
-			err: "blocks/lock.yaml doesn't exist",
+			err: "blocks/ping.yaml doesn't exist",
 		},
 		"include cycle": {
 			change: func(files map[string]string) {
-				files["screens/home.yaml"] = "id: home\nchildren:\n  - include: ../blocks/lock.yaml\n"
-				files["blocks/lock.yaml"] = "include: lock.yaml\n"
+				files["screens/home.yaml"] = "id: home\nchildren:\n  - include: ../blocks/ping.yaml\n"
+				files["blocks/ping.yaml"] = "include: ping.yaml\n"
 			},
-			err: "blocks/lock.yaml includes itself",
+			err: "blocks/ping.yaml includes itself",
 		},
 		"not yaml": {
 			change: func(files map[string]string) { files["notes.txt"] = "" },
-			err:    "notes.txt: only .yaml files are allowed",
+			err:    "notes.txt: only .yaml and .png files are allowed",
+		},
+		"missing icon": {
+			change: func(files map[string]string) { delete(files, "icons/light-off.png") },
+			err:    "icon icons/light-off.png doesn't exist",
+		},
+		"icon outside the app": {
+			change: func(files map[string]string) {
+				files["app.yaml"] = strings.Replace(files["app.yaml"], "icons/app.png", "../other/app.png", 1)
+			},
+			err: "icon ../other/app.png doesn't exist",
+		},
+		"not a png": {
+			change: func(files map[string]string) {
+				files["icons/app.png"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("GIF89a"))
+			},
+			err: "icons/app.png: is not a PNG image",
+		},
+		"png not a data uri": {
+			change: func(files map[string]string) { files["icons/app.png"] = "\x89PNG" },
+			err:    "icons/app.png: must be a data:image/png;base64 data URI",
+		},
+		"icon too large": {
+			change: func(files map[string]string) {
+				files["icons/app.png"] = "data:image/png;base64," +
+					base64.StdEncoding.EncodeToString(append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 64<<10)...))
+			},
+			err: "icons/app.png: can be at most 64 KiB",
+		},
+		"http icon": {
+			change: func(files map[string]string) {
+				files["app.yaml"] = strings.Replace(files["app.yaml"], "icons/app.png", "http://example.com/app.png", 1)
+			},
+			err: "icon http://example.com/app.png must be an https URL or a PNG file in the app",
+		},
+		"app icon per state": {
+			change: func(files map[string]string) {
+				files["app.yaml"] = strings.Replace(files["app.yaml"], "icon: icons/app.png",
+					"icon: {on: icons/app.png, off: icons/app.png}", 1)
+			},
+			err: "app.icon must be one icon, not one per state",
+		},
+		"icons too large in all": {
+			change: func(files map[string]string) {
+				big := "data:image/png;base64," +
+					base64.StdEncoding.EncodeToString(append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 60<<10)...))
+				var icons strings.Builder
+				for i := range 5 {
+					name := fmt.Sprintf("icons/big%d.png", i)
+					files[name] = big
+					fmt.Fprintf(&icons, "      - icon: %s\n", name)
+				}
+				files["screens/home.yaml"] += "  extra:\n    children:\n" + icons.String()
+			},
+			err: "an app's PNG files can be at most 256 KiB in all",
+		},
+		"yaml too large": {
+			change: func(files map[string]string) { files["blocks/big.yaml"] = "x: " + strings.Repeat("a", 256<<10) },
+			err:    "an app can have at most 256 KiB of YAML",
 		},
 		"bad id": {
-			change: func(files map[string]string) { files["app.yaml"] = "app:\n  id: Remote Control\n" },
+			change: func(files map[string]string) { files["app.yaml"] = "app:\n  id: Example\n" },
 			err:    "app.id must match",
 		},
 		"id taken": {
@@ -258,13 +369,13 @@ func TestCapabilitiesWatch(t *testing.T) {
 		return nil
 	}
 
-	require.Nil(t, has(next(), "remote-control"))
+	require.Nil(t, has(next(), "example"))
 
 	require.NoError(t, registerManifest(caller, readManifest(t)).Err)
-	require.True(t, has(next(), "remote-control").Enabled)
+	require.True(t, has(next(), "example").Enabled)
 
-	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args("remote-control", false).Execute().Err)
-	require.False(t, has(next(), "remote-control").Enabled)
+	require.NoError(t, caller.Call(common.ProcedureCapabilitiesSet).Args("example", false).Execute().Err)
+	require.False(t, has(next(), "example").Enabled)
 
 	cancel()
 	select {
@@ -285,6 +396,6 @@ func TestManifestAppNeedsManager(t *testing.T) {
 	member, err := connectAs(router, common.LocalRealm, "bob", "user:member")
 	require.NoError(t, err)
 	require.ErrorContains(t, registerManifest(member, readManifest(t)).Err, common.ErrNotAuthorized)
-	require.ErrorContains(t, member.Call(common.ProcedureManifestUnregister).Args("remote-control").Execute().Err,
+	require.ErrorContains(t, member.Call(common.ProcedureManifestUnregister).Args("example").Execute().Err,
 		common.ErrNotAuthorized)
 }
