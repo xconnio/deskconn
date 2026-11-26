@@ -10,11 +10,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/agent"
 )
 
 // ExtractAgentTarball reverses BuildAgentTarball, writing each entry where tool keeps it for
-// path under homeDir (see common.AgentSessionDir) - re-derived using this machine's own
+// path under homeDir (see agent.AgentSessionDir) - re-derived using this machine's own
 // homeDir, so the same project lands in the right place regardless of username or home
 // directory location. Returns
 // the number of files written. Entries aren't plain filenames (e.g. contain a path separator or
@@ -43,7 +43,7 @@ func ExtractAgentTarball(tool string, tarball []byte, homeDir, path string) (int
 			return 0, fmt.Errorf("refusing to extract entry with unexpected name %q", header.Name)
 		}
 
-		destDir, err := common.AgentSessionDir(tool, homeDir, path, header.Name)
+		destDir, err := agent.AgentSessionDir(tool, homeDir, path, header.Name)
 		if err != nil {
 			return 0, err
 		}

@@ -8,14 +8,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/agent"
 )
 
 // BuildAgentTarball tars the given session files (by basename only - not by their on-disk path,
 // which is specific to this machine's home directory) into a gzip-compressed archive.
 // ExtractTarball re-derives the correct destination directory independently, using the
 // extracting machine's own home directory and the same project path.
-func BuildAgentTarball(files []common.AgentSessionFile) ([]byte, error) {
+func BuildAgentTarball(files []agent.AgentSessionFile) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)

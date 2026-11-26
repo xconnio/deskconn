@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/xconnio/deskconn/internal/agent"
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/xconn/bindings/go"
 )
@@ -70,7 +71,7 @@ func (d *Deskconn) agentSessionList(tool string, inv *xconn.Invocation) *xconn.R
 	if args.Limit > 0 {
 		sessions = sessions[:min(args.Limit, len(sessions))]
 	}
-	return encryptResult(enc, common.SummarizeAgentSessions(sessions))
+	return encryptResult(enc, agent.SummarizeAgentSessions(sessions))
 }
 
 func (d *Deskconn) handleAgentSessionPull(tool string) xconn.InvocationHandler {
@@ -96,7 +97,7 @@ func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.R
 	}
 
 	if args.SessionID != "" {
-		var matches []common.AgentSessionFile
+		var matches []agent.AgentSessionFile
 		for _, s := range sessions {
 			if strings.HasPrefix(s.ID, args.SessionID) {
 				matches = append(matches, s)
@@ -112,7 +113,7 @@ func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.R
 		sessions = matches
 	}
 
-	byTool := make(map[string][]common.AgentSessionFile)
+	byTool := make(map[string][]agent.AgentSessionFile)
 	for _, s := range sessions {
 		if args.Tool != "" && s.Tool != args.Tool {
 			continue
@@ -151,7 +152,7 @@ func (d *Deskconn) agentProjectList(tool string, inv *xconn.Invocation) *xconn.R
 	if err != nil {
 		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
-	projects, err := common.DiscoverAgentProjects(tool, homeDir)
+	projects, err := agent.DiscoverAgentProjects(tool, homeDir)
 	if err != nil {
 		return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 	}
@@ -161,10 +162,10 @@ func (d *Deskconn) agentProjectList(tool string, inv *xconn.Invocation) *xconn.R
 // agentLocalSessions discovers this machine's current tool sessions for the project at path:
 // relative to home, as `desk agent` sends it to match the project across machines, or
 // absolute, as the web app sends a directory from the agent's project list.
-func agentLocalSessions(tool, path string) ([]common.AgentSessionFile, error) {
+func agentLocalSessions(tool, path string) ([]agent.AgentSessionFile, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
-	return common.DiscoverAgentSessions(tool, homeDir, path)
+	return agent.DiscoverAgentSessions(tool, homeDir, path)
 }
