@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/xconnio/deskconn/internal/agent"
 	"github.com/xconnio/deskconn/internal/common"
@@ -97,12 +96,7 @@ func (d *Deskconn) agentSessionPull(tool string, inv *xconn.Invocation) *xconn.R
 	}
 
 	if args.SessionID != "" {
-		var matches []agent.AgentSessionFile
-		for _, s := range sessions {
-			if strings.HasPrefix(s.ID, args.SessionID) {
-				matches = append(matches, s)
-			}
-		}
+		matches := agent.SessionsWithIDPrefix(sessions, args.SessionID)
 		switch {
 		case len(matches) == 0:
 			return xconn.NewResultError(common.ErrOperationFailed, fmt.Sprintf("no session matching %q", args.SessionID))

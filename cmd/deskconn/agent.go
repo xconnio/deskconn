@@ -290,11 +290,7 @@ func runAgentResume(sessionID string, printOnly bool) error {
 		if err != nil {
 			return fmt.Errorf("failed to discover local %s sessions: %w", tool, err)
 		}
-		for _, s := range sessions {
-			if strings.HasPrefix(s.ID, sessionID) {
-				matches = append(matches, s)
-			}
-		}
+		matches = append(matches, agent.SessionsWithIDPrefix(sessions, sessionID)...)
 	}
 	switch {
 	case len(matches) == 0:

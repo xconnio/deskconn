@@ -543,3 +543,15 @@ func truncateTitle(s string) string {
 	}
 	return s
 }
+
+// SessionsWithIDPrefix returns the sessions whose ID starts with prefix, as `desk agent ls`
+// shortens IDs.
+func SessionsWithIDPrefix(sessions []AgentSessionFile, prefix string) []AgentSessionFile {
+	var matches []AgentSessionFile
+	for _, s := range sessions {
+		if strings.HasPrefix(s.ID, prefix) {
+			matches = append(matches, s)
+		}
+	}
+	return matches
+}
