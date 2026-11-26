@@ -9,7 +9,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
@@ -176,7 +175,7 @@ func (v *topForwardsView) body(m *Model, width, height int) []string {
 		}
 		rows = append(rows, topRow{style: style, cells: []string{
 			forward.target.name, direction, forward.from(), forward.dest(), status,
-			common.FormatSince(time.Since(forward.started)),
+			deskconn.FormatSince(time.Since(forward.started)),
 		}})
 	}
 	return m.table(columns, rows, &v.list, width, height)

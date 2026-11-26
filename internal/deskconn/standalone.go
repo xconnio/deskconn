@@ -80,7 +80,7 @@ func AddStandaloneMachine(cfgDirectory string, machine common.StandaloneMachine)
 	}
 	if managed, ok := ManagedMachineConflict(config.Machines, machine.Name); ok {
 		return fmt.Errorf("%q already refers to a managed machine of your account (%s, ID %s); choose another name",
-			machine.Name, managed.Name, common.ShortID(managed.Authid))
+			machine.Name, managed.Name, ShortID(managed.Authid))
 	}
 	config.Standalone = append(config.Standalone, machine)
 	return writeConfig(cfgDirectory, config)

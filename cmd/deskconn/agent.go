@@ -237,7 +237,7 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.Header([]string{"AGENT", "SESSION-ID", "TITLE", "UPDATED"})
 	for _, s := range sessions {
-		_ = table.Append([]any{s.Tool, s.SessionID, s.Title, common.FormatSince(time.Since(s.UpdatedAt))})
+		_ = table.Append([]any{s.Tool, s.SessionID, s.Title, deskconn.FormatSince(time.Since(s.UpdatedAt))})
 	}
 	return table.Render()
 }
