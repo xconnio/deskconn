@@ -77,7 +77,7 @@ type vpnTunnelSession struct {
 	echoClosed bool
 }
 
-func (d *Deskconn) handleVPNChannel(ch common.MessageChannel) {
+func (d *Deskconn) handleVPNChannel(ch, control common.MessageChannel) {
 	d.vpn.mu.Lock()
 	if d.vpn.closed || !d.vpn.armed {
 		d.vpn.mu.Unlock()
@@ -95,7 +95,7 @@ func (d *Deskconn) handleVPNChannel(ch common.MessageChannel) {
 	d.vpn.starting = true
 	d.vpn.mu.Unlock()
 
-	sess, err := startVPNTunnelServer(ch, vpnDestinationAllowed)
+	sess, err := startVPNTunnelServer(ch, control, vpnDestinationAllowed)
 
 	d.vpn.mu.Lock()
 	d.vpn.starting = false
@@ -144,7 +144,7 @@ func (d *Deskconn) CloseVPNTunnel() {
 
 // startVPNTunnelServer brings up the netstack for one client. allowed decides which destinations
 // the client may reach.
-func startVPNTunnelServer(ch common.MessageChannel, allowed func(net.IP) bool) (*vpnTunnelSession, error) {
+func startVPNTunnelServer(ch, control common.MessageChannel, allowed func(net.IP) bool) (*vpnTunnelSession, error) {
 	netstack := stack.New(stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol},
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
@@ -213,7 +213,7 @@ func startVPNTunnelServer(ch common.MessageChannel, allowed func(net.IP) bool) (
 		MTU:        common.VPNMTU,
 	})
 	if err == nil {
-		err = ch.SendText(string(ready))
+		err = control.SendText(string(ready))
 	}
 	if err != nil {
 		sess.close()

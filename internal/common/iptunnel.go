@@ -10,7 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// VPNOpenFrame is the client's first message on a VPN data channel.
+// VPNOpenFrame is the client's first message on the VPN control channel.
 type VPNOpenFrame struct {
 	Type string `json:"type"`
 }

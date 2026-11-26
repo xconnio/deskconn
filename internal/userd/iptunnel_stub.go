@@ -21,10 +21,8 @@ func newVPNServer() *vpnServer { return &vpnServer{} }
 // platform that can't serve one in the first place.
 func (d *Deskconn) CloseVPNTunnel() {}
 
-// handleVPNChannel mirrors iptunnel.go's method of the same name: streamrelay.go calls this
-// unconditionally on a VPNChannelLabel match, which never happens on this platform, but the
-// method still needs to exist to compile. Never actually invoked.
-func (d *Deskconn) handleVPNChannel(channel common.MessageChannel) {
+// handleVPNChannel rejects VPN setup on unsupported platforms.
+func (d *Deskconn) handleVPNChannel(channel, control common.MessageChannel) {
 	_ = channel.Close()
 }
 

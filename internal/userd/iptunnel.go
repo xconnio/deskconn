@@ -47,9 +47,8 @@ type vpnTunnelSession struct {
 	cleanup   func()
 }
 
-// handleVPNChannel is called once the relay dispatch has identified
-// channel as a VPN tunnel request (see handleRelayConn).
-func (d *Deskconn) handleVPNChannel(channel common.MessageChannel) {
+// handleVPNChannel starts a VPN tunnel after channel dispatch.
+func (d *Deskconn) handleVPNChannel(channel, control common.MessageChannel) {
 	d.vpn.mu.Lock()
 	if d.vpn.closed || d.vpn.helper == nil {
 		d.vpn.mu.Unlock()
@@ -68,7 +67,7 @@ func (d *Deskconn) handleVPNChannel(channel common.MessageChannel) {
 	helper := d.vpn.helper
 	d.vpn.mu.Unlock()
 
-	sess, err := startVPNTunnelServer(channel, helper)
+	sess, err := startVPNTunnelServer(channel, control, helper)
 
 	d.vpn.mu.Lock()
 	d.vpn.starting = false
@@ -173,7 +172,10 @@ func (d *Deskconn) DisarmVPNServing() bool {
 	return true
 }
 
-func startVPNTunnelServer(channel common.MessageChannel, helper *vpnhelper.VPNHelperClient) (*vpnTunnelSession, error) {
+func startVPNTunnelServer(
+	channel, control common.MessageChannel,
+	helper *vpnhelper.VPNHelperClient,
+) (*vpnTunnelSession, error) {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNServerTUNName)
 	if err != nil {
 		return nil, fmt.Errorf("open tun: %w", err)
@@ -252,10 +254,7 @@ func startVPNTunnelServer(channel common.MessageChannel, helper *vpnhelper.VPNHe
 
 	expectedSource := net.ParseIP(common.VPNClientIP).To4()
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		if msg.IsString {
-			return // control frame; nothing more expected once we're running
-		}
-		if !ValidateIPv4Source(msg.Data, expectedSource) {
+		if msg.IsString || !ValidateIPv4Source(msg.Data, expectedSource) {
 			return
 		}
 		if _, werr := tun.Write(msg.Data); werr != nil {
@@ -280,7 +279,7 @@ func startVPNTunnelServer(channel common.MessageChannel, helper *vpnhelper.VPNHe
 		sess.close()
 		return nil, err
 	}
-	if err := channel.SendText(string(ready)); err != nil {
+	if err := control.SendText(string(ready)); err != nil {
 		sess.close()
 		return nil, err
 	}

@@ -16,7 +16,7 @@ type App struct {
 	NewSession      func(authID, authRole string) (*api.Session, error)
 	Procedures      []string
 	Prefixes        []string
-	DatagramChannel func(*api.WebRTCDataChannel)
+	DatagramChannel func(string, *api.WebRTCDataChannel)
 }
 
 type appAuthorizer struct{}
@@ -84,11 +84,11 @@ func NewBridge(ctx context.Context, remote *api.Session, app *App) (*api.Bridge,
 // Datagram channels are a product capability distinct from reliable RPC streams.
 // Reject unhandled or old preclassified channels rather than retaining a relay.
 func configureDatagrams(provider *api.WebRTCProvider, app *App) {
-	provider.OnDataChannel(func(_ string, channel *api.WebRTCDataChannel, first []byte) {
+	provider.OnDataChannel(func(connectionID string, channel *api.WebRTCDataChannel, first []byte) {
 		if first != nil || app.DatagramChannel == nil {
 			_ = channel.Close()
 			return
 		}
-		app.DatagramChannel(channel)
+		app.DatagramChannel(connectionID, channel)
 	})
 }

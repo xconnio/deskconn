@@ -4,8 +4,6 @@ package deskconn
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -61,69 +59,13 @@ func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, onRead
 		return err
 	}
 
-	ordered, maxRetransmits := false, uint16(common.VPNMaxRetransmits)
-	channel, err := session.OpenChannel(common.VPNChannelLabel, &webrtc.DataChannelInit{
-		Ordered:        &ordered,
-		MaxRetransmits: &maxRetransmits,
+	channel, ready, closedCh, closeChannels, err := openVPNChannels(ctx, session, func(packet []byte) {
+		if err := device.Write(packet); err != nil {
+			log.Debugf("iptunnel: tun write failed: %v", err)
+		}
 	})
 	if err != nil {
 		return err
-	}
-	defer func() { _ = channel.Close() }()
-
-	closedCh := make(chan struct{})
-	var closedOnce sync.Once
-	signalClosed := func() { closedOnce.Do(func() { close(closedCh) }) }
-	channel.OnClose(signalClosed)
-	channel.OnError(func(error) { signalClosed() })
-
-	openCh := make(chan struct{})
-	channel.OnOpen(func() { close(openCh) })
-	select {
-	case <-openCh:
-	case <-closedCh:
-		return errors.New("remote machine closed the vpn channel before it opened")
-	case <-time.After(common.VPNHandshakeTimeout):
-		return errors.New("timed out opening vpn data channel")
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	readyCh := make(chan common.VPNReadyFrame, 1)
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		if msg.IsString {
-			var frame common.VPNReadyFrame
-			if json.Unmarshal(msg.Data, &frame) == nil && frame.Type == common.VPNFrameReady {
-				select {
-				case readyCh <- frame:
-				default:
-				}
-			}
-			return
-		}
-		if werr := device.Write(msg.Data); werr != nil {
-			log.Debugf("iptunnel: tun write failed: %v", werr)
-		}
-	})
-
-	openFrame, err := json.Marshal(common.VPNOpenFrame{Type: common.VPNFrameOpen})
-	if err != nil {
-		return err
-	}
-	if err := channel.SendText(string(openFrame)); err != nil {
-		return err
-	}
-
-	var ready common.VPNReadyFrame
-	select {
-	case ready = <-readyCh:
-	case <-closedCh:
-		return errors.New("remote machine rejected the tunnel (not currently serving? " +
-			"it needs \"desk vpn serve\" run on it first)")
-	case <-time.After(common.VPNHandshakeTimeout):
-		return errors.New("timed out waiting for the remote machine to set up the tunnel")
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 
 	for _, ip := range pinTargets(ctx, session) {
@@ -142,7 +84,7 @@ func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, onRead
 	// Closed before waiting, as Read only returns once the device is gone.
 	defer pumpWG.Wait()
 	defer device.Close()
-	defer signalClosed()
+	defer closeChannels()
 
 	if err := device.RouteAll(4); err != nil {
 		return fmt.Errorf("failed to change default route: %w", err)
