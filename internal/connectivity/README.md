@@ -31,6 +31,11 @@ without cloud attachment. Configure authentication, TLS and realm settings.
 Cancellation closes listeners, providers and sessions and joins connection
 workers. `WebTransportPath` is `/wamp`.
 
+The client side connects to machines: `ConnectMachineRealmQUIC` reaches a machine
+through the cloud, or a standalone machine directly with `ConnectStandalone`;
+`ConnectWebrtcSession` negotiates a direct WebRTC session; `ConnectDaemon` joins
+the current user's local daemon.
+
 Files, shell, ports, agents and logs use encrypted RPC byte streams. WebRTC
 uses one reliable ordered data channel per stream, without additional yamux.
 VPN retains its native unreliable data channel through `App.DatagramChannel`.
