@@ -1,4 +1,4 @@
-package common
+package thumbnail
 
 import (
 	"bytes"
