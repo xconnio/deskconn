@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/xconn/bindings/go"
 )
 
@@ -20,7 +21,7 @@ type DaemonStreams struct {
 }
 
 func DialDaemonStreams(ctx context.Context, realm, directory string) (*DaemonStreams, error) {
-	session, err := common.ConnectDaemon(ctx, directory)
+	session, err := connectivity.ConnectDaemon(ctx, directory)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 	}

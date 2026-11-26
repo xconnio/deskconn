@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/auth"
 	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
@@ -190,12 +191,13 @@ func ConnectMachineRealmP2PSession(
 		return nil, err
 	}
 
-	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
 
-	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, common.ServedRealm(realm), authenticator, func() {})
+	webrtcSess, err := connectivity.ConnectWebrtcSession(quicSess.Session, common.ServedRealm(realm), authenticator,
+		func() {})
 	quicSess.Connection().Close()
 	if err != nil {
 		return nil, err
@@ -210,7 +212,7 @@ func ConnectWebrtc(session *xconn.Session, realm, authid, privateKey string,
 	if err != nil {
 		return nil, err
 	}
-	webrtcSess, err := common.ConnectWebrtcSession(session, realm, authenticator, onDisconnect)
+	webrtcSess, err := connectivity.ConnectWebrtcSession(session, realm, authenticator, onDisconnect)
 	if err != nil {
 		return nil, err
 	}

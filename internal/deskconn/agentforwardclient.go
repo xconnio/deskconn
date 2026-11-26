@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 )
 
 // RunAgentForward is the client entry point for `desk shell -A`. It
@@ -56,7 +57,7 @@ func RunAgentForward(ctx context.Context, mode, realm, cfgDirectory, agentSock s
 }
 
 func runAgentForwardQUIC(ctx context.Context, realm, cfgDirectory, agentSock string, ready chan<- error) error {
-	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		ready <- err
 		return err

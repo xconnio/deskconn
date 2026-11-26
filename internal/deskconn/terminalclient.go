@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/xconn/bindings/go"
 )
 
@@ -153,7 +154,7 @@ func openTerminalStream(ctx context.Context, mode, realm, cfgDirectory string) (
 				return nil, nil, err
 			}
 		}
-		quic, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+		quic, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return nil, nil, err
 		}

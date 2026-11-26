@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/vpnhelper"
 	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
@@ -306,7 +307,7 @@ func runVPNServe(cliCtx context.Context, cfgDirectory string) error {
 		}
 	}()
 
-	localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
+	localSession, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -349,7 +350,7 @@ func runVPNStop(ctx context.Context, cfgDirectory string) error {
 }
 
 func disarmVPNServing(ctx context.Context, cfgDirectory string) error {
-	localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
+	localSession, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		return err
 	}

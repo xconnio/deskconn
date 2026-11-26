@@ -5,7 +5,7 @@ package main
 import (
 	"context"
 
-	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
@@ -20,7 +20,7 @@ func mountFiles(cfgDirectory, target, mountpoint, mode string, readOnly, debug b
 	connect := func(ctx context.Context) (*deskconn.MountConnection, error) {
 		switch mode {
 		case ModeRouted:
-			quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+			quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 			if err != nil {
 				return nil, err
 			}
@@ -40,7 +40,7 @@ func mountFiles(cfgDirectory, target, mountpoint, mode string, readOnly, debug b
 				Close: func() { _ = p2pSess.Leave() },
 			}, nil
 		default:
-			localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
+			localSession, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
 			if err != nil {
 				return nil, err
 			}

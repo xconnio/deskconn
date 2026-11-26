@@ -72,6 +72,6 @@ func DaemonCloudConfig(cfgDirectory string) (*xconnd.CloudConfig, error) {
 		TopicDetachFormat:     c.TopicDetachFormat,
 		CredentialsFile:       credentialsFile,
 		PrincipalsFile:        filepath.Join(cfgDirectory, "principals.json"),
-		ICEServers:            common.ICEServers(),
+		ICEServers:            xconnd.ICEServers(),
 	}, nil
 }

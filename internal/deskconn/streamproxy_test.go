@@ -65,7 +65,7 @@ func startStreamProxy(t *testing.T) (string, *userd.ClientSessions) {
 	require.NoError(t, err)
 	authenticator, err := auth.NewCryptoSignAuthenticator("client", key, nil)
 	require.NoError(t, err)
-	connection, err := common.ConnectStandalone(t.Context(), machineURL, certHash, streamProxyTestRealm, authenticator)
+	connection, err := xconnd.ConnectStandalone(t.Context(), machineURL, certHash, streamProxyTestRealm, authenticator)
 	require.NoError(t, err)
 	clients := userd.NewClientSessions()
 	lifetime, cancel := context.WithCancel(t.Context())
@@ -111,7 +111,7 @@ func TestDaemonStreamsTransferFiles(t *testing.T) {
 
 func TestDaemonUploadsLocalFileByPath(t *testing.T) {
 	directory, _ := startStreamProxy(t)
-	session, err := common.ConnectDaemon(t.Context(), directory)
+	session, err := xconnd.ConnectDaemon(t.Context(), directory)
 	require.NoError(t, err)
 	defer session.Close()
 

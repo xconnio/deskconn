@@ -16,6 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 )
 
 // RunPortForward is the client entry point for `desk port forward`. It
@@ -40,7 +41,7 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 		defer func() { _ = p2pSess.Close() }()
 		return acceptPortForwardLoopP2P(ctx, ln, p2pSess, remotePort)
 	case ModeRouted:
-		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -64,7 +65,7 @@ func RunPortForward(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 			return acceptPortForwardLoopP2P(ctx, ln, p2pSess, remotePort)
 		}
 		fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
-		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -207,7 +208,7 @@ func RunPortReverse(ctx context.Context, mode, realm, cfgDirectory, remotePort, 
 }
 
 func runPortReverseQUIC(ctx context.Context, realm, cfgDirectory, remotePort, localPort string) error {
-	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return err
 	}

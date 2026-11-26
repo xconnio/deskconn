@@ -19,6 +19,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/agent"
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/xconn/bindings/go"
 )
@@ -147,7 +148,7 @@ func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, err
 	var closeFn func()
 	switch defaultMode(cfgDirectory, realm, mode) {
 	case ModeRouted:
-		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +160,7 @@ func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, err
 		}
 		session, closeFn = p2pSess, func() { _ = p2pSess.Leave() }
 	default:
-		localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+		localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 		if err != nil {
 			return nil, fmt.Errorf("could not reach local daemon: %w", err)
 		}

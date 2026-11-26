@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
@@ -247,7 +248,7 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 // daemonConnectedMachines returns when the local daemon connected to each machine it's
 // connected to, by realm.
 func daemonConnectedMachines(cfgDirectory string) (map[string]any, error) {
-	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	session, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +375,7 @@ pingLoop:
 // own, which the returned close func closes.
 func machinePinger(cfgDirectory, realm string) (func() (int64, error), func(), error) {
 	if !throughDaemon(cfgDirectory, realm) {
-		conn, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+		conn, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -387,7 +388,7 @@ func machinePinger(cfgDirectory, realm string) (func() (int64, error), func(), e
 		}, func() { _ = conn.Connection().Close() }, nil
 	}
 
-	localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -406,7 +407,7 @@ func connectMachine(cfgDirectory, machine string) error {
 	if err != nil {
 		return err
 	}
-	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	session, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -418,7 +419,7 @@ func connectMachine(cfgDirectory, machine string) error {
 }
 
 func disconnectMachine(cfgDirectory, machine string, all bool) error {
-	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	session, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -465,7 +466,7 @@ func showMachineInfo(cfgDirectory, machine, mode string) error {
 func fetchMachineInfo(cfgDirectory, realm, mode string) ([]byte, error) {
 	switch mode {
 	case ModeRouted:
-		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
@@ -479,7 +480,7 @@ func fetchMachineInfo(cfgDirectory, realm, mode string) ([]byte, error) {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.CallFileOp(p2pSess, common.ProcedureMachineInfo, nil)
 	default:
-		localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+		localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 		if err != nil {
 			return nil, err
 		}

@@ -1,4 +1,4 @@
-package common
+package connectivity
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/url"
 
-	xconnd "github.com/xconnio/deskconn/internal/connectivity"
+	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/auth"
 )
@@ -19,7 +19,7 @@ const (
 )
 
 // ParseStandaloneURL checks a standalone machine URL (see SchemeQUIC/SchemeWebTransport) and
-// returns it, with WebTransport's path defaulting to xconnd.WebTransportPath.
+// returns it, with WebTransport's path defaulting to WebTransportPath.
 func ParseStandaloneURL(rawURL string) (*url.URL, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -35,7 +35,7 @@ func ParseStandaloneURL(rawURL string) (*url.URL, error) {
 		return nil, fmt.Errorf("invalid url %q: missing host:port", rawURL)
 	}
 	if u.Scheme == SchemeWebTransport && (u.Path == "" || u.Path == "/") {
-		u.Path = xconnd.WebTransportPath
+		u.Path = WebTransportPath
 	}
 	return u, nil
 }
@@ -45,7 +45,7 @@ func ParseStandaloneURL(rawURL string) (*url.URL, error) {
 // self-signed certificate, otherwise against the system's trusted CAs.
 func StandaloneTLSConfig(certHash string) (*tls.Config, error) {
 	if certHash != "" {
-		return PinnedTLSConfig(certHash)
+		return common.PinnedTLSConfig(certHash)
 	}
 	return &tls.Config{MinVersion: tls.VersionTLS13}, nil
 }
