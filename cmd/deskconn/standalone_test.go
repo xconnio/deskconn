@@ -166,8 +166,8 @@ func TestStandaloneAndManagedStayApart(t *testing.T) {
 	require.Equal(t, alice, t1.AuthID)
 	require.Equal(t, "bob", t2.AuthID)
 
-	require.ErrorContains(t, updateMachineAlias(dir, testLab, "x"), "aliases are for managed machines")
-	require.ErrorContains(t, updateMachineAlias(dir, testOffice, testLab), "already names a standalone machine")
+	require.ErrorContains(t, deskconn.UpdateMachineAlias(dir, testLab, "x"), "aliases are for managed machines")
+	require.ErrorContains(t, deskconn.UpdateMachineAlias(dir, testOffice, testLab), "already names a standalone machine")
 }
 
 func TestRemoveStandaloneMachine(t *testing.T) {

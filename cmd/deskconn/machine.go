@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/olekukonko/tablewriter"
-	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/connectivity"
@@ -164,7 +162,7 @@ func dispatchMachineCommand(parsedCmd string, cmds *machineCommands, cfgDirector
 		if *cmds.aliasUnset == (*cmds.aliasName != "") {
 			exitOnErr(&usageError{msg: "specify either an alias name or --unset"})
 		} else {
-			exitOnErr(updateMachineAlias(cfgDirectory, *cmds.aliasMachine, *cmds.aliasName))
+			exitOnErr(deskconn.UpdateMachineAlias(cfgDirectory, *cmds.aliasMachine, *cmds.aliasName))
 		}
 	case cmds.ping.FullCommand():
 		exitOnErr(pingMachine(cfgDirectory, *cmds.pingMachine, *cmds.pingCount))
@@ -635,57 +633,4 @@ func formatBytes(b uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-func updateMachineAlias(cfgDirectory, machineKey, alias string) error {
-	configFile := filepath.Join(cfgDirectory, "config.yml")
-
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("no config found. User not logged in")
-		}
-		return fmt.Errorf("failed to read config: %w", err)
-	}
-
-	var config common.Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("failed to parse config: %w", err)
-	}
-
-	for _, m := range config.Standalone {
-		if m.Name == machineKey {
-			return fmt.Errorf("%s is a standalone machine: aliases are for managed machines", machineKey)
-		}
-		if m.Name == alias {
-			return fmt.Errorf("alias '%s' already names a standalone machine", alias)
-		}
-	}
-
-	machines := config.Machines
-	for _, d := range machines {
-		if (d.Alias == alias && d.Alias != "") || d.Authid == alias || d.Name == alias {
-			return fmt.Errorf("alias '%s' already in use", alias)
-		}
-	}
-
-	updated := false
-	for i, d := range machines {
-		if d.Authid == machineKey || d.Name == machineKey || d.Alias == machineKey {
-			machines[i].Alias = alias
-			updated = true
-			break
-		}
-	}
-
-	if !updated {
-		return fmt.Errorf("machine %s not found", machineKey)
-	}
-
-	out, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	return os.WriteFile(configFile, out, 0600)
 }
