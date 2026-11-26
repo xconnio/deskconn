@@ -1,6 +1,7 @@
 package userd
 
 import (
+	"context"
 	"net"
 	"sync"
 	"time"
@@ -177,24 +178,6 @@ func (t *FakeShellTransport) Written() [][]byte {
 	return append([][]byte(nil), t.written...)
 }
 
-// QUICConn exposes quicConn's lifecycle; closeConn stands in for the connection.
-type QUICConn = quicConn
-
-func NewQUICConn(closeConn func() error) *QUICConn { return &quicConn{closeConn: closeConn} }
-
-func (q *quicConn) Acquire() bool { return q.acquire() }
-func (q *quicConn) Release()      { q.release() }
-func (q *quicConn) Retire()       { q.retire() }
-func (q *quicConn) Close()        { q.closeIf(true) }
-
-// RetireQUIC retires realm's QUIC connection, as a P2P upgrade does.
-func (c *ClientSessions) RetireQUIC(realm string) {
-	c.Lock()
-	quic := c.sessions[realm].quic
-	c.Unlock()
-	quic.retire()
-}
-
 // NewMountFS returns a mount server's request handler, as one caller session, and a
 // func reporting how many files it has open.
 func NewMountFS() (func(payload []byte) ([]byte, error), func() int) {
@@ -220,4 +203,10 @@ func BuildApps(procs []ProcessInfo, registry map[string]DesktopEntry) []AppInfo 
 // ServeTerminalStream serves a persistent terminal request on stream, made by caller.
 func (d *Deskconn) ServeTerminalStream(stream net.Conn, caller string) {
 	d.handleTerminalStream(stream, caller)
+}
+
+// DirectPath reports what the stream proxy tells the CLI: whether new calls to realm's machine
+// go over a direct path.
+func (c *ClientSessions) DirectPath(ctx context.Context, realm, cfgDirectory string) (bool, error) {
+	return c.directPath(ctx, realm, cfgDirectory)
 }

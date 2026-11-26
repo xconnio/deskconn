@@ -80,7 +80,7 @@ func uploadSession(ctx context.Context, clients *ClientSessions, realm, director
 		if err != nil {
 			return nil, nil, err
 		}
-		return session, clients.holdSession(realm, session), nil
+		return session, func() {}, nil
 	}
 }
 

@@ -69,7 +69,7 @@ func startEchoProxy(t *testing.T) (string, *userd.ClientSessions, *xconn.Session
 	require.NoError(t, err)
 	clients := userd.NewClientSessions()
 	lifetime, cancel := context.WithCancel(t.Context())
-	clients.StoreMachineSession(proxyTestRealm, connection.Session, nil, connection, lifetime, cancel)
+	clients.StoreMachineSession(proxyTestRealm, connection.Session, connection, lifetime, cancel)
 	t.Cleanup(clients.DisconnectAll)
 	socket := filepath.Join(dir, "deskconn.sock")
 	local, localListener, session, err := connectivity.StartAppLayer(common.LocalRealm, socket)
@@ -92,22 +92,14 @@ func requireStreamEcho(t *testing.T, stream net.Conn) {
 	require.Equal(t, "ping", string(body))
 }
 
-func TestStreamProxyHoldsQUICForRunningOperation(t *testing.T) {
-	directory, clients, machine := startEchoProxy(t)
+func TestStreamProxyForwardsStreams(t *testing.T) {
+	directory, _, _ := startEchoProxy(t)
 	daemon, err := deskconn.DialDaemonStreams(t.Context(), proxyTestRealm, directory)
 	require.NoError(t, err)
 	defer daemon.Close()
+	require.False(t, daemon.P2P(), "a standalone machine is only reached on its own connection")
 	stream, err := common.OpenRPCStream(t.Context(), daemon, common.ProcedureShellStream, false)
 	require.NoError(t, err)
 	defer stream.Close()
 	requireStreamEcho(t, stream)
-	clients.RetireQUIC(proxyTestRealm)
-	requireStreamEcho(t, stream)
-	require.True(t, machine.Connected())
-	require.NoError(t, stream.Close())
-	select {
-	case <-machine.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("retired connection survived its final stream")
-	}
 }

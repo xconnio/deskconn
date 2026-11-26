@@ -71,7 +71,7 @@ func TestReadFileViaEncryptedProxy(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	sessions := userd.NewClientSessions()
-	sessions.StoreMachineSession("machine", machine, nil, nil, ctx, cancel)
+	sessions.StoreMachineSession("machine", machine, nil, ctx, cancel)
 	defer sessions.DisconnectAll()
 	router, err := xconn.NewRouter(nil)
 	require.NoError(t, err)

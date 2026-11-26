@@ -33,8 +33,8 @@ func standaloneTarget(machine common.StandaloneMachine) topTarget {
 }
 
 // streamMode is the --mode a shell, logs or port forward uses: the daemon's
-// connection to it when the daemon is running (P2P once it has upgraded it, which it starts
-// on connecting), otherwise a connection of its own through the router (which, unlike trying
+// connection to it when the daemon is running (direct once XConn has negotiated a direct path
+// in the background), otherwise a connection of its own through the router (which, unlike trying
 // a direct one first, doesn't print on the way).
 func (m *Model) streamMode() string {
 	if m.daemonUp {
@@ -119,7 +119,7 @@ type Remote interface {
 }
 
 // topSessions are the real Remote. Calls go through the local daemon when it's running, on
-// its connection to the machine: P2P once it has upgraded it, and with the keys already
+// its connection to the machine: direct once XConn has a direct path, and with the keys already
 // exchanged. Otherwise they go on connections of desk top's own, one per machine, kept for as
 // long as they work.
 type topSessions struct {

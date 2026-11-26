@@ -75,7 +75,7 @@ func startStreamProxy(t *testing.T) (string, *userd.ClientSessions) {
 	require.NoError(t, err)
 	clients := userd.NewClientSessions()
 	lifetime, cancel := context.WithCancel(t.Context())
-	clients.StoreMachineSession(streamProxyTestRealm, connection.Session, nil, connection, lifetime, cancel)
+	clients.StoreMachineSession(streamProxyTestRealm, connection.Session, connection, lifetime, cancel)
 	t.Cleanup(clients.DisconnectAll)
 	local, listener, session, err := xconnd.StartAppLayer(common.LocalRealm, filepath.Join(dir, "deskconn.sock"))
 	require.NoError(t, err)
