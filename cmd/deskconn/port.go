@@ -69,7 +69,7 @@ func forwardPort(cfgDirectory, machine, mapping, mode string) error {
 	if err != nil {
 		return err
 	}
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func reversePort(cfgDirectory, machine, mapping, mode string) error {
 	if err != nil {
 		return err
 	}
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}

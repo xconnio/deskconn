@@ -144,8 +144,8 @@ func dispatchFileCommand(parsedCmd string, cmds *fileCommands, cfgDirectory stri
 }
 
 func listFiles(cfgDirectory, target, mode string) error {
-	machine, path := parseMachinePath(target)
-	realm, err := machineRealm(machine, cfgDirectory)
+	machine, path := deskconn.ParseMachinePath(target)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -158,12 +158,12 @@ func listFiles(cfgDirectory, target, mode string) error {
 }
 
 func moveFile(cfgDirectory, src, dst, mode string) error {
-	srcMachine, srcPath := parseMachinePath(src)
-	dstMachine, dstPath := parseMachinePath(dst)
+	srcMachine, srcPath := deskconn.ParseMachinePath(src)
+	dstMachine, dstPath := deskconn.ParseMachinePath(dst)
 	if srcMachine != dstMachine {
 		return errors.New("cross-machine move not supported")
 	}
-	realm, err := machineRealm(srcMachine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(srcMachine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -181,16 +181,16 @@ func transferProgressOut(show bool) io.Writer {
 }
 
 func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode string, progress io.Writer) error {
-	srcRemote := isRemotePath(src)
-	dstRemote := isRemotePath(dst)
+	srcRemote := deskconn.IsRemotePath(src)
+	dstRemote := deskconn.IsRemotePath(dst)
 	switch {
 	case srcRemote && dstRemote:
-		srcMachine, srcPath := parseMachinePath(src)
-		dstMachine, dstPath := parseMachinePath(dst)
+		srcMachine, srcPath := deskconn.ParseMachinePath(src)
+		dstMachine, dstPath := deskconn.ParseMachinePath(dst)
 		if srcMachine != dstMachine {
 			return errors.New("cross-machine copy not supported")
 		}
-		realm, err := machineRealm(srcMachine, cfgDirectory)
+		realm, err := deskconn.MachineRealm(srcMachine, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -198,8 +198,8 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 		return fileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileCopy, payload, mode)
 
 	case !srcRemote && dstRemote:
-		dstMachine, dstPath := parseMachinePath(dst)
-		realm, err := machineRealm(dstMachine, cfgDirectory)
+		dstMachine, dstPath := deskconn.ParseMachinePath(dst)
+		realm, err := deskconn.MachineRealm(dstMachine, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -217,8 +217,8 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 		})
 
 	case srcRemote && !dstRemote:
-		srcMachine, srcPath := parseMachinePath(src)
-		realm, err := machineRealm(srcMachine, cfgDirectory)
+		srcMachine, srcPath := deskconn.ParseMachinePath(src)
+		realm, err := deskconn.MachineRealm(srcMachine, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -312,8 +312,8 @@ func transferFiles(cfgDirectory, realm, mode string, transfer func(common.Stream
 }
 
 func removeFile(cfgDirectory, target, mode string) error {
-	machine, path := parseMachinePath(target)
-	realm, err := machineRealm(machine, cfgDirectory)
+	machine, path := deskconn.ParseMachinePath(target)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -322,11 +322,11 @@ func removeFile(cfgDirectory, target, mode string) error {
 }
 
 func catFile(cfgDirectory, target, mode string) error {
-	machine, path := parseMachinePath(target)
+	machine, path := deskconn.ParseMachinePath(target)
 	if path == "" {
 		return errors.New("path is required")
 	}
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -345,14 +345,14 @@ func catFile(cfgDirectory, target, mode string) error {
 // editFile opens a copy of a remote text file in $EDITOR, then sends the machine only a
 // patch of what changed.
 func editFile(cfgDirectory, target, mode string) error {
-	machine, path := parseMachinePath(target)
+	machine, path := deskconn.ParseMachinePath(target)
 	if path == "" {
 		return errors.New("path is required")
 	}
 	if !deskconn.IsEditableExtension(path) {
 		return fmt.Errorf("%s: not a text file, editing is not supported", path)
 	}
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -452,7 +452,7 @@ func machinePathCompletions(cfgDirectory string) func() []string {
 func remotePathCompletions(cfgDirectory string) func() []string {
 	return func() []string {
 		current := currentCompletionArg()
-		if !isRemotePath(current) {
+		if !deskconn.IsRemotePath(current) {
 			return machinePathCompletions(cfgDirectory)()
 		}
 		return remoteMachinePathCompletions(cfgDirectory, current)
@@ -471,8 +471,8 @@ func currentCompletionArg() string {
 
 // remoteMachinePathCompletions lists entries of the directory being typed in current.
 func remoteMachinePathCompletions(cfgDirectory, current string) []string {
-	machine, path := parseMachinePath(current)
-	realm, err := machineRealm(machine, cfgDirectory)
+	machine, path := deskconn.ParseMachinePath(current)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	// Remote paths complete through the daemon's connection, so not for a standalone machine
 	// while it isn't running.
 	if err != nil || !deskconn.ThroughDaemon(cfgDirectory, realm) {
@@ -541,19 +541,4 @@ func machineHasPersistentSession(localSession *xconn.Session, realm string) bool
 	}
 	_, ok = connected[realm]
 	return ok
-}
-
-func isRemotePath(s string) bool {
-	if filepath.IsAbs(s) && filepath.VolumeName(s) != "" {
-		return false
-	}
-	return strings.ContainsRune(s, ':')
-}
-
-func parseMachinePath(s string) (machine, path string) {
-	idx := strings.IndexByte(s, ':')
-	if idx < 0 {
-		return s, ""
-	}
-	return s[:idx], s[idx+1:]
 }

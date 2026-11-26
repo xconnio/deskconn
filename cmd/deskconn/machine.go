@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -194,7 +193,7 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 	if err != nil {
 		return err
 	}
-	if len(managed) == 0 && len(standalone) == 0 && !loggedIn(cfgDirectory) {
+	if len(managed) == 0 && len(standalone) == 0 && !deskconn.LoggedIn(cfgDirectory) {
 		fmt.Println("No machines. Sign in with `desk auth login`, or add a standalone machine with " +
 			"`desk machine add <name> --url <url>`.")
 		return nil
@@ -234,7 +233,7 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 	}
 	for _, m := range standalone {
 		if machine, ok := deskconn.ManagedMachineConflict(managed, m.Name); ok {
-			fmt.Fprintf(os.Stderr, "warning: %v\n", ambiguousMachineError(m.Name, machine))
+			fmt.Fprintf(os.Stderr, "warning: %v\n", deskconn.AmbiguousMachineError(m.Name, machine))
 		}
 	}
 	if fetched {
@@ -281,7 +280,7 @@ func managedMachinesToList(cfgDirectory string, refresh, haveStandalone bool) ([
 			machines = append(machines, d)
 		}
 	}
-	if !refresh && (len(machines) > 0 || !loggedIn(cfgDirectory)) {
+	if !refresh && (len(machines) > 0 || !deskconn.LoggedIn(cfgDirectory)) {
 		return machines, false, nil
 	}
 
@@ -299,7 +298,7 @@ func managedMachinesToList(cfgDirectory string, refresh, haveStandalone bool) ([
 // pingMachine pings machine count times (0 = until interrupted) a second apart, then prints
 // statistics like ping(8).
 func pingMachine(cfgDirectory, machine string, count int) error {
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -401,7 +400,7 @@ func machinePinger(cfgDirectory, realm string) (func() (int64, error), func(), e
 }
 
 func connectMachine(cfgDirectory, machine string) error {
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -432,7 +431,7 @@ func disconnectMachine(cfgDirectory, machine string, all bool) error {
 	if machine == "" {
 		return errors.New("specify a machine or use --all")
 	}
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -445,7 +444,7 @@ func disconnectMachine(cfgDirectory, machine string, all bool) error {
 }
 
 func showMachineInfo(cfgDirectory, machine, mode string) error {
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -508,7 +507,7 @@ func printMachineInfo(info common.MachineInfo) {
 }
 
 func streamMachineLogs(cfgDirectory, machine, source string, follow bool, tail int64, since, mode string) error {
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
@@ -516,59 +515,6 @@ func streamMachineLogs(cfgDirectory, machine, source string, follow bool, tail i
 		return deskconn.RunLogs(ctx, deskconn.DefaultMode(cfgDirectory, realm, mode), realm, cfgDirectory, source, follow,
 			tail, since, os.Stdout)
 	})
-}
-
-// machineRealm returns the realm the CLI names machineName's machine by: a standalone
-// machine saved on this client (see useStandaloneMachine), otherwise a managed machine of the
-// account, by its name, alias, ID or the start of its ID.
-func machineRealm(machineName, cfgDirectory string) (string, error) {
-	if machineName == "" {
-		return "", errors.New("no machine given; see desk machine ls")
-	}
-	standalone, err := deskconn.FindStandaloneMachine(cfgDirectory, machineName)
-	switch {
-	case err == nil:
-		// Only the cached managed machines: a standalone machine works offline and signed out.
-		managed, _ := common.MachinesFromCfg(cfgDirectory)
-		if machine, ok := deskconn.ManagedMachineConflict(managed, machineName); ok {
-			return "", ambiguousMachineError(machineName, machine)
-		}
-		return useStandaloneMachine(standalone), nil
-	case !errors.Is(err, deskconn.ErrStandaloneMachineNotFound):
-		return "", err
-	}
-	return managedMachineRealm(machineName, cfgDirectory)
-}
-
-// managedMachineRealm returns the realm of the account's machine machineName refers to,
-// fetching the account's machines if none are cached yet.
-func managedMachineRealm(machineName, cfgDirectory string) (string, error) {
-	machines, err := common.MachinesFromCfg(cfgDirectory)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	// No config.yml yet, or one with only standalone machines: fetch the account's machines,
-	// which says so when signed out.
-	if len(machines) == 0 && (errors.Is(err, os.ErrNotExist) || loggedIn(cfgDirectory)) {
-		machines, err = deskconn.FetchMachinesFromCloud(cfgDirectory)
-		if err != nil {
-			return "", err
-		}
-		if err := deskconn.CacheMachines(cfgDirectory, machines); err != nil {
-			return "", err
-		}
-	}
-
-	if d, ok := deskconn.ManagedMachineNamed(machines, machineName); ok {
-		return d.Realm, nil
-	}
-	for _, d := range machines {
-		if strings.HasPrefix(d.Authid, machineName) {
-			return d.Realm, nil
-		}
-	}
-
-	return "", fmt.Errorf("machine not found: %s; see desk machine ls", machineName)
 }
 
 // machineNames are the names of the managed machines cached and the standalone machines

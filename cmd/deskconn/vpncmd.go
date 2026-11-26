@@ -7,6 +7,7 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
 // vpnTunnelChildFlag marks the elevated process that "vpn connect" starts on Windows as the tunnel.
@@ -56,7 +57,7 @@ func dispatchVPNCommand(parsedCmd string, cmds *vpnCommands, cfgDirectory string
 	case cmds.connect.FullCommand():
 		routes, err := common.ParseVPNRoutes(*cmds.connectRoutes)
 		exitOnErr(err)
-		realm, err := machineRealm(*cmds.connectMachine, cfgDirectory)
+		realm, err := deskconn.MachineRealm(*cmds.connectMachine, cfgDirectory)
 		exitOnErr(err)
 		ctx, cancel := context.WithCancel(context.Background())
 		err = runVPNConnect(ctx, cfgDirectory, realm, *cmds.connectMachine, routes, *cmds.connectTunnelChild)

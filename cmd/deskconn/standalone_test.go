@@ -71,11 +71,11 @@ func TestStandaloneMachineResolution(t *testing.T) {
 		URL: testMachineURL, Username: alice}))
 	t.Cleanup(func() { common.SetStandaloneTargetFor(common.StandaloneMachineRealm(testLab), nil) })
 
-	realm, err := machineRealm(testOffice, dir)
+	realm, err := deskconn.MachineRealm(testOffice, dir)
 	require.NoError(t, err)
 	require.Equal(t, testRealm, realm)
 
-	realm, err = machineRealm(testLab, dir)
+	realm, err = deskconn.MachineRealm(testLab, dir)
 	require.NoError(t, err)
 	require.Equal(t, common.StandaloneMachineRealm(testLab), realm)
 	target, ok := common.StandaloneTargetFor(realm)
@@ -86,9 +86,9 @@ func TestStandaloneMachineResolution(t *testing.T) {
 	require.Contains(t, machineNames(dir), testOffice)
 	require.Contains(t, machineNames(dir), testLab)
 
-	_, err = machineRealm("nope", dir)
+	_, err = deskconn.MachineRealm("nope", dir)
 	require.ErrorContains(t, err, "machine not found")
-	_, err = machineRealm("", dir)
+	_, err = deskconn.MachineRealm("", dir)
 	require.ErrorContains(t, err, "no machine given", "not the first machine without an alias")
 }
 
@@ -101,16 +101,16 @@ func TestStandaloneMachineCollision(t *testing.T) {
 		{Authid: testOfficeID, Name: testLab, Realm: "realm.lab"},
 	}))
 
-	_, err := machineRealm(testLab, dir)
+	_, err := deskconn.MachineRealm(testLab, dir)
 	require.ErrorContains(t, err, "refers to both a standalone machine and a managed machine")
 	require.ErrorContains(t, err, "desk machine remove lab")
 
-	realm, err := machineRealm("aaaa1111", dir)
+	realm, err := deskconn.MachineRealm("aaaa1111", dir)
 	require.NoError(t, err, "the managed machine is still reachable by its ID")
 	require.Equal(t, "realm.lab", realm)
 
 	require.NoError(t, removeStandaloneMachine(dir, testLab), "and the standalone one can still be removed")
-	realm, err = machineRealm(testLab, dir)
+	realm, err = deskconn.MachineRealm(testLab, dir)
 	require.NoError(t, err)
 	require.Equal(t, "realm.lab", realm)
 }
@@ -124,10 +124,10 @@ func TestStandaloneMachineIDPrefixCollision(t *testing.T) {
 		{Authid: testOfficeID, Name: testOffice, Realm: testRealm},
 	}))
 
-	_, err := machineRealm("aaaa", dir)
+	_, err := deskconn.MachineRealm("aaaa", dir)
 	require.ErrorContains(t, err, "refers to both", "a short ID meant for the managed machine isn't taken over")
 	require.ErrorContains(t, err, testOfficeID, "the full ID tells them apart")
-	realm, err := machineRealm(testOfficeID, dir)
+	realm, err := deskconn.MachineRealm(testOfficeID, dir)
 	require.NoError(t, err)
 	require.Equal(t, testRealm, realm)
 }
@@ -149,11 +149,11 @@ func TestStandaloneAndManagedStayApart(t *testing.T) {
 		common.SetStandaloneTargetFor(common.StandaloneMachineRealm("lab2"), nil)
 	})
 
-	office, err := machineRealm(testOffice, dir)
+	office, err := deskconn.MachineRealm(testOffice, dir)
 	require.NoError(t, err)
-	lab, err := machineRealm(testLab, dir)
+	lab, err := deskconn.MachineRealm(testLab, dir)
 	require.NoError(t, err)
-	lab2, err := machineRealm("lab2", dir)
+	lab2, err := deskconn.MachineRealm("lab2", dir)
 	require.NoError(t, err)
 
 	_, standalone := common.StandaloneTargetFor(office)

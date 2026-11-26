@@ -158,3 +158,81 @@ func DaemonRunning(cfgDirectory string) bool {
 	_ = conn.Close()
 	return true
 }
+
+// MachineRealm returns the realm the CLI names machineName's machine by: a standalone
+// machine saved on this client (see useStandaloneMachine), otherwise a managed machine of the
+// account, by its name, alias, ID or the start of its ID.
+func MachineRealm(machineName, cfgDirectory string) (string, error) {
+	if machineName == "" {
+		return "", errors.New("no machine given; see desk machine ls")
+	}
+	standalone, err := FindStandaloneMachine(cfgDirectory, machineName)
+	switch {
+	case err == nil:
+		// Only the cached managed machines: a standalone machine works offline and signed out.
+		managed, _ := common.MachinesFromCfg(cfgDirectory)
+		if machine, ok := ManagedMachineConflict(managed, machineName); ok {
+			return "", AmbiguousMachineError(machineName, machine)
+		}
+		return useStandaloneMachine(standalone), nil
+	case !errors.Is(err, ErrStandaloneMachineNotFound):
+		return "", err
+	}
+	return managedMachineRealm(machineName, cfgDirectory)
+}
+
+// managedMachineRealm returns the realm of the account's machine machineName refers to,
+// fetching the account's machines if none are cached yet.
+func managedMachineRealm(machineName, cfgDirectory string) (string, error) {
+	machines, err := common.MachinesFromCfg(cfgDirectory)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	// No config.yml yet, or one with only standalone machines: fetch the account's machines,
+	// which says so when signed out.
+	if len(machines) == 0 && (errors.Is(err, os.ErrNotExist) || LoggedIn(cfgDirectory)) {
+		machines, err = FetchMachinesFromCloud(cfgDirectory)
+		if err != nil {
+			return "", err
+		}
+		if err := CacheMachines(cfgDirectory, machines); err != nil {
+			return "", err
+		}
+	}
+
+	if d, ok := ManagedMachineNamed(machines, machineName); ok {
+		return d.Realm, nil
+	}
+	for _, d := range machines {
+		if strings.HasPrefix(d.Authid, machineName) {
+			return d.Realm, nil
+		}
+	}
+
+	return "", fmt.Errorf("machine not found: %s; see desk machine ls", machineName)
+}
+
+// useStandaloneMachine makes machine's realm resolve to it for this process, and returns
+// that realm.
+func useStandaloneMachine(machine common.StandaloneMachine) string {
+	realm := common.StandaloneMachineRealm(machine.Name)
+	if _, ok := common.StandaloneTargetFor(realm); !ok {
+		common.SetStandaloneTargetFor(realm, machine.Target())
+	}
+	return realm
+}
+
+// AmbiguousMachineError reports name referring to both a standalone machine and managed, a
+// machine of the account, and how to tell them apart.
+func AmbiguousMachineError(name string, managed common.Machine) error {
+	return fmt.Errorf("%q refers to both a standalone machine and a managed machine of your account (%s); "+
+		"use the managed machine's full ID (%s) to reach it, or rename the standalone machine: "+
+		"desk machine remove %s, then desk machine add <new-name> --url <url>",
+		name, managed.Name, managed.Authid, name)
+}
+
+// LoggedIn reports whether the CLI has an account login, whose machines it can fetch.
+func LoggedIn(cfgDirectory string) bool {
+	_, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519"))
+	return err == nil
+}

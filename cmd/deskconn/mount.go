@@ -9,8 +9,8 @@ import (
 )
 
 func mountFiles(cfgDirectory, target, mountpoint, mode string, readOnly, debug bool) error {
-	machine, remotePath := parseMachinePath(target)
-	realm, err := machineRealm(machine, cfgDirectory)
+	machine, remotePath := deskconn.ParseMachinePath(target)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}
