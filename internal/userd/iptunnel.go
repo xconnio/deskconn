@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/vpnhelper"
 	"github.com/xconnio/xconn/bindings/go"
 	webrtc "github.com/xconnio/xconn/bindings/go/webrtc"
 )
@@ -22,7 +23,7 @@ import (
 // and the single tunnel it allows at a time once it is.
 type vpnServer struct {
 	mu     sync.Mutex
-	helper *common.VPNHelperClient // non-nil while armed by ArmVPNServing
+	helper *vpnhelper.VPNHelperClient // non-nil while armed by ArmVPNServing
 	active *vpnTunnelSession
 
 	// starting is claimed before setup begins so two tunnels can't race to
@@ -130,7 +131,7 @@ func (d *Deskconn) CloseVPNTunnel() {
 // duration, so "desk vpn serve" can return control to its caller right
 // away). Stays armed, serving tunnels one at a time, until
 // DisarmVPNServing or CloseVPNTunnel.
-func (d *Deskconn) ArmVPNServing(helper *common.VPNHelperClient) error {
+func (d *Deskconn) ArmVPNServing(helper *vpnhelper.VPNHelperClient) error {
 	d.vpn.mu.Lock()
 	defer d.vpn.mu.Unlock()
 
@@ -172,7 +173,7 @@ func (d *Deskconn) DisarmVPNServing() bool {
 	return true
 }
 
-func startVPNTunnelServer(channel common.MessageChannel, helper *common.VPNHelperClient) (*vpnTunnelSession, error) {
+func startVPNTunnelServer(channel common.MessageChannel, helper *vpnhelper.VPNHelperClient) (*vpnTunnelSession, error) {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNServerTUNName)
 	if err != nil {
 		return nil, fmt.Errorf("open tun: %w", err)
@@ -341,7 +342,7 @@ func ProxyVPNStartHandler(d *Deskconn) xconn.InvocationHandler {
 			return xconn.NewResultError(common.ErrInvalidArgument, err.Error())
 		}
 
-		helper, err := common.DialVPNHelper(helperSocket)
+		helper, err := vpnhelper.DialVPNHelper(helperSocket)
 		if err != nil {
 			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}

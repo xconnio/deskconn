@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/vpnhelper"
 	"github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
@@ -60,7 +61,7 @@ func pinTargets(ctx context.Context, session *webrtc.WebRTCSession) []string {
 // and this machine's traffic has been routed through it -- callers printing
 // something like "tunnel up" should wait for this rather than assume
 // success as soon as the call is made.
-func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, helper *common.VPNHelperClient,
+func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, helper *vpnhelper.VPNHelperClient,
 	routes common.VPNRoutes, onReady func()) error {
 	tun, ifaceName, err := helper.OpenTUN(common.VPNClientTUNName)
 	if err != nil {
@@ -213,7 +214,7 @@ func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, helper
 
 // routeAllTraffic sends all of this machine's IPv4 traffic and DNS lookups through the tunnel
 // on ifaceName and blocks IPv6, appending the undo of each step to teardown.
-func routeAllTraffic(helper *common.VPNHelperClient, ifaceName string, exitDNS []string, teardown *[]func()) error {
+func routeAllTraffic(helper *vpnhelper.VPNHelperClient, ifaceName string, exitDNS []string, teardown *[]func()) error {
 	if err := helper.ReplaceDefaultRoute(4, ifaceName); err != nil {
 		return fmt.Errorf("failed to change default route: %w", err)
 	}
@@ -244,7 +245,7 @@ func routeAllTraffic(helper *common.VPNHelperClient, ifaceName string, exitDNS [
 // routeDomains sends lookups of routes.Domains (and their subdomains) to the exit node's
 // resolvers through the tunnel on ifaceName, where router routes the addresses in the answers.
 // Each step's undo is appended to teardown.
-func routeDomains(helper *common.VPNHelperClient, ifaceName string, exitDNS []string, routes common.VPNRoutes,
+func routeDomains(helper *vpnhelper.VPNHelperClient, ifaceName string, exitDNS []string, routes common.VPNRoutes,
 	router *DNSRouter, teardown *[]func()) error {
 	servers := common.TunnelDNSServers(exitDNS)
 	if len(servers) == 0 {

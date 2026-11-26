@@ -1,4 +1,4 @@
-package common
+package vpnhelper
 
 import (
 	"encoding/json"

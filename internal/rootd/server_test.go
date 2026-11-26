@@ -10,13 +10,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/rootd"
+	"github.com/xconnio/deskconn/internal/vpnhelper"
 )
 
 // serve starts a Server for one client on a fresh socket, the way runRootd does, and returns
 // that client and a channel closed once Serve returns.
-func serve(t *testing.T) (*common.VPNHelperClient, <-chan struct{}) {
+func serve(t *testing.T) (*vpnhelper.VPNHelperClient, <-chan struct{}) {
 	t.Helper()
 	socketPath := filepath.Join(t.TempDir(), "rootd.sock")
 	listener, err := net.Listen("unixpacket", socketPath)
@@ -34,7 +34,7 @@ func serve(t *testing.T) (*common.VPNHelperClient, <-chan struct{}) {
 		server.Serve(conn.(*net.UnixConn))
 	}()
 
-	client, err := common.DialVPNHelper(socketPath)
+	client, err := vpnhelper.DialVPNHelper(socketPath)
 	require.NoError(t, err)
 	return client, done
 }
