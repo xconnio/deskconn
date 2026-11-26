@@ -381,10 +381,11 @@ func shellSetupContext(
 // and Op/Cols/Rows are filled in here. mode selects the connection policy:
 //   - "routed": QUIC only, no upgrade attempt.
 //   - "direct": P2P only, no QUIC fast-start.
-//   - "" (default): use userd's persistent connection: P2P if it has it,
-//     otherwise QUIC, migrating the running PTY to P2P once the connection
-//     upgrades. Without userd, fast-start on a QUIC connection of its own
-//     and migrate to P2P in the background the same way.
+//   - "" (default): use userd's persistent connection, on which XConn sends
+//     each new call direct once it has negotiated a direct path, otherwise
+//     through the Hub; the running PTY moves to the direct path once there
+//     is one. Without userd, fast-start on a QUIC connection of its own
+//     and migrate to P2P in the background.
 //
 // It returns an *ExitError if the command exits nonzero, and a *ConnectionError if
 // the machine can't be reached or the connection drops before the command exits.
@@ -521,7 +522,7 @@ func migrateShell(active *activeShellConn, primary *shellHandshakeResult,
 }
 
 // awaitDaemonP2P waits, for up to P2PRequestTimeout, for userd's connection to
-// realm's machine to upgrade to P2P.
+// realm's machine to have a direct path.
 func awaitDaemonP2P(ctx context.Context, realm, cfgDirectory string) (*DaemonStreams, error) {
 	ctx, cancel := context.WithTimeout(ctx, common.P2PRequestTimeout)
 	defer cancel()

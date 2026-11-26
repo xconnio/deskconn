@@ -33,6 +33,9 @@ type testCloud struct {
 	rawSocketURI string
 	machineKey   string
 	cfgDirectory string
+	// authenticator logs in the machine and the user, on the router and on the machine's
+	// direct path.
+	authenticator testCloudAuthenticator
 }
 
 type testCloudAuthenticator struct {
@@ -70,15 +73,25 @@ func startTestCloud(t *testing.T) *testCloud {
 	require.NoError(t, router.AddRealm(cloudMachineRealm, &xconn.RealmConfig{
 		AutoDiscloseCaller: true, Meta: true,
 		Roles: []xconn.RealmRole{
+			// As deploy/cloud-router/router.yaml, with XConn's direct path signaling.
 			{Name: "machine", Permissions: []xconn.Permission{
 				{URI: common.ProcedurePrefix, MatchPolicy: protocol.MatchPrefix, AllowRegister: true},
+				{URI: "io.xconn.peer.resolve", MatchPolicy: protocol.MatchExact, AllowRegister: true},
+				{URI: "io.xconn.peer.offer", MatchPolicy: protocol.MatchExact, AllowRegister: true},
+				{URI: "io.xconn.peer.offerer_candidates", MatchPolicy: protocol.MatchExact, AllowSubscribe: true},
+				{URI: "io.xconn.peer.answerer_candidates", MatchPolicy: protocol.MatchExact, AllowPublish: true},
 			}},
 			{Name: cloudUserRole, Permissions: []xconn.Permission{
 				{URI: common.ProcedurePrefix, MatchPolicy: protocol.MatchPrefix, AllowCall: true},
+				{URI: "io.xconn.peer.resolve", MatchPolicy: protocol.MatchExact, AllowCall: true},
+				{URI: "io.xconn.peer.offer", MatchPolicy: protocol.MatchExact, AllowCall: true},
+				{URI: "io.xconn.peer.offerer_candidates", MatchPolicy: protocol.MatchExact, AllowPublish: true},
+				{URI: "io.xconn.peer.answerer_candidates", MatchPolicy: protocol.MatchExact, AllowSubscribe: true},
 			}},
 		},
 	}))
-	server := xconn.NewServer(router, testCloudAuthenticator{machinePublic: machinePublic, userPublic: userPublic}, nil)
+	authenticator := testCloudAuthenticator{machinePublic: machinePublic, userPublic: userPublic}
+	server := xconn.NewServer(router, authenticator, nil)
 	t.Cleanup(func() { _ = server.Close() })
 	quic, err := server.ListenQUIC(t.Context(), "127.0.0.1:0", nil)
 	require.NoError(t, err)
@@ -93,7 +106,7 @@ func startTestCloud(t *testing.T) *testCloud {
 		[]byte(userPrivate+" "+cloudUserAuthID), 0o600))
 
 	cloud := &testCloud{t: t, rawSocketURI: "rs://" + raw.Addr().String(), machineKey: machinePrivate,
-		cfgDirectory: cfgDirectory}
+		cfgDirectory: cfgDirectory, authenticator: authenticator}
 	require.Eventually(t, func() bool {
 		conn, err := connectivity.ConnectMachineRealmQUIC(context.Background(), cloudMachineRealm, cfgDirectory)
 		if err == nil {
@@ -118,7 +131,17 @@ func (c *testCloud) machineOnline() (offline func()) {
 	defer cancel()
 	session, err := xconn.ConnectCryptosign(ctx, c.rawSocketURI, cloudMachineRealm, cloudMachineAuthID, c.machineKey)
 	require.NoError(c.t, err)
+	c.serveMachine(session)
 
+	var once sync.Once
+	offline = func() { once.Do(func() { _ = session.Leave() }) }
+	c.t.Cleanup(offline)
+	return offline
+}
+
+// serveMachine registers the machine's procedures on session, with keys of their own.
+func (c *testCloud) serveMachine(session *xconn.Session) {
+	c.t.Helper()
 	var mu sync.Mutex
 	keys := map[uint64]*common.SessionKeys{} // by caller, from the machine's side
 	handlers := map[string]xconn.InvocationHandler{
@@ -144,6 +167,9 @@ func (c *testCloud) machineOnline() (offline func()) {
 			mu.Lock()
 			enc := keys[inv.Caller()]
 			mu.Unlock()
+			if enc == nil { // as userd's callerKeys
+				return xconn.NewResultError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+			}
 			encrypted, err := inv.ArgBytes(0)
 			require.NoError(c.t, err)
 			request, err := common.DecryptPayload(encrypted, enc.ReceiveKey)
@@ -158,11 +184,6 @@ func (c *testCloud) machineOnline() (offline func()) {
 	for procedure, handler := range handlers {
 		require.NoError(c.t, session.Register(procedure, handler).Execute().Err, procedure)
 	}
-
-	var once sync.Once
-	offline = func() { once.Do(func() { _ = session.Leave() }) }
-	c.t.Cleanup(offline)
-	return offline
 }
 
 func connectedRealms(sessions *userd.ClientSessions) []string {
@@ -235,25 +256,6 @@ func TestLostConnection(t *testing.T) {
 	cloud.machineOnline()
 	require.Eventually(t, func() bool { return len(connectedRealms(sessions)) == 1 }, 20*time.Second,
 		100*time.Millisecond, "back once the machine is")
-}
-
-func TestConnectedSinceKeptAcrossUpgrade(t *testing.T) {
-	router, err := xconn.NewRouter(&xconn.RouterConfig{})
-	require.NoError(t, err)
-	require.NoError(t, router.AddRealm("realm1", xconn.DefaultRealmConfig()))
-	quic, err := xconn.ConnectInMemory(router, "realm1")
-	require.NoError(t, err)
-	p2p, err := xconn.ConnectInMemory(router, "realm1")
-	require.NoError(t, err)
-
-	sessions := userd.NewClientSessions()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sessions.StoreMachineSession(cloudMachineRealm, quic, nil, nil, ctx, cancel)
-	since := sessions.MachineSessions()[cloudMachineRealm]
-	time.Sleep(1100 * time.Millisecond)
-	sessions.StoreMachineSession(cloudMachineRealm, p2p, nil, nil, ctx, cancel)
-	require.Equal(t, since, sessions.MachineSessions()[cloudMachineRealm], "only the transport changed")
 }
 
 func TestProxiedCallsAtOnce(t *testing.T) {

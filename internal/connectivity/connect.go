@@ -21,8 +21,19 @@ func UnixSocketURI(path string) string {
 
 // ConnectMachineRealmQUIC connects to realm's machine: directly over QUIC or WebTransport for
 // a standalone machine the CLI resolved (see SetStandaloneTargetFor), otherwise through
-// the cloud over QUIC.
+// the cloud over QUIC. Every call stays on that connection.
 func ConnectMachineRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*MachineConn, error) {
+	return connectMachineRealm(ctx, realm, cfgDirectory, true)
+}
+
+// ConnectMachineRealmManaged is ConnectMachineRealmQUIC with XConn choosing the path of each
+// new call to a cloud machine: a direct WebRTC session once the machine has one, negotiated in
+// the background, otherwise the cloud connection, without waiting for it.
+func ConnectMachineRealmManaged(ctx context.Context, realm, cfgDirectory string) (*MachineConn, error) {
+	return connectMachineRealm(ctx, realm, cfgDirectory, false)
+}
+
+func connectMachineRealm(ctx context.Context, realm, cfgDirectory string, routedOnly bool) (*MachineConn, error) {
 	if target, ok := common.StandaloneTargetFor(realm); ok {
 		authenticator, err := target.Authenticator()
 		if err != nil {
@@ -41,14 +52,20 @@ func ConnectMachineRealmQUIC(ctx context.Context, realm, cfgDirectory string) (*
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
 
-	sess, err := xconn.ConnectQUIC(ctx, common.CloudQUICAddress(), realm, &xconn.QUICDialerConfig{
-		Authenticator: authenticator,
-		TLSConfig:     common.CloudQUICTLSConfig(),
-	})
+	connection, err := xconn.DialQUICWithTLS(ctx, common.CloudQUICAddress(), common.CloudQUICTLSConfig())
 	if err != nil {
 		return nil, err
 	}
-	return NewQUICMachineConn(sess), nil
+	client := &xconn.Client{Authenticator: authenticator, SerializerSpec: xconn.CBORSerializerSpec, RoutedOnly: routedOnly}
+	if !routedOnly {
+		client.Direct = &xconn.DirectConfig{ICEServers: ICEServers()}
+	}
+	session, err := connection.OpenSession(ctx, realm, client)
+	if err != nil {
+		_ = connection.Close()
+		return nil, err
+	}
+	return &MachineConn{Session: session, closeConn: connection.Close, close: session.Close}, nil
 }
 
 // ICEServers returns the STUN server plus, when DESKCONN_TURN_URL is set, a TURN server

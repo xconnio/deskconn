@@ -100,8 +100,6 @@ func ProxyFileOpHandler(clientSessions *ClientSessions, cfgDirectory string) xco
 		if invErr != nil {
 			return invErr
 		}
-		realm, _ := inv.ArgString(0)
-		defer clientSessions.holdSession(realm, machineSession)()
 
 		result, err := clientSessions.keys.call(machineSession, procedure, payload)
 		if err != nil {
@@ -142,7 +140,6 @@ func ProxyMachineInfoHandler(clientSessions *ClientSessions, cfgDirectory string
 		if err != nil {
 			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
-		defer clientSessions.holdSession(realm, machineSess)()
 
 		result, err := clientSessions.keys.call(machineSess, common.ProcedureMachineInfo, nil)
 		if err != nil {
@@ -164,7 +161,6 @@ func ProxyPingHandler(clientSessions *ClientSessions, cfgDirectory string) xconn
 		if err != nil {
 			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
-		defer clientSessions.holdSession(realm, machineSess)()
 
 		start := time.Now()
 		callResp := machineSess.Call(common.ProcedurePing).Execute()
@@ -193,7 +189,6 @@ func ProxyCatHandler(clientSessions *ClientSessions, cfgDirectory string) xconn.
 		if err != nil {
 			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
-		defer clientSessions.holdSession(realm, machineSession)()
 
 		var rejected *common.SessionKeys
 		for {

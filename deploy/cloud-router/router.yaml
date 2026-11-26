@@ -170,6 +170,24 @@ realm_source:
             uri: 'com.deskconn.webrtc.offerer.on_candidate'
             match: exact
             allow_subscribe: true
+          # XConn managed direct connections (io.xconn.peer.*), next to com.deskconn.webrtc.*
+          # while clients move to them.
+          - &peer_resolve
+            uri: 'io.xconn.peer.resolve'
+            match: exact
+            allow_call: true
+          - &peer_offer
+            uri: 'io.xconn.peer.offer'
+            match: exact
+            allow_call: true
+          - &peer_publish_candidate
+            uri: 'io.xconn.peer.offerer_candidates'
+            match: exact
+            allow_publish: true
+          - &peer_subscribe_candidate
+            uri: 'io.xconn.peer.answerer_candidates'
+            match: exact
+            allow_subscribe: true
       - name: 'user:owner'
         permissions: &machine_admin
           - *machine_call
@@ -177,6 +195,10 @@ realm_source:
           - *machine_media
           - *machine_publish_candidate
           - *machine_subscribe_candidate
+          - *peer_resolve
+          - *peer_offer
+          - *peer_publish_candidate
+          - *peer_subscribe_candidate
           - uri: 'com.deskconn.admin.'
             match: prefix
             allow_call: true
@@ -204,6 +226,18 @@ realm_source:
           match: exact
           allow_subscribe: true
         - uri: 'com.deskconn.webrtc.offerer.on_candidate'
+          match: exact
+          allow_publish: true
+        - uri: 'io.xconn.peer.resolve'
+          match: exact
+          allow_register: true
+        - uri: 'io.xconn.peer.offer'
+          match: exact
+          allow_register: true
+        - uri: 'io.xconn.peer.offerer_candidates'
+          match: exact
+          allow_subscribe: true
+        - uri: 'io.xconn.peer.answerer_candidates'
           match: exact
           allow_publish: true
         - uri: 'com.deskconn.desktop.detach'

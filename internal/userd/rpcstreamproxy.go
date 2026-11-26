@@ -2,16 +2,14 @@ package userd
 
 import (
 	"context"
-	"io"
-	"sync"
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/xconn/bindings/go"
 )
 
 // ProxyStreamHandler keeps CLI traffic on the daemon's authenticated machine
-// session. It forwards opaque encrypted bytes and pins a routed connection until
-// its stream finishes, even if the session upgrades to P2P meanwhile.
+// session. It forwards opaque encrypted bytes; each stream stays on the path XConn chose
+// for it when it started. Without a procedure, it reports whether new calls go direct.
 func ProxyStreamHandler(clients *ClientSessions, directory string) xconn.InvocationHandler {
 	return func(ctx context.Context, inv *xconn.Invocation) *xconn.Result {
 		realm, err := inv.ArgString(0)
@@ -25,11 +23,11 @@ func ProxyStreamHandler(clients *ClientSessions, directory string) xconn.Invocat
 		input := false
 		switch procedure {
 		case "":
-			_, rtc, connectErr := clients.machineTransports(ctx, realm, directory)
+			direct, connectErr := clients.directPath(ctx, realm, directory)
 			if connectErr != nil {
 				return xconn.NewResultError(common.ErrOperationFailed, connectErr.Error())
 			}
-			return xconn.NewResult(rtc != nil)
+			return xconn.NewResult(direct)
 		case common.ProcedureFileInitStream, common.ProcedureFileWriteStream:
 			input = true
 		case common.ProcedureFileListStream, common.ProcedureFileReadStream, common.ProcedureShellStream,
@@ -42,9 +40,7 @@ func ProxyStreamHandler(clients *ClientSessions, directory string) xconn.Invocat
 		if err != nil {
 			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
-		release := clients.holdSession(realm, session)
 		if input {
-			defer release()
 			stream, openErr := inv.ArgStream(3)
 			if openErr != nil {
 				return xconn.NewResultError(common.ErrInvalidArgument, openErr.Error())
@@ -54,33 +50,12 @@ func ProxyStreamHandler(clients *ClientSessions, directory string) xconn.Invocat
 		}
 		result := session.Call(procedure).ExecuteContext(ctx)
 		if result.Err != nil {
-			release()
 			return result
 		}
 		stream, err := result.ArgStream(1)
 		if err != nil {
-			release()
 			return xconn.NewResultError(common.ErrOperationFailed, err.Error())
 		}
-		return xconn.NewResult(nil, xconn.DuplexStream(&leasedRPCStream{ReadWriteCloser: stream, release: release}))
+		return xconn.NewResult(nil, xconn.DuplexStream(stream))
 	}
-}
-
-type leasedRPCStream struct {
-	io.ReadWriteCloser
-	release func()
-	once    sync.Once
-}
-
-func (s *leasedRPCStream) CloseWrite() error {
-	if half, ok := s.ReadWriteCloser.(interface{ CloseWrite() error }); ok {
-		return half.CloseWrite()
-	}
-	return io.ErrClosedPipe
-}
-
-func (s *leasedRPCStream) Close() error {
-	err := s.ReadWriteCloser.Close()
-	s.once.Do(s.release)
-	return err
 }

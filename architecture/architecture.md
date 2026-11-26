@@ -88,8 +88,8 @@ sequenceDiagram
 ### Raw streams
 
 Shell, exec, logs, port forwarding, agent forwarding and file transfer don't use procedure calls: they
-run on raw streams opened alongside the session (QUIC streams, or WebRTC data channels once the
-connection has upgraded to P2P). By default the CLI opens those on the same persistent connection,
+run on raw streams opened alongside the session (QUIC streams, or WebRTC data channels once XConn
+has a direct path to the device). By default the CLI opens those on the same persistent connection,
 through the daemon's stream proxy socket (`~/.deskconn/deskconn-streams.sock`), instead of connecting
 to the device itself. `--mode routed` and `--mode direct` still open a connection of their own, as does
 the default mode when the daemon isn't running.

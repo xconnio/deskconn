@@ -222,7 +222,9 @@ func cloudCycle(
 	if err != nil {
 		return false, err
 	}
-	client := &api.Client{SerializerSpec: api.CBORSerializerSpec, Authenticator: authenticator}
+	// The device is what clients connect to directly: it advertises itself with Expose below
+	// and never looks for a direct path of its own.
+	client := &api.Client{SerializerSpec: api.CBORSerializerSpec, Authenticator: authenticator, RoutedOnly: true}
 	device, err := connection.OpenSession(initialization, credentials.Realm, client)
 	if err != nil {
 		return false, err
@@ -309,6 +311,15 @@ func cloudCycle(
 		return false, err
 	}
 	defer provider.Close()
+	// Clients' sessions find and connect to this one through XConn's io.xconn.peer.* signaling;
+	// the provider above keeps com.deskconn.webrtc.* for older clients, direct mode and VPN. A
+	// Hub that doesn't allow the new signaling yet leaves clients on the routed path.
+	endpoint, err := device.Expose(ctx, router, &api.ExposeConfig{Authenticator: policy, ICEServers: servers})
+	if err != nil {
+		log.Printf("advertise direct connections: %v", err)
+	} else {
+		defer func() { _ = endpoint.Close() }()
+	}
 	stopInitialization()
 	for {
 		select {

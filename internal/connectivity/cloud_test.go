@@ -3,6 +3,7 @@ package connectivity_test
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -193,6 +194,26 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	}
 	require.NoError(t, direct.Close())
 	require.NoError(t, direct.Connection().Close())
+
+	// A client of XConn's managed path reaches the device directly too, as it advertises with
+	// Expose, and gets the same procedures and streams there.
+	tlsConfig := &tls.Config{ServerName: "localhost", MinVersion: tls.VersionTLS13, RootCAs: x509.NewCertPool()}
+	certificate, err := x509.ParseCertificate(listener.Certificate)
+	require.NoError(t, err)
+	tlsConfig.RootCAs.AddCert(certificate)
+	connection, err := api.DialQUICWithTLS(ctx, listener.Address, tlsConfig)
+	require.NoError(t, err)
+	defer connection.Close()
+	managed, err := connection.OpenSession(ctx, deviceRealm, &api.Client{
+		Authenticator: bobAuthenticator, SerializerSpec: api.CBORSerializerSpec,
+		Direct: &api.DirectConfig{ICEServers: []api.WebRTCICEServer{}},
+	})
+	require.NoError(t, err)
+	defer managed.Close()
+	require.Eventually(t, func() bool { return managed.Path() == api.PathDirect }, 10*time.Second, 10*time.Millisecond)
+	require.NoError(t, managed.Call("com.deskconn.echo").Arg("managed").ExecuteContext(ctx).Err)
+	checkStream(managed)
+	require.NoError(t, managed.Close())
 	davePublic, davePrivate, err := auth.GenerateCryptoSignKeyPair()
 	require.NoError(t, err)
 	expired := time.Now().Add(-time.Minute).Unix()
