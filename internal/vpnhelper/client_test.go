@@ -1,6 +1,6 @@
 //go:build linux
 
-package common_test
+package vpnhelper_test
 
 import (
 	"net"
@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/vpnhelper"
 )
 
 func TestVPNHelperClientAlive(t *testing.T) {
@@ -24,7 +24,7 @@ func TestVPNHelperClientAlive(t *testing.T) {
 		accepted <- conn
 	}()
 
-	client, err := common.DialVPNHelper(socketPath)
+	client, err := vpnhelper.DialVPNHelper(socketPath)
 	require.NoError(t, err)
 	defer func() { _ = client.Close() }()
 	server := <-accepted

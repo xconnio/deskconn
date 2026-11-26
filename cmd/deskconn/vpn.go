@@ -20,6 +20,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
+	"github.com/xconnio/deskconn/internal/vpnhelper"
 	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
 )
 
@@ -142,7 +143,7 @@ func runVPNConnectChild(cliCtx context.Context, cfgDirectory, realm, machine str
 		}
 	}()
 
-	helper, err := common.DialVPNHelper(socketPath)
+	helper, err := vpnhelper.DialVPNHelper(socketPath)
 	if err != nil {
 		return err
 	}
