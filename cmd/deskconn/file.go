@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn/bindings/go"
 )
 
 type fileCommands struct {
@@ -168,7 +166,7 @@ func moveFile(cfgDirectory, src, dst, mode string) error {
 		return err
 	}
 	payload, _ := json.Marshal(map[string]string{"old_path": srcPath, "new_path": dstPath})
-	return fileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileRename, payload, mode)
+	return deskconn.FileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileRename, payload, mode)
 }
 
 // transferProgressOut is where a transfer prints its progress: stderr, if show is set and
@@ -195,7 +193,7 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 			return err
 		}
 		payload, _ := json.Marshal(map[string]string{"src": srcPath, "dst": dstPath})
-		return fileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileCopy, payload, mode)
+		return deskconn.FileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileCopy, payload, mode)
 
 	case !srcRemote && dstRemote:
 		dstMachine, dstPath := deskconn.ParseMachinePath(dst)
@@ -209,10 +207,10 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 				return err
 			}
 			if info.Mode().IsRegular() {
-				return uploadViaDaemon(cfgDirectory, realm, src, dstPath, mode, streams, progress)
+				return deskconn.UploadViaDaemon(cfgDirectory, realm, src, dstPath, mode, streams, progress)
 			}
 		}
-		return transferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
+		return deskconn.TransferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
 			return deskconn.UploadFiles(session, src, dstPath, recursive, streams, progress)
 		})
 
@@ -222,93 +220,13 @@ func copyFiles(cfgDirectory, src, dst string, recursive bool, streams int, mode 
 		if err != nil {
 			return err
 		}
-		return transferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
+		return deskconn.TransferFiles(cfgDirectory, realm, mode, func(session common.StreamSession) error {
 			return deskconn.DownloadFiles(session, srcPath, dst, recursive, streams, progress)
 		})
 
 	default:
 		return errors.New("at least one of src or dst must be a remote path (machine:path)")
 	}
-}
-
-func uploadViaDaemon(directory, realm, source, destination, mode string, streams int, progress io.Writer) error {
-	source, err := filepath.Abs(source)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-	session, err := connectivity.ConnectDaemon(ctx, directory)
-	if err != nil {
-		return fmt.Errorf("connect to local daemon for upload: %w", err)
-	}
-
-	call := session.Call(common.ProcedureProxyUpload).
-		Args(realm, source, destination, max(streams, 0), progress != nil, mode)
-	if progress != nil {
-		call.ProgressReceiver(func(result *xconn.Result) {
-			_, _ = io.WriteString(progress, result.ArgStringOr(0, ""))
-		})
-	}
-	// XConn's RPC cancellation or session close can wait on its native runtime.
-	// Let the CLI exit on Ctrl+C so closing its socket also interrupts the daemon.
-	done := make(chan error, 1)
-	go func() {
-		defer session.Close()
-		done <- call.ExecuteContext(ctx).Err
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return err
-	}
-}
-
-// transferFiles runs transfer over mode's connection to realm. Without a mode it goes through
-// the local daemon, or when the daemon isn't running, over p2p, falling back to quic.
-func transferFiles(cfgDirectory, realm, mode string, transfer func(common.StreamSession) error) error {
-	ctx := context.Background()
-	mode = deskconn.DefaultMode(cfgDirectory, realm, mode)
-	viaQUIC := func() error {
-		quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer quicSess.Close()
-		return transfer(quicSess)
-	}
-
-	switch mode {
-	case ModeRouted:
-		return viaQUIC()
-	case ModeDirect:
-		p2pSess, err := deskconn.ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = p2pSess.Close() }()
-		return transfer(p2pSess)
-	}
-
-	daemon, err := deskconn.DialDaemonStreams(ctx, realm, cfgDirectory)
-	if !errors.Is(err, deskconn.ErrDaemonUnavailable) {
-		if err != nil {
-			return err
-		}
-		defer daemon.Close()
-		return transfer(daemon)
-	}
-	p2pSess, err := deskconn.ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
-	if err == nil {
-		defer func() { _ = p2pSess.Close() }()
-		return transfer(p2pSess)
-	}
-	fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
-	return viaQUIC()
 }
 
 func removeFile(cfgDirectory, target, mode string) error {
@@ -318,7 +236,7 @@ func removeFile(cfgDirectory, target, mode string) error {
 		return err
 	}
 	payload, _ := json.Marshal(map[string]string{jsonFieldPath: path})
-	return fileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileDelete, payload, mode)
+	return deskconn.FileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileDelete, payload, mode)
 }
 
 func catFile(cfgDirectory, target, mode string) error {
@@ -357,7 +275,7 @@ func editFile(cfgDirectory, target, mode string) error {
 		return err
 	}
 
-	original, err := readRemoteFile(cfgDirectory, realm, path, mode)
+	original, err := deskconn.ReadRemoteFile(cfgDirectory, realm, path, mode)
 	if err != nil {
 		return err
 	}
@@ -402,39 +320,12 @@ func editFile(cfgDirectory, target, mode string) error {
 
 	patch := deskconn.BuildEditPatch(original, edited)
 	payload, _ := json.Marshal(map[string]string{jsonFieldPath: path, "patch": patch})
-	if err := fileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileEdit, payload, mode); err != nil {
+	err = deskconn.FileOp(context.Background(), realm, cfgDirectory, common.ProcedureFileEdit, payload, mode)
+	if err != nil {
 		return err
 	}
 	fmt.Println("file updated")
 	return nil
-}
-
-func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
-	session, err := deskconn.ConnectMachineSession(context.Background(), cfgDirectory, realm,
-		deskconn.DefaultMode(cfgDirectory, realm, mode))
-	if err != nil {
-		return nil, err
-	}
-	if session.Proxied {
-		return deskconn.ReadFileViaProxy(session.Session, realm, path)
-	}
-	defer session.Close()
-	return deskconn.ReadFile(session.Session, path)
-}
-
-func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
-	session, err := deskconn.ConnectMachineSession(ctx, cfgDirectory, realm,
-		deskconn.DefaultMode(cfgDirectory, realm, mode))
-	if err != nil {
-		return err
-	}
-	if session.Proxied {
-		resp := session.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Execute()
-		return resp.Err
-	}
-	defer session.Close()
-	_, err = deskconn.CallFileOp(session.Session, procedure, payload)
-	return err
 }
 
 func machinePathCompletions(cfgDirectory string) func() []string {
@@ -493,7 +384,8 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	}
 	defer func() { _ = localSession.Leave() }()
 
-	if !machineHasPersistentSession(localSession, realm) {
+	connected, err := deskconn.ConnectedMachines(localSession)
+	if _, ok := connected[realm]; err != nil || !ok {
 		_ = localSession.Call(common.ProcedureConnect).Args(realm).Execute()
 		return nil
 	}
@@ -528,17 +420,4 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 		out = append(out, completion)
 	}
 	return out
-}
-
-func machineHasPersistentSession(localSession *xconn.Session, realm string) bool {
-	resp := localSession.Call(common.ProcedureConnectedMachines).Execute()
-	if resp.Err != nil || len(resp.Args) == 0 {
-		return false
-	}
-	connected, ok := resp.Args[0].(map[string]any)
-	if !ok {
-		return false
-	}
-	_, ok = connected[realm]
-	return ok
 }
