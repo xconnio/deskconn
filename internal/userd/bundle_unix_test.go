@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/xconnio/deskconn/internal/agent"
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/userd"
@@ -25,7 +26,7 @@ func TestBuildAndExtractTarballRoundTrip(t *testing.T) {
 	projectDir := filepath.Join(homeDir, ".claude", "projects", encodedProjectDir(homeDir, path))
 	writeFile(t, filepath.Join(projectDir, "session.jsonl"), []byte(`{"hello":"world"}`), time.Now())
 
-	sessions, err := common.DiscoverClaudeSessions(homeDir, path)
+	sessions, err := agent.DiscoverClaudeSessions(homeDir, path)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 

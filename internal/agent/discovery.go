@@ -1,4 +1,4 @@
-package common
+package agent
 
 import (
 	"bufio"
@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/xconnio/deskconn/internal/common"
 )
 
 // AgentSessionFile is one agent session's file on this machine.
@@ -28,9 +30,9 @@ type AgentSessionFile struct {
 // homeDir or absolute, newest first.
 func DiscoverAgentSessions(tool, homeDir, path string) ([]AgentSessionFile, error) {
 	switch tool {
-	case ClaudeTool:
+	case common.ClaudeTool:
 		return DiscoverClaudeSessions(homeDir, path)
-	case CodexTool:
+	case common.CodexTool:
 		return DiscoverCodexSessions(homeDir, path)
 	}
 	return nil, fmt.Errorf("unknown agent %q", tool)
@@ -38,11 +40,11 @@ func DiscoverAgentSessions(tool, homeDir, path string) ([]AgentSessionFile, erro
 
 // DiscoverAgentProjects lists the directories with tool's sessions on this machine, most
 // recently used first.
-func DiscoverAgentProjects(tool, homeDir string) ([]AgentProject, error) {
+func DiscoverAgentProjects(tool, homeDir string) ([]common.AgentProject, error) {
 	switch tool {
-	case ClaudeTool:
+	case common.ClaudeTool:
 		return DiscoverClaudeProjects(homeDir)
-	case CodexTool:
+	case common.CodexTool:
 		return DiscoverCodexProjects(homeDir)
 	}
 	return nil, fmt.Errorf("unknown agent %q", tool)
@@ -50,22 +52,22 @@ func DiscoverAgentProjects(tool, homeDir string) ([]AgentProject, error) {
 
 // SummarizeAgentSessions turns discovered session files into the summaries `agent ls` and the
 // web app show.
-func SummarizeAgentSessions(sessions []AgentSessionFile) []AgentSessionSummary {
-	var summaries []AgentSessionSummary
+func SummarizeAgentSessions(sessions []AgentSessionFile) []common.AgentSessionSummary {
+	var summaries []common.AgentSessionSummary
 	for _, s := range sessions {
 		var title string
-		var messages []AgentMessage
+		var messages []common.AgentMessage
 		switch s.Tool {
-		case ClaudeTool:
+		case common.ClaudeTool:
 			_, title, messages = readClaudeSessionTail(s.Path)
 			if title == "" {
 				title = ClaudeSessionTitle(s.Path)
 			}
-		case CodexTool:
+		case common.CodexTool:
 			messages = readCodexSessionTail(s.Path)
 			title = codexSessionTitle(s.Path)
 		}
-		summaries = append(summaries, AgentSessionSummary{
+		summaries = append(summaries, common.AgentSessionSummary{
 			Tool:      s.Tool,
 			SessionID: s.ID,
 			Title:     truncateTitle(title),
@@ -81,9 +83,9 @@ func SummarizeAgentSessions(sessions []AgentSessionFile) []AgentSessionSummary {
 // the project at path (relative to homeDir).
 func AgentSessionDir(tool, homeDir, path, name string) (string, error) {
 	switch tool {
-	case ClaudeTool:
+	case common.ClaudeTool:
 		return filepath.Join(homeDir, ".claude", "projects", ClaudeProjectDir(homeDir, path)), nil
-	case CodexTool:
+	case common.CodexTool:
 		// Codex keeps sessions by day, as rollout-YYYY-MM-DDThh-mm-ss-<id>.jsonl.
 		date, ok := strings.CutPrefix(name, "rollout-")
 		if !ok || len(date) < len("2006-01-02") {
@@ -147,7 +149,7 @@ func ClaudeSessionsIn(dir string) ([]AgentSessionFile, error) {
 			continue
 		}
 		sessions = append(sessions, AgentSessionFile{
-			Tool:    ClaudeTool,
+			Tool:    common.ClaudeTool,
 			ID:      strings.TrimSuffix(entry.Name(), ".jsonl"),
 			Path:    filepath.Join(dir, entry.Name()),
 			ModTime: info.ModTime(),
@@ -166,17 +168,17 @@ func sortByModTimeDesc(sessions []AgentSessionFile) {
 
 // DiscoverClaudeProjects lists the directories with Claude Code sessions on this machine,
 // most recently used first.
-func DiscoverClaudeProjects(homeDir string) ([]AgentProject, error) {
+func DiscoverClaudeProjects(homeDir string) ([]common.AgentProject, error) {
 	root := filepath.Join(homeDir, ".claude", "projects")
 	entries, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
-		return []AgentProject{}, nil
+		return []common.AgentProject{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	projects := []AgentProject{}
+	projects := []common.AgentProject{}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -189,7 +191,7 @@ func DiscoverClaudeProjects(homeDir string) ([]AgentProject, error) {
 		// the entry's name can't be reversed.
 		for _, s := range sessions[:min(len(sessions), 5)] {
 			if cwd, _, _ := readClaudeSessionTail(s.Path); cwd != "" {
-				projects = append(projects, AgentProject{Path: cwd, Sessions: len(sessions), UpdatedAt: sessions[0].ModTime})
+				projects = append(projects, common.AgentProject{Path: cwd, Sessions: len(sessions), UpdatedAt: sessions[0].ModTime})
 				break
 			}
 		}
@@ -198,13 +200,13 @@ func DiscoverClaudeProjects(homeDir string) ([]AgentProject, error) {
 	return projects, nil
 }
 
-func sortProjects(projects []AgentProject) {
-	slices.SortFunc(projects, func(a, b AgentProject) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+func sortProjects(projects []common.AgentProject) {
+	slices.SortFunc(projects, func(a, b common.AgentProject) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 }
 
 // readClaudeSessionTail reads the end of a session file: its cwd, its latest AI title and
 // its last chat messages, skipping tool calls, thinking and sidechains (subagents).
-func readClaudeSessionTail(path string) (cwd, title string, messages []AgentMessage) {
+func readClaudeSessionTail(path string) (cwd, title string, messages []common.AgentMessage) {
 	readTailLines(path, func(line []byte) {
 		var rec struct {
 			Type        string `json:"type"`
@@ -227,7 +229,7 @@ func readClaudeSessionTail(path string) (cwd, title string, messages []AgentMess
 				cwd = rec.CWD
 			}
 			if text := agentMessageText(rec.Message.Content); text != "" {
-				messages = append(messages, AgentMessage{Role: rec.Type, Text: text})
+				messages = append(messages, common.AgentMessage{Role: rec.Type, Text: text})
 			}
 		}
 	})
@@ -260,7 +262,7 @@ func codexSessions(homeDir string) ([]AgentSessionFile, []string, error) {
 		}
 		stem := strings.TrimSuffix(name, ".jsonl")
 		files = append(files, AgentSessionFile{
-			Tool:    CodexTool,
+			Tool:    common.CodexTool,
 			ID:      stem[max(len(stem)-codexIDLen, 0):],
 			Path:    path,
 			ModTime: info.ModTime(),
@@ -302,13 +304,13 @@ func DiscoverCodexSessions(homeDir, path string) ([]AgentSessionFile, error) {
 
 // DiscoverCodexProjects lists the directories with Codex sessions on this machine, most
 // recently used first.
-func DiscoverCodexProjects(homeDir string) ([]AgentProject, error) {
+func DiscoverCodexProjects(homeDir string) ([]common.AgentProject, error) {
 	files, cwds, err := codexSessions(homeDir)
 	if err != nil {
 		return nil, err
 	}
-	byDir := map[string]*AgentProject{}
-	projects := []AgentProject{}
+	byDir := map[string]*common.AgentProject{}
+	projects := []common.AgentProject{}
 	for i, f := range files {
 		if cwds[i] == "" {
 			continue
@@ -318,7 +320,7 @@ func DiscoverCodexProjects(homeDir string) ([]AgentProject, error) {
 			continue
 		}
 		// files are newest first, so a directory's first session is its latest.
-		byDir[cwds[i]] = &AgentProject{Path: cwds[i], Sessions: 1, UpdatedAt: f.ModTime}
+		byDir[cwds[i]] = &common.AgentProject{Path: cwds[i], Sessions: 1, UpdatedAt: f.ModTime}
 	}
 	for _, p := range byDir {
 		projects = append(projects, *p)
@@ -382,11 +384,11 @@ func codexMessage(line []byte) (role, text string) {
 }
 
 // readCodexSessionTail returns a Codex session's last chat messages.
-func readCodexSessionTail(path string) []AgentMessage {
-	var messages []AgentMessage
+func readCodexSessionTail(path string) []common.AgentMessage {
+	var messages []common.AgentMessage
 	readTailLines(path, func(line []byte) {
 		if role, text := codexMessage(line); text != "" {
-			messages = append(messages, AgentMessage{Role: role, Text: text})
+			messages = append(messages, common.AgentMessage{Role: role, Text: text})
 		}
 	})
 	return recentMessages(messages)
@@ -450,16 +452,16 @@ func readTailLines(path string, fn func(line []byte)) {
 
 // recentMessages returns messages' last AgentRecentMessages, keeping the latest prompt, which
 // tells sessions apart best, even past a long reply.
-func recentMessages(messages []AgentMessage) []AgentMessage {
+func recentMessages(messages []common.AgentMessage) []common.AgentMessage {
 	if len(messages) <= AgentRecentMessages {
 		return messages
 	}
 	cut := len(messages) - AgentRecentMessages
 	recent := messages[cut:]
-	if !slices.ContainsFunc(recent, func(m AgentMessage) bool { return m.Role == AgentRoleUser }) {
+	if !slices.ContainsFunc(recent, func(m common.AgentMessage) bool { return m.Role == AgentRoleUser }) {
 		for i := cut - 1; i >= 0; i-- {
 			if messages[i].Role == AgentRoleUser {
-				return append([]AgentMessage{messages[i]}, recent[1:]...)
+				return append([]common.AgentMessage{messages[i]}, recent[1:]...)
 			}
 		}
 	}

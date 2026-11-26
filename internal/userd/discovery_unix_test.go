@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/xconnio/deskconn/internal/agent"
 	"github.com/xconnio/deskconn/internal/common"
 )
 
@@ -40,7 +41,7 @@ func TestDiscoverClaudeSessionsFindsMatchingProjectSortedNewestFirst(t *testing.
 	otherDir := filepath.Join(homeDir, ".claude", "projects", encodedProjectDir(homeDir, "code/other"))
 	writeFile(t, filepath.Join(otherDir, "unrelated.jsonl"), []byte(`{}`), now)
 
-	sessions, err := common.DiscoverClaudeSessions(homeDir, path)
+	sessions, err := agent.DiscoverClaudeSessions(homeDir, path)
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
 	require.Equal(t, "newer.jsonl", filepath.Base(sessions[0].Path))
@@ -59,12 +60,12 @@ func TestDiscoverClaudeSessionsIndependentOfHomeDir(t *testing.T) {
 	dirB := filepath.Join(homeB, ".claude", "projects", encodedProjectDir(homeB, path))
 	writeFile(t, filepath.Join(dirB, "b.jsonl"), []byte(`{}`), time.Now())
 
-	sessionsA, err := common.DiscoverClaudeSessions(homeA, path)
+	sessionsA, err := agent.DiscoverClaudeSessions(homeA, path)
 	require.NoError(t, err)
 	require.Len(t, sessionsA, 1)
 	require.Equal(t, "a.jsonl", filepath.Base(sessionsA[0].Path))
 
-	sessionsB, err := common.DiscoverClaudeSessions(homeB, path)
+	sessionsB, err := agent.DiscoverClaudeSessions(homeB, path)
 	require.NoError(t, err)
 	require.Len(t, sessionsB, 1)
 	require.Equal(t, "b.jsonl", filepath.Base(sessionsB[0].Path))

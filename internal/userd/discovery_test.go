@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/agent"
 )
 
 const (
@@ -27,7 +27,7 @@ func jsonLine(t *testing.T, fields map[string]any) []byte {
 
 func TestDiscoverClaudeSessionsMissingDirReturnsEmpty(t *testing.T) {
 	homeDir := t.TempDir()
-	sessions, err := common.DiscoverClaudeSessions(homeDir, "/some/repo")
+	sessions, err := agent.DiscoverClaudeSessions(homeDir, "/some/repo")
 	require.NoError(t, err)
 	require.Empty(t, sessions)
 }
@@ -45,7 +45,7 @@ func TestSessionTitleUsesSummaryLine(t *testing.T) {
 	})...)
 	require.NoError(t, os.WriteFile(path, buf, 0600))
 
-	require.Equal(t, "Fix the login bug", common.ClaudeSessionTitle(path))
+	require.Equal(t, "Fix the login bug", agent.ClaudeSessionTitle(path))
 }
 
 func TestSessionTitleFallsBackToFirstUserMessage(t *testing.T) {
@@ -57,5 +57,5 @@ func TestSessionTitleFallsBackToFirstUserMessage(t *testing.T) {
 	})
 	require.NoError(t, os.WriteFile(path, buf, 0600))
 
-	require.Equal(t, "please refactor the parser", common.ClaudeSessionTitle(path))
+	require.Equal(t, "please refactor the parser", agent.ClaudeSessionTitle(path))
 }

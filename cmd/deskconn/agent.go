@@ -17,6 +17,7 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/olekukonko/tablewriter"
 
+	"github.com/xconnio/deskconn/internal/agent"
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/xconn/bindings/go"
@@ -203,11 +204,11 @@ func runAgentLs(cfgDirectory, machine, mode string) error {
 			return fmt.Errorf("failed to get home directory: %w", err)
 		}
 		for _, tool := range common.AgentTools() {
-			local, err := common.DiscoverAgentSessions(tool, homeDir, path)
+			local, err := agent.DiscoverAgentSessions(tool, homeDir, path)
 			if err != nil {
 				return fmt.Errorf("failed to discover local %s sessions: %w", tool, err)
 			}
-			sessions = append(sessions, common.SummarizeAgentSessions(local)...)
+			sessions = append(sessions, agent.SummarizeAgentSessions(local)...)
 		}
 	} else {
 		where = machine
@@ -295,9 +296,9 @@ func runAgentResume(sessionID string, printOnly bool) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	var matches []common.AgentSessionFile
+	var matches []agent.AgentSessionFile
 	for _, tool := range common.AgentTools() {
-		sessions, err := common.DiscoverAgentSessions(tool, homeDir, path)
+		sessions, err := agent.DiscoverAgentSessions(tool, homeDir, path)
 		if err != nil {
 			return fmt.Errorf("failed to discover local %s sessions: %w", tool, err)
 		}
