@@ -71,7 +71,7 @@ func runShell(cfgDirectory, machine string, command []string, mode string, forwa
 	if err := flags.check(command, forwardAgent); err != nil {
 		return err
 	}
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return err
 	}

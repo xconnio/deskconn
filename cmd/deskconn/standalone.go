@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -102,29 +101,4 @@ func disconnectRemovedMachine(cfgDirectory, name string) {
 	if err := session.Call(common.ProcedureDisconnect).Kwargs(kwargs).ExecuteContext(ctx).Err; err != nil {
 		fmt.Fprintf(os.Stderr, "warning: the local daemon may still be connected to %s: %v\n", name, err)
 	}
-}
-
-// useStandaloneMachine makes machine's realm resolve to it for this process, and returns
-// that realm.
-func useStandaloneMachine(machine common.StandaloneMachine) string {
-	realm := common.StandaloneMachineRealm(machine.Name)
-	if _, ok := common.StandaloneTargetFor(realm); !ok {
-		common.SetStandaloneTargetFor(realm, machine.Target())
-	}
-	return realm
-}
-
-// ambiguousMachineError reports name referring to both a standalone machine and managed, a
-// machine of the account, and how to tell them apart.
-func ambiguousMachineError(name string, managed common.Machine) error {
-	return fmt.Errorf("%q refers to both a standalone machine and a managed machine of your account (%s); "+
-		"use the managed machine's full ID (%s) to reach it, or rename the standalone machine: "+
-		"desk machine remove %s, then desk machine add <new-name> --url <url>",
-		name, managed.Name, managed.Authid, name)
-}
-
-// loggedIn reports whether the CLI has an account login, whose machines it can fetch.
-func loggedIn(cfgDirectory string) bool {
-	_, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519"))
-	return err == nil
 }

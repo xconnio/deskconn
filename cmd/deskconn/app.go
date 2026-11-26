@@ -12,6 +12,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/common"
 	"github.com/xconnio/deskconn/internal/connectivity"
+	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
 type appCommands struct {
@@ -81,7 +82,7 @@ func dispatchAppCommand(parsedCmd string, cmds *appCommands, cfgDirectory string
 // callMachine calls procedure with args on machine, routed over QUIC, and returns its
 // first result.
 func callMachine(cfgDirectory, machine, procedure string, args ...any) (any, error) {
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}

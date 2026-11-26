@@ -137,7 +137,7 @@ type agentMachine struct {
 // connectAgentMachine connects to machine with mode: 'routed' or 'direct' itself, otherwise
 // through the daemon's persistent session.
 func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, error) {
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("unknown machine %q: %w", machine, err)
 	}
@@ -328,7 +328,7 @@ func runAgentResumeRemote(cfgDirectory, machine, tool, sessionID, mode string) e
 	if err != nil {
 		return err
 	}
-	realm, err := machineRealm(machine, cfgDirectory)
+	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
 		return fmt.Errorf("unknown machine %q: %w", machine, err)
 	}
