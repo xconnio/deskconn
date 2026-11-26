@@ -215,8 +215,8 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.Header(tableHeader)
 	for _, d := range managed {
-		row := []any{common.ShortID(d.Authid), d.Name, modeManaged, d.Alias,
-			common.ConnectedSince(connectedMachines, d.Realm)}
+		row := []any{deskconn.ShortID(d.Authid), d.Name, modeManaged, d.Alias,
+			deskconn.ConnectedSince(connectedMachines, d.Realm)}
 		if detailed {
 			row = append(row, d.Organization.Name, d.Realm, "")
 		}
@@ -224,7 +224,7 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 	}
 	for _, m := range standalone {
 		row := []any{"", m.Name, modeStandalone, "",
-			common.ConnectedSince(connectedMachines, common.StandaloneMachineRealm(m.Name))}
+			deskconn.ConnectedSince(connectedMachines, common.StandaloneMachineRealm(m.Name))}
 		if detailed {
 			row = append(row, "", "", m.URL)
 		}

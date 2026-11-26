@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,7 +88,7 @@ func removeStandaloneMachine(cfgDirectory, name string) error {
 // standalone machine just removed as name: one added again under that name, maybe with
 // another URL or login, gets a connection of its own rather than the old one.
 func disconnectRemovedMachine(cfgDirectory, name string) {
-	if !common.DaemonRunning(cfgDirectory) {
+	if !daemonRunning(cfgDirectory) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -118,7 +119,7 @@ func useStandaloneMachine(machine common.StandaloneMachine) string {
 // the daemon is running. Without the daemon, a standalone machine is reached on a connection
 // of its own, as it was before the daemon could keep one: it needs neither daemon nor cloud.
 func throughDaemon(cfgDirectory, realm string) bool {
-	return !common.IsStandaloneMachineRealm(realm) || common.DaemonRunning(cfgDirectory)
+	return !common.IsStandaloneMachineRealm(realm) || daemonRunning(cfgDirectory)
 }
 
 // defaultMode is the --mode to reach realm's machine with: mode if given, otherwise "" (the
@@ -144,4 +145,15 @@ func ambiguousMachineError(name string, managed common.Machine) error {
 func loggedIn(cfgDirectory string) bool {
 	_, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519"))
 	return err == nil
+}
+
+// daemonRunning reports whether the current user's local daemon is listening on its socket:
+// a socket left behind by one that's gone refuses the connection.
+func daemonRunning(cfgDirectory string) bool {
+	conn, err := net.DialTimeout("unix", filepath.Join(cfgDirectory, "deskconn.sock"), time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
 // topMachinesView lists the account's managed machines, then the standalone ones.
@@ -144,17 +145,17 @@ func (v *topMachinesView) body(m *Model, width, height int) []string {
 	rows := make([]topRow, 0, len(entries))
 	for _, entry := range entries {
 		if standalone := entry.standalone; standalone != nil {
-			since := common.ConnectedSince(m.connected, common.StandaloneMachineRealm(standalone.Name))
+			since := deskconn.ConnectedSince(m.connected, common.StandaloneMachineRealm(standalone.Name))
 			rows = append(rows, topRow{style: m.connectedStyle(since), cells: []string{
 				standalone.Name, "standalone", "", "", standalone.URL, standaloneLogin(*standalone), since,
 			}})
 			continue
 		}
 		machine := entry.machine
-		since := common.ConnectedSince(m.connected, machine.Realm)
+		since := deskconn.ConnectedSince(m.connected, machine.Realm)
 		style := m.connectedStyle(since)
 		rows = append(rows, topRow{style: style, cells: []string{
-			machine.Name, "managed", machine.Alias, common.ShortID(machine.Authid), "via the cloud", "account", since,
+			machine.Name, "managed", machine.Alias, deskconn.ShortID(machine.Authid), "via the cloud", "account", since,
 		}})
 	}
 	return m.table(columns, rows, &v.list, width, height)
