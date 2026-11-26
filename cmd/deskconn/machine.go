@@ -462,32 +462,19 @@ func showMachineInfo(cfgDirectory, machine, mode string) error {
 }
 
 func fetchMachineInfo(cfgDirectory, realm, mode string) ([]byte, error) {
-	switch mode {
-	case ModeRouted:
-		quicSess, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return nil, err
-		}
-		defer quicSess.Connection().Close()
-		return deskconn.CallFileOp(quicSess.Session, common.ProcedureMachineInfo, nil)
-	case ModeDirect:
-		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = p2pSess.Leave() }()
-		return deskconn.CallFileOp(p2pSess, common.ProcedureMachineInfo, nil)
-	default:
-		localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
-		if err != nil {
-			return nil, err
-		}
-		callResp := localSession.Call(common.ProcedureProxyMachineInfo).Args(realm).Execute()
+	session, err := deskconn.ConnectMachineSession(context.Background(), cfgDirectory, realm, mode)
+	if err != nil {
+		return nil, err
+	}
+	if session.Proxied {
+		callResp := session.Call(common.ProcedureProxyMachineInfo).Args(realm).Execute()
 		if callResp.Err != nil {
 			return nil, callResp.Err
 		}
 		return callResp.ArgBytes(0)
 	}
+	defer session.Close()
+	return deskconn.CallFileOp(session.Session, common.ProcedureMachineInfo, nil)
 }
 
 // printMachineInfo prints info laid out like top(1).

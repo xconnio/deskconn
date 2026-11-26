@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 
-	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
@@ -18,38 +17,17 @@ func mountFiles(cfgDirectory, target, mountpoint, mode string, readOnly, debug b
 
 	mode = deskconn.DefaultMode(cfgDirectory, realm, mode)
 	connect := func(ctx context.Context) (*deskconn.MountConnection, error) {
-		switch mode {
-		case ModeRouted:
-			quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
-			if err != nil {
-				return nil, err
-			}
-			return &deskconn.MountConnection{
-				Call:  deskconn.DirectMountCaller(quicSess.Session),
-				Done:  quicSess.Done(),
-				Close: func() { _ = quicSess.Connection().Close() },
-			}, nil
-		case ModeDirect:
-			p2pSess, err := deskconn.ConnectMachineRealmP2P(ctx, realm, cfgDirectory)
-			if err != nil {
-				return nil, err
-			}
-			return &deskconn.MountConnection{
-				Call:  deskconn.DirectMountCaller(p2pSess),
-				Done:  p2pSess.Done(),
-				Close: func() { _ = p2pSess.Leave() },
-			}, nil
-		default:
-			localSession, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
-			if err != nil {
-				return nil, err
-			}
-			return &deskconn.MountConnection{
-				Call:  deskconn.ProxyMountCaller(localSession, realm),
-				Done:  localSession.Done(),
-				Close: func() { _ = localSession.Leave() },
-			}, nil
+		session, err := deskconn.ConnectMachineSession(ctx, cfgDirectory, realm, mode)
+		if err != nil {
+			return nil, err
 		}
+		var call deskconn.MountCaller
+		if session.Proxied {
+			call = deskconn.ProxyMountCaller(session.Session, realm)
+		} else {
+			call = deskconn.DirectMountCaller(session.Session)
+		}
+		return &deskconn.MountConnection{Call: call, Done: session.Done(), Close: session.Close}, nil
 	}
 
 	call, closeConn, err := deskconn.ReconnectingMountCaller(context.Background(), connect)

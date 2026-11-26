@@ -19,9 +19,7 @@ import (
 
 	"github.com/xconnio/deskconn/internal/agent"
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
-	"github.com/xconnio/xconn/bindings/go"
 )
 
 type agentCommands struct {
@@ -144,44 +142,33 @@ func connectAgentMachine(cfgDirectory, machine, mode string) (*agentMachine, err
 		return nil, fmt.Errorf("unknown machine %q: %w", machine, err)
 	}
 
-	var session *xconn.Session
-	var closeFn func()
-	switch deskconn.DefaultMode(cfgDirectory, realm, mode) {
-	case ModeRouted:
-		quicSess, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return nil, err
-		}
-		session, closeFn = quicSess.Session, func() { _ = quicSess.Connection().Close() }
-	case ModeDirect:
-		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return nil, err
-		}
-		session, closeFn = p2pSess, func() { _ = p2pSess.Leave() }
-	default:
-		localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
-		if err != nil {
+	mode = deskconn.DefaultMode(cfgDirectory, realm, mode)
+	session, err := deskconn.ConnectMachineSession(context.Background(), cfgDirectory, realm, mode)
+	if err != nil {
+		if mode != ModeRouted && mode != ModeDirect {
 			return nil, fmt.Errorf("could not reach local daemon: %w", err)
 		}
+		return nil, err
+	}
+	if session.Proxied {
 		return &agentMachine{
 			list: func(tool, path string) ([]common.AgentSessionSummary, error) {
-				return deskconn.CallAgentSessionListProxy(localSession, realm, tool, path)
+				return deskconn.CallAgentSessionListProxy(session.Session, realm, tool, path)
 			},
 			pull: func(tool, path, sessionID string) ([]common.AgentSessionBundle, error) {
-				return deskconn.CallAgentSessionPullProxy(localSession, realm, tool, path, sessionID)
+				return deskconn.CallAgentSessionPullProxy(session.Session, realm, tool, path, sessionID)
 			},
-			close: func() { _ = localSession.Leave() },
+			close: session.Close,
 		}, nil
 	}
 	return &agentMachine{
 		list: func(tool, path string) ([]common.AgentSessionSummary, error) {
-			return deskconn.CallAgentSessionList(session, tool, path)
+			return deskconn.CallAgentSessionList(session.Session, tool, path)
 		},
 		pull: func(tool, path, sessionID string) ([]common.AgentSessionBundle, error) {
-			return deskconn.CallAgentSessionPull(session, tool, path, sessionID)
+			return deskconn.CallAgentSessionPull(session.Session, tool, path, sessionID)
 		},
-		close: closeFn,
+		close: session.Close,
 	}, nil
 }
 
