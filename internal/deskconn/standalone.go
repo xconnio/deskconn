@@ -3,10 +3,12 @@ package deskconn
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -126,4 +128,33 @@ func writeConfig(cfgDirectory string, config common.Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 	return os.WriteFile(filepath.Join(cfgDirectory, "config.yml"), data, 0600)
+}
+
+// ThroughDaemon reports whether realm's machine is reached through the local daemon's
+// persistent connection by default: a managed machine's always, a standalone machine's while
+// the daemon is running. Without the daemon, a standalone machine is reached on a connection
+// of its own, as it was before the daemon could keep one: it needs neither daemon nor cloud.
+func ThroughDaemon(cfgDirectory, realm string) bool {
+	return !common.IsStandaloneMachineRealm(realm) || DaemonRunning(cfgDirectory)
+}
+
+// DefaultMode is the --mode to reach realm's machine with: mode if given, otherwise "" (the
+// local daemon's persistent connection), or routed (a connection of its own) for a standalone
+// machine while the daemon isn't running (see ThroughDaemon).
+func DefaultMode(cfgDirectory, realm, mode string) string {
+	if mode == "" && !ThroughDaemon(cfgDirectory, realm) {
+		return ModeRouted
+	}
+	return mode
+}
+
+// DaemonRunning reports whether the current user's local daemon is listening on its socket:
+// a socket left behind by one that's gone refuses the connection.
+func DaemonRunning(cfgDirectory string) bool {
+	conn, err := net.DialTimeout("unix", filepath.Join(cfgDirectory, "deskconn.sock"), time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }

@@ -75,7 +75,7 @@ func runShell(cfgDirectory, machine string, command []string, mode string, forwa
 	if err != nil {
 		return err
 	}
-	mode = defaultMode(cfgDirectory, realm, mode)
+	mode = deskconn.DefaultMode(cfgDirectory, realm, mode)
 	switch {
 	case *flags.list:
 		return listSessions(mode, realm, cfgDirectory, machine)
