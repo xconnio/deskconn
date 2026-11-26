@@ -201,7 +201,7 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 
 	// The daemon's connections, to managed machines and standalone ones; standalone machines
 	// work without the daemon too, so listing only them doesn't need it running.
-	connectedMachines, err := daemonConnectedMachines(cfgDirectory)
+	connectedMachines, err := deskconn.DaemonConnectedMachines(context.Background(), cfgDirectory)
 	if err != nil && len(managed) > 0 {
 		return err
 	}
@@ -240,25 +240,6 @@ func listMachines(cfgDirectory string, refresh, detailed bool) error {
 		return deskconn.CacheMachines(cfgDirectory, managed)
 	}
 	return nil
-}
-
-// daemonConnectedMachines returns when the local daemon connected to each machine it's
-// connected to, by realm.
-func daemonConnectedMachines(cfgDirectory string) (map[string]any, error) {
-	session, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = session.Leave() }()
-	resp := session.Call(common.ProcedureConnectedMachines).Execute()
-	if resp.Err != nil {
-		return nil, resp.Err
-	}
-	connected, ok := resp.Args[0].(map[string]any)
-	if !ok {
-		return nil, errors.New("expected a map of strings")
-	}
-	return connected, nil
 }
 
 // managedMachinesToList returns the account's machines desk ls shows, and whether they were
@@ -302,7 +283,7 @@ func pingMachine(cfgDirectory, machine string, count int) error {
 	if err != nil {
 		return err
 	}
-	ping, closePing, err := machinePinger(cfgDirectory, realm)
+	ping, closePing, err := deskconn.MachinePinger(cfgDirectory, realm)
 	if err != nil {
 		return err
 	}
@@ -367,38 +348,6 @@ pingLoop:
 	return nil
 }
 
-// machinePinger returns a func that pings realm's machine once and returns the round trip
-// in milliseconds: through the daemon (see throughDaemon), otherwise over a connection of its
-// own, which the returned close func closes.
-func machinePinger(cfgDirectory, realm string) (func() (int64, error), func(), error) {
-	if !deskconn.ThroughDaemon(cfgDirectory, realm) {
-		conn, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return nil, nil, err
-		}
-		return func() (int64, error) {
-			start := time.Now()
-			if err := conn.Call(common.ProcedurePing).Execute().Err; err != nil {
-				return 0, err
-			}
-			return time.Since(start).Milliseconds(), nil
-		}, func() { _ = conn.Connection().Close() }, nil
-	}
-
-	localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
-	if err != nil {
-		return nil, nil, err
-	}
-	return func() (int64, error) {
-		callResp := localSession.Call(common.ProcedureProxyPing).Args(realm).Execute()
-		if callResp.Err != nil {
-			return 0, callResp.Err
-		}
-		ms, _ := callResp.ArgInt64(0)
-		return ms, nil
-	}, func() { _ = localSession.Leave() }, nil
-}
-
 func connectMachine(cfgDirectory, machine string) error {
 	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
 	if err != nil {
@@ -448,7 +397,7 @@ func showMachineInfo(cfgDirectory, machine, mode string) error {
 	if err != nil {
 		return err
 	}
-	rawData, err := fetchMachineInfo(cfgDirectory, realm, deskconn.DefaultMode(cfgDirectory, realm, mode))
+	rawData, err := deskconn.FetchMachineInfo(cfgDirectory, realm, deskconn.DefaultMode(cfgDirectory, realm, mode))
 	if err != nil {
 		return err
 	}
@@ -458,22 +407,6 @@ func showMachineInfo(cfgDirectory, machine, mode string) error {
 	}
 	printMachineInfo(info)
 	return nil
-}
-
-func fetchMachineInfo(cfgDirectory, realm, mode string) ([]byte, error) {
-	session, err := deskconn.ConnectMachineSession(context.Background(), cfgDirectory, realm, mode)
-	if err != nil {
-		return nil, err
-	}
-	if session.Proxied {
-		callResp := session.Call(common.ProcedureProxyMachineInfo).Args(realm).Execute()
-		if callResp.Err != nil {
-			return nil, callResp.Err
-		}
-		return callResp.ArgBytes(0)
-	}
-	defer session.Close()
-	return deskconn.CallFileOp(session.Session, common.ProcedureMachineInfo, nil)
 }
 
 // printMachineInfo prints info laid out like top(1).

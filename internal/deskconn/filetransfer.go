@@ -2,14 +2,19 @@ package deskconn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
+	"github.com/xconnio/xconn/bindings/go"
 )
 
 const (
@@ -233,4 +238,86 @@ func uploadFiles(localPath, remotePath string, recursive bool, numWorkers int, p
 	err = runChunkWorkers(chunks, effectiveWorkers(numWorkers), newWorker(sourceIsDir, targetIsDirHint, progress))
 	progress.Finish(err)
 	return err
+}
+
+// UploadViaDaemon has the local daemon upload source to destination on realm's machine, printing
+// its progress to progress if set. Interrupted, it returns at once.
+func UploadViaDaemon(directory, realm, source, destination, mode string, streams int, progress io.Writer) error {
+	source, err := filepath.Abs(source)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	session, err := connectivity.ConnectDaemon(ctx, directory)
+	if err != nil {
+		return fmt.Errorf("connect to local daemon for upload: %w", err)
+	}
+
+	call := session.Call(common.ProcedureProxyUpload).
+		Args(realm, source, destination, max(streams, 0), progress != nil, mode)
+	if progress != nil {
+		call.ProgressReceiver(func(result *xconn.Result) {
+			_, _ = io.WriteString(progress, result.ArgStringOr(0, ""))
+		})
+	}
+	// XConn's RPC cancellation or session close can wait on its native runtime.
+	// Let the CLI exit on Ctrl+C so closing its socket also interrupts the daemon.
+	done := make(chan error, 1)
+	go func() {
+		defer session.Close()
+		done <- call.ExecuteContext(ctx).Err
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+}
+
+// TransferFiles runs transfer over mode's connection to realm. Without a mode it goes through
+// the local daemon, or when the daemon isn't running, over p2p, falling back to quic.
+func TransferFiles(cfgDirectory, realm, mode string, transfer func(common.StreamSession) error) error {
+	ctx := context.Background()
+	mode = DefaultMode(cfgDirectory, realm, mode)
+	viaQUIC := func() error {
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+		if err != nil {
+			return err
+		}
+		defer quicSess.Close()
+		return transfer(quicSess)
+	}
+
+	switch mode {
+	case ModeRouted:
+		return viaQUIC()
+	case ModeDirect:
+		p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = p2pSess.Close() }()
+		return transfer(p2pSess)
+	}
+
+	daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
+	if !errors.Is(err, ErrDaemonUnavailable) {
+		if err != nil {
+			return err
+		}
+		defer daemon.Close()
+		return transfer(daemon)
+	}
+	p2pSess, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
+	if err == nil {
+		defer func() { _ = p2pSess.Close() }()
+		return transfer(p2pSess)
+	}
+	fmt.Fprintln(os.Stderr, "direct connection unavailable, falling back to routed")
+	return viaQUIC()
 }

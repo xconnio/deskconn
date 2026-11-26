@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +10,6 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 
 	"github.com/xconnio/deskconn/internal/common"
-	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
@@ -79,31 +77,8 @@ func dispatchAppCommand(parsedCmd string, cmds *appCommands, cfgDirectory string
 	return true
 }
 
-// callMachine calls procedure with args on machine, routed over QUIC, and returns its
-// first result.
-func callMachine(cfgDirectory, machine, procedure string, args ...any) (any, error) {
-	realm, err := deskconn.MachineRealm(machine, cfgDirectory)
-	if err != nil {
-		return nil, err
-	}
-	session, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = session.Close() }()
-
-	resp := session.Call(procedure).Args(args...).Execute()
-	if resp.Err != nil {
-		return nil, resp.Err
-	}
-	if resp.ArgsLen() == 0 {
-		return nil, nil
-	}
-	return resp.Args[0], nil
-}
-
 func listApps(cfgDirectory, machine string) error {
-	result, err := callMachine(cfgDirectory, machine, common.ProcedureCapabilitiesList)
+	result, err := deskconn.CallMachine(cfgDirectory, machine, common.ProcedureCapabilitiesList)
 	if err != nil {
 		return err
 	}
@@ -141,7 +116,7 @@ func registerApp(cfgDirectory, machine, directory string) error {
 		return err
 	}
 
-	id, err := callMachine(cfgDirectory, machine, common.ProcedureManifestRegister, payload)
+	id, err := deskconn.CallMachine(cfgDirectory, machine, common.ProcedureManifestRegister, payload)
 	if err != nil {
 		return err
 	}
@@ -150,7 +125,7 @@ func registerApp(cfgDirectory, machine, directory string) error {
 }
 
 func unregisterApp(cfgDirectory, machine, id string) error {
-	if _, err := callMachine(cfgDirectory, machine, common.ProcedureManifestUnregister, id); err != nil {
+	if _, err := deskconn.CallMachine(cfgDirectory, machine, common.ProcedureManifestUnregister, id); err != nil {
 		return err
 	}
 	fmt.Printf("unregistered %s from %s\n", id, machine)
@@ -158,7 +133,7 @@ func unregisterApp(cfgDirectory, machine, id string) error {
 }
 
 func setAppEnabled(cfgDirectory, machine, id string, enabled bool) error {
-	if _, err := callMachine(cfgDirectory, machine, common.ProcedureCapabilitiesSet, id, enabled); err != nil {
+	if _, err := deskconn.CallMachine(cfgDirectory, machine, common.ProcedureCapabilitiesSet, id, enabled); err != nil {
 		return err
 	}
 	state := "disabled"

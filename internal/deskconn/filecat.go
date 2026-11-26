@@ -111,3 +111,34 @@ func streamCat(session *xconn.Session, procedure string, out io.Writer, args []a
 		}
 	}
 }
+
+// ReadRemoteFile reads path on realm's machine, connecting for mode as DefaultMode resolves it.
+func ReadRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
+	session, err := ConnectMachineSession(context.Background(), cfgDirectory, realm,
+		DefaultMode(cfgDirectory, realm, mode))
+	if err != nil {
+		return nil, err
+	}
+	if session.Proxied {
+		return ReadFileViaProxy(session.Session, realm, path)
+	}
+	defer session.Close()
+	return ReadFile(session.Session, path)
+}
+
+// FileOp calls the file procedure with payload on realm's machine, connecting for mode as
+// DefaultMode resolves it; through the daemon, with its proxy.
+func FileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
+	session, err := ConnectMachineSession(ctx, cfgDirectory, realm,
+		DefaultMode(cfgDirectory, realm, mode))
+	if err != nil {
+		return err
+	}
+	if session.Proxied {
+		resp := session.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Execute()
+		return resp.Err
+	}
+	defer session.Close()
+	_, err = CallFileOp(session.Session, procedure, payload)
+	return err
+}
