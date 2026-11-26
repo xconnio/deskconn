@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/xconn/bindings/go"
 )
@@ -48,7 +49,7 @@ func (m *Model) fetchConnected() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		session, err := common.ConnectDaemon(ctx, m.cfgDirectory)
+		session, err := connectivity.ConnectDaemon(ctx, m.cfgDirectory)
 		if err != nil {
 			return topConnectedMsg{}
 		}
@@ -136,7 +137,7 @@ type topSessions struct {
 }
 
 type topSession struct {
-	conn *common.MachineConn
+	conn *connectivity.MachineConn
 	keys *common.SessionKeys
 }
 
@@ -163,7 +164,7 @@ func (s *topSessions) viaDaemon() *xconn.Session {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), topDaemonTimeout)
 	defer cancel()
-	daemon, err := common.ConnectDaemon(ctx, s.cfgDirectory)
+	daemon, err := connectivity.ConnectDaemon(ctx, s.cfgDirectory)
 	if err != nil {
 		s.daemon = nil
 		return nil
@@ -240,7 +241,7 @@ func (s *topSessions) sessionFor(realm string) (*topSession, error) {
 func (s *topSessions) dial(realm string) (*topSession, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), topConnectTimeout)
 	defer cancel()
-	conn, err := common.ConnectMachineRealmQUIC(ctx, realm, s.cfgDirectory)
+	conn, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, s.cfgDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +342,7 @@ func (s *topSessions) Close() {
 }
 
 // closeMachineConn leaves conn's session and closes the connection under it.
-func closeMachineConn(conn *common.MachineConn) {
+func closeMachineConn(conn *connectivity.MachineConn) {
 	_ = conn.Close()
 	_ = conn.Connection().Close()
 }

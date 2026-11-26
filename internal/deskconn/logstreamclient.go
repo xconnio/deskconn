@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 )
 
 // RunLogs is the client entry point for `desk machine logs`. It validates since
@@ -57,7 +58,7 @@ func RunLogs(ctx context.Context, mode, realm, cfgDirectory, source string,
 
 func runLogsQUIC(ctx context.Context, realm, cfgDirectory, source string,
 	follow bool, tailN int64, since string, out io.Writer) error {
-	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return err
 	}

@@ -215,7 +215,7 @@ func newStandaloneConfig(cfgDirectory, transport, quicAddr, wtAddr, certFile,
 	config := &xconnd.StandaloneConfig{
 		TLSConfig:  &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13},
 		Realm:      common.StandaloneRealm,
-		ICEServers: common.ICEServers(),
+		ICEServers: xconnd.ICEServers(),
 	}
 	if transport == transportQUIC || transport == transportBoth {
 		config.QUICAddress = quicAddr

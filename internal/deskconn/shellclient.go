@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 )
 
 // ModeRouted/ModeDirect are the "routed"/"direct" --mode flag values every raw-stream
@@ -123,7 +124,7 @@ type shellHandshakeResult struct {
 
 func dialShellQUIC(ctx context.Context, realm, cfgDirectory string,
 	ctrl common.ShellControlMsg) (*shellHandshakeResult, error) {
-	quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}

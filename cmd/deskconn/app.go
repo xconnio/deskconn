@@ -11,6 +11,7 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 )
 
 type appCommands struct {
@@ -84,7 +85,7 @@ func callMachine(cfgDirectory, machine, procedure string, args ...any) (any, err
 	if err != nil {
 		return nil, err
 	}
-	session, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+	session, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 	if err != nil {
 		return nil, err
 	}

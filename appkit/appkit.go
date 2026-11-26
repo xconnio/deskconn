@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/thumbnail"
 	"github.com/xconnio/xconn/bindings/go"
 )
@@ -43,12 +44,12 @@ func CfgDirectory() (string, error) {
 
 // SocketURI is the Unix socket URI. Use Connect for a Windows-compatible connection.
 func SocketURI(cfgDirectory string) string {
-	return common.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
+	return connectivity.UnixSocketURI(filepath.Join(cfgDirectory, "deskconn.sock"))
 }
 
 // Connect joins deskconnd's local application realm on Unix or Windows.
 func Connect(ctx context.Context, cfgDirectory string) (*xconn.Session, error) {
-	return common.ConnectDaemon(ctx, cfgDirectory)
+	return connectivity.ConnectDaemon(ctx, cfgDirectory)
 }
 
 // Handler serves one of an app's procedures: req is the decrypted request, nil when there

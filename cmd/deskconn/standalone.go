@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	auth "github.com/xconnio/xconn/bindings/go/auth"
 )
@@ -36,10 +37,10 @@ func addStandaloneMachine(cfgDirectory string, machine common.StandaloneMachine)
 	if strings.TrimSpace(machine.Name) == "" || strings.ContainsAny(machine.Name, " \t\n:") {
 		return &usageError{msg: "machine name can't be empty or contain spaces or ':'"}
 	}
-	if _, err := common.ParseStandaloneURL(machine.URL); err != nil {
+	if _, err := connectivity.ParseStandaloneURL(machine.URL); err != nil {
 		return err
 	}
-	if _, err := common.StandaloneTLSConfig(machine.CertHash); err != nil {
+	if _, err := connectivity.StandaloneTLSConfig(machine.CertHash); err != nil {
 		return err
 	}
 	if machine.Username == "" {
@@ -93,7 +94,7 @@ func disconnectRemovedMachine(cfgDirectory, name string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	session, err := common.ConnectDaemon(ctx, cfgDirectory)
+	session, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		return
 	}

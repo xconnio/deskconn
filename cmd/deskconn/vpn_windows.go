@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/deskconn/internal/vpnwin"
 	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
@@ -62,7 +63,7 @@ func runRootd(_ rootdFlags) {
 }
 
 func callVPNProcedure(ctx context.Context, cfgDirectory, procedure string) error {
-	session, err := common.ConnectDaemon(ctx, cfgDirectory)
+	session, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		return err
 	}

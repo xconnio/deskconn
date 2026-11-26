@@ -63,10 +63,10 @@ func startStandaloneServer(t *testing.T, dbPath string, fixed ...userd.Standalon
 		certHash: common.CertificateFingerprint(cert)}
 }
 
-func (s *standaloneServer) connect(authenticator auth.ClientAuthenticator) (*common.MachineConn, error) {
+func (s *standaloneServer) connect(authenticator auth.ClientAuthenticator) (*xconnd.MachineConn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return common.ConnectStandalone(ctx, s.url, s.certHash, common.StandaloneRealm, authenticator)
+	return xconnd.ConnectStandalone(ctx, s.url, s.certHash, common.StandaloneRealm, authenticator)
 }
 
 func password(username, password string) auth.ClientAuthenticator {
@@ -112,7 +112,7 @@ func (s *standaloneServer) requireLogsInAs(t *testing.T, authenticator auth.Clie
 
 // admin is a caller of the users' procedures.
 type admin struct {
-	conn *common.MachineConn
+	conn *xconnd.MachineConn
 }
 
 func (s *standaloneServer) admin(t *testing.T, authenticator auth.ClientAuthenticator) *admin {

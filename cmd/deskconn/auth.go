@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
@@ -67,7 +68,7 @@ func runLogin(cfgDirectory, username string) error {
 	if err := login(username); err != nil {
 		return err
 	}
-	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	session, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func runLogout(cfgDirectory string) error {
 	if err := deskconn.Logout(cfgDirectory); err != nil {
 		return err
 	}
-	session, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+	session, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 	if err != nil {
 		log.Fatal(err)
 	}

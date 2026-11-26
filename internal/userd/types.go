@@ -11,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/xconn/bindings/go"
 	xconnauth "github.com/xconnio/xconn/bindings/go/auth"
 	xconnwebrtc "github.com/xconnio/xconn/bindings/go/webrtc"
@@ -19,7 +20,7 @@ import (
 // quicConn is a machine's QUIC connection plus a count of the operations running on it.
 // Once retired (its session upgraded to P2P) it closes as soon as that count is zero.
 type quicConn struct {
-	*common.MachineConn
+	*connectivity.MachineConn
 	closeConn func() error
 
 	mu      sync.Mutex
@@ -28,7 +29,7 @@ type quicConn struct {
 	closed  bool
 }
 
-func newQUICConn(conn *common.MachineConn) *quicConn {
+func newQUICConn(conn *connectivity.MachineConn) *quicConn {
 	return &quicConn{MachineConn: conn, closeConn: conn.Connection().Close}
 }
 
@@ -200,7 +201,7 @@ func (c *ClientSessions) SessionContext(realm string) (context.Context, bool) {
 // long-lived proxied call sharing this machine connection can independently re-issue itself
 // on the new session.
 func (c *ClientSessions) StoreMachineSession(realm string, session *xconn.Session,
-	webrtcSession *xconnwebrtc.WebRTCSession, quic *common.MachineConn, ctx context.Context,
+	webrtcSession *xconnwebrtc.WebRTCSession, quic *connectivity.MachineConn, ctx context.Context,
 	cancel context.CancelFunc) {
 	var conn *quicConn
 	if quic != nil {
@@ -422,7 +423,8 @@ func (c *ClientSessions) upgradeToWebRTC(quicSess *quicConn, realm, cfgDirectory
 	}
 
 	sessCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck
-	webrtcSess, err := common.ConnectWebrtcSession(quicSess.Session, common.ServedRealm(realm), authenticator, cancel)
+	webrtcSess, err := connectivity.ConnectWebrtcSession(quicSess.Session, common.ServedRealm(realm), authenticator,
+		cancel)
 	if err != nil {
 		log.Printf("p2p upgrade %s: %v", realm, err)
 		cancel()
@@ -518,7 +520,8 @@ func (c *ClientSessions) forget(realm string, session *xconn.Session) bool {
 // connectMachine connects to realm's machine through the router, or directly to a standalone
 // machine saved in config.yml, failing with ErrMachineOffline unless the machine answers on
 // the connection.
-func (c *ClientSessions) connectMachine(ctx context.Context, realm, cfgDirectory string) (*common.MachineConn, error) {
+func (c *ClientSessions) connectMachine(ctx context.Context, realm, cfgDirectory string) (
+	*connectivity.MachineConn, error) {
 	conn, err := connectMachineQUIC(ctx, realm, cfgDirectory)
 	if err != nil {
 		return nil, err
@@ -531,15 +534,15 @@ func (c *ClientSessions) connectMachine(ctx context.Context, realm, cfgDirectory
 	return conn, nil
 }
 
-// connectMachineQUIC is common.ConnectMachineRealmQUIC with, for a standalone machine, its
+// connectMachineQUIC is connectivity.ConnectMachineRealmQUIC with, for a standalone machine, its
 // address and login read afresh from config.yml, which this process learns them from.
-func connectMachineQUIC(ctx context.Context, realm, cfgDirectory string) (*common.MachineConn, error) {
+func connectMachineQUIC(ctx context.Context, realm, cfgDirectory string) (*connectivity.MachineConn, error) {
 	if common.IsStandaloneMachineRealm(realm) {
 		if err := common.LoadStandaloneTarget(cfgDirectory, realm); err != nil {
 			return nil, err
 		}
 	}
-	return common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+	return connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 }
 
 // machineTransports returns what raw streams to realm's machine can be opened on, connecting

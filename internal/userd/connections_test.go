@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/userd"
 	"github.com/xconnio/xconn/bindings/go"
 	"github.com/xconnio/xconn/bindings/go/auth"
@@ -94,7 +95,7 @@ func startTestCloud(t *testing.T) *testCloud {
 	cloud := &testCloud{t: t, rawSocketURI: "rs://" + raw.Addr().String(), machineKey: machinePrivate,
 		cfgDirectory: cfgDirectory}
 	require.Eventually(t, func() bool {
-		conn, err := common.ConnectMachineRealmQUIC(context.Background(), cloudMachineRealm, cfgDirectory)
+		conn, err := connectivity.ConnectMachineRealmQUIC(context.Background(), cloudMachineRealm, cfgDirectory)
 		if err == nil {
 			_ = conn.Close()
 			_ = conn.Connection().Close()

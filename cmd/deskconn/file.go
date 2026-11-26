@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/xconn/bindings/go"
 )
@@ -236,7 +237,7 @@ func uploadViaDaemon(directory, realm, source, destination, mode string, streams
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	session, err := common.ConnectDaemon(ctx, directory)
+	session, err := connectivity.ConnectDaemon(ctx, directory)
 	if err != nil {
 		return fmt.Errorf("connect to local daemon for upload: %w", err)
 	}
@@ -272,7 +273,7 @@ func transferFiles(cfgDirectory, realm, mode string, transfer func(common.Stream
 	ctx := context.Background()
 	mode = defaultMode(cfgDirectory, realm, mode)
 	viaQUIC := func() error {
-		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -330,7 +331,7 @@ func catFile(cfgDirectory, target, mode string) error {
 	}
 	switch defaultMode(cfgDirectory, realm, mode) {
 	case ModeRouted:
-		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -344,7 +345,7 @@ func catFile(cfgDirectory, target, mode string) error {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.CatFile(p2pSess, path)
 	default:
-		localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+		localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -422,7 +423,7 @@ func editFile(cfgDirectory, target, mode string) error {
 func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 	switch defaultMode(cfgDirectory, realm, mode) {
 	case ModeRouted:
-		quicSess, err := common.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
@@ -436,7 +437,7 @@ func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 		defer func() { _ = p2pSess.Leave() }()
 		return deskconn.ReadFile(p2pSess, path)
 	default:
-		localSession, err := common.ConnectDaemon(context.Background(), cfgDirectory)
+		localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
 		if err != nil {
 			return nil, err
 		}
@@ -447,7 +448,7 @@ func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
 func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
 	switch defaultMode(cfgDirectory, realm, mode) {
 	case ModeRouted:
-		quicSess, err := common.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
+		quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -463,7 +464,7 @@ func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload 
 		_, err = deskconn.CallFileOp(p2pSess, procedure, payload)
 		return err
 	default:
-		localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
+		localSession, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
 		if err != nil {
 			return err
 		}
@@ -522,7 +523,7 @@ func remoteMachinePathCompletions(cfgDirectory, current string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	localSession, err := common.ConnectDaemon(ctx, cfgDirectory)
+	localSession, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
 	if err != nil {
 		return nil
 	}

@@ -58,30 +58,30 @@ func startStandalone(t *testing.T, keys []string, passwords map[string]string) (
 		common.CertificateFingerprint(cert)
 }
 
-func connectStandalone(t *testing.T, target *common.StandaloneTarget) (*common.MachineConn, error) {
+func connectStandalone(t *testing.T, target *common.StandaloneTarget) (*xconnd.MachineConn, error) {
 	t.Helper()
 	authenticator, err := target.Authenticator()
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return common.ConnectStandalone(ctx, target.URL, target.CertHash, common.StandaloneRealm, authenticator)
+	return xconnd.ConnectStandalone(ctx, target.URL, target.CertHash, common.StandaloneRealm, authenticator)
 }
 
 func TestParseStandaloneURL(t *testing.T) {
-	u, err := common.ParseStandaloneURL("quic://203.0.113.5:18080")
+	u, err := xconnd.ParseStandaloneURL("quic://203.0.113.5:18080")
 	require.NoError(t, err)
 	require.Equal(t, "quic://203.0.113.5:18080", u.String())
 
-	u, err = common.ParseStandaloneURL("https://example.com:18081")
+	u, err = xconnd.ParseStandaloneURL("https://example.com:18081")
 	require.NoError(t, err)
 	require.Equal(t, "https://example.com:18081"+xconnd.WebTransportPath, u.String())
 
-	u, err = common.ParseStandaloneURL("https://example.com:443/custom")
+	u, err = xconnd.ParseStandaloneURL("https://example.com:443/custom")
 	require.NoError(t, err)
 	require.Equal(t, "/custom", u.Path)
 
 	for _, bad := range []string{"tcp://host:1", "unix:///tmp/d.sock", "quic://host", "https://host", "::"} {
-		_, err := common.ParseStandaloneURL(bad)
+		_, err := xconnd.ParseStandaloneURL(bad)
 		require.Error(t, err, bad)
 	}
 }
@@ -206,7 +206,7 @@ func TestStandaloneMachineRealms(t *testing.T) {
 
 	// Both at once, each as its own user, on the realm the machine serves.
 	for name, user := range map[string]string{"one": testUser, "two": otherUser} {
-		conn, err := common.ConnectMachineRealmQUIC(context.Background(), common.StandaloneMachineRealm(name), t.TempDir())
+		conn, err := xconnd.ConnectMachineRealmQUIC(context.Background(), common.StandaloneMachineRealm(name), t.TempDir())
 		require.NoError(t, err, name)
 		t.Cleanup(func() { _ = conn.Close() })
 		require.Equal(t, user, conn.Details().AuthID(), name)

@@ -64,7 +64,7 @@ func startEchoProxy(t *testing.T) (string, *userd.ClientSessions, *xconn.Session
 	require.NoError(t, err)
 	authenticator, err := auth.NewCryptoSignAuthenticator("client", privateKey, nil)
 	require.NoError(t, err)
-	connection, err := common.ConnectStandalone(t.Context(), "quic://"+listener.Address,
+	connection, err := connectivity.ConnectStandalone(t.Context(), "quic://"+listener.Address,
 		common.CertificateFingerprint(certificate), proxyTestRealm, authenticator)
 	require.NoError(t, err)
 	clients := userd.NewClientSessions()

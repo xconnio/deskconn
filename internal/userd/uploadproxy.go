@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/connectivity"
 	"github.com/xconnio/deskconn/internal/deskconn"
 	"github.com/xconnio/xconn/bindings/go"
 )
@@ -66,7 +67,7 @@ func uploadSession(ctx context.Context, clients *ClientSessions, realm, director
 			_ = session.Connection().Close()
 		}, nil
 	case deskconn.ModeRouted:
-		session, err := common.ConnectMachineRealmQUIC(ctx, realm, directory)
+		session, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, directory)
 		if err != nil {
 			return nil, nil, err
 		}
