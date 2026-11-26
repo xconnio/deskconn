@@ -1,9 +1,16 @@
 package common
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"os/user"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"gopkg.in/yaml.v3"
 
 	auth "github.com/xconnio/xconn/bindings/go/auth"
 )
@@ -138,4 +145,110 @@ func ServedRealm(realm string) string {
 		return StandaloneRealm
 	}
 	return realm
+}
+
+var ErrKeyExpired = errors.New("authentication key expired, please login again")
+
+func CredentialsFilePath() (string, error) {
+	cfgDirectory, err := CfgDirectory()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cfgDirectory, "credentials.json"), nil
+}
+
+// CfgDirectory returns ~/.deskconn, creating it if needed. It holds the machine's keys and the
+// daemon's socket, so only its owner may use it.
+func CfgDirectory() (string, error) {
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
+	cfgDirectory := filepath.Join(homedir, ".deskconn")
+	if err := os.MkdirAll(cfgDirectory, 0o700); err != nil {
+		return "", err
+	}
+	return cfgDirectory, nil
+}
+
+func MachinesFromCfg(cfgDirectory string) ([]Machine, error) {
+	config, err := readCfg(cfgDirectory)
+	if err != nil {
+		return []Machine{}, err
+	}
+	return config.Machines, nil
+}
+
+func readCfg(cfgDirectory string) (Config, error) {
+	var config Config
+	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
+	if err != nil {
+		return config, err
+	}
+	err = yaml.Unmarshal(data, &config)
+	return config, err
+}
+
+// LoadStandaloneTarget makes realm, a StandaloneMachineRealm, resolve to the standalone
+// machine config.yml saves under its name, read afresh: for the local daemon, which only
+// knows of standalone machines from there.
+func LoadStandaloneTarget(cfgDirectory, realm string) error {
+	name := strings.TrimPrefix(realm, StandaloneRealm+"/")
+	config, err := readCfg(cfgDirectory)
+	if err != nil {
+		return fmt.Errorf("read standalone machine %s: %w", name, err)
+	}
+	for _, machine := range config.Standalone {
+		if machine.Name != name {
+			continue
+		}
+		SetStandaloneTargetFor(realm, machine.Target())
+		return nil
+	}
+	return fmt.Errorf("no standalone machine named %s", name)
+}
+
+func ReadCredentials(cfgDirectory string) (string, string, error) {
+	path := filepath.Join(cfgDirectory, "id_ed25519")
+
+	credentialsStr, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", fmt.Errorf("user not logged in")
+		}
+		return "", "", err
+	}
+
+	credentials := strings.Split(string(credentialsStr), " ")
+	if len(credentials) < 2 {
+		return "", "", fmt.Errorf("malformed credentials file: %s", path)
+	}
+	privKey := strings.TrimSpace(credentials[0])
+	authid := strings.TrimSpace(credentials[1])
+
+	if len(credentials) >= 3 {
+		expiresAtStr := strings.TrimSpace(credentials[2])
+		expiresAt, err := time.Parse(time.RFC3339Nano, expiresAtStr)
+		if err == nil && time.Now().After(expiresAt) {
+			return "", "", fmt.Errorf("%w", ErrKeyExpired)
+		}
+	}
+
+	return authid, privKey, nil
+}
+
+type Credentials struct {
+	Realm      string `json:"realm"`
+	AuthID     string `json:"authid"`
+	PublicKey  string `json:"public_key"`
+	PrivateKey string `json:"private_key"` // #nosec
+}
+
+// CurrentUsername is the username a standalone machine logs in as unless --username says otherwise.
+func CurrentUsername() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return "deskconn"
 }

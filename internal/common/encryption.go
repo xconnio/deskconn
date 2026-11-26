@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/xconnio/xconn/bindings/go"
 	packetcrypto "github.com/xconnio/xconn/bindings/go/crypto"
 )
 
@@ -96,4 +97,63 @@ func DecryptPayload(data, key []byte) ([]byte, error) {
 func IsPublicKey(s string) bool {
 	raw, err := hex.DecodeString(s)
 	return err == nil && len(raw) == ed25519.PublicKeySize
+}
+
+// SessionKeys is one X25519 key exchange's derived send/receive keys, from
+// the calling (client) side's perspective.
+type SessionKeys struct {
+	SendKey    []byte
+	ReceiveKey []byte
+}
+
+// ClientKeyExchange performs a key exchange against session's
+// ProcedureKeyExchange, as the calling side.
+func ClientKeyExchange(session *xconn.Session) (*SessionKeys, error) {
+	return ClientKeyExchangeWith(session, ProcedureKeyExchange)
+}
+
+// ClientKeyExchangeWith performs a key exchange against procedure, as the calling side.
+func ClientKeyExchangeWith(session *xconn.Session, procedure string) (*SessionKeys, error) {
+	publicKey, privateKey, err := CreateX25519KeyPair()
+	if err != nil {
+		return nil, err
+	}
+
+	keyResp := session.Call(procedure).Args(publicKey).Execute()
+	if keyResp.Err != nil {
+		return nil, keyResp.Err
+	}
+
+	serverPublicKey, err := keyResp.ArgBytes(0)
+	if err != nil {
+		return nil, err
+	}
+
+	sendKey, receiveKey, err := ClientKeyExchangeKeys(privateKey, serverPublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SessionKeys{SendKey: sendKey, ReceiveKey: receiveKey}, nil
+}
+
+// EncryptedCall encrypts payload with enc, calls procedure with it, and
+// decrypts the single-argument encrypted result.
+func EncryptedCall(session *xconn.Session, procedure string, payload []byte, enc *SessionKeys) ([]byte, error) {
+	encrypted, err := EncryptPayload(payload, enc.SendKey)
+	if err != nil {
+		return nil, err
+	}
+
+	opResp := session.Call(procedure).Args(encrypted).Execute()
+	if opResp.Err != nil {
+		return nil, opResp.Err
+	}
+
+	encResult, err := opResp.ArgBytes(0)
+	if err != nil {
+		return nil, err
+	}
+
+	return DecryptPayload(encResult, enc.ReceiveKey)
 }
