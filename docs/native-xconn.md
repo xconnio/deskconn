@@ -7,7 +7,7 @@ File-cat and file search use encrypted progressive RPC results.
 File uploads, downloads, shell, ports, agent forwarding and logs use encrypted
 RPC-associated byte streams. VPN retains its native datagram channel.
 
-The app uses the published XConn Go module and Native SDK `v0.6.6`. A sibling
+The app uses the published XConn Go module and Native SDK `v0.6.8`. A sibling
 Core checkout and Rust are not required.
 
 ## Build and test on Linux or Apple Silicon macOS
@@ -84,7 +84,7 @@ Unix applications may continue using `appkit.SocketURI` with a normal client.
 ## Shared connectivity
 
 RPC-associated streams, Rust bridge forwarding, Unix yamux application sessions
-and native WebRTC stream carriers use the published XConn 0.6.6 binding and SDK.
+and native WebRTC stream carriers use the published XConn 0.6.8 binding and SDK.
 No XConn source workspace is needed.
 
 The former raw-stream relay sockets and feature data-channel endpoints are

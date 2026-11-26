@@ -257,7 +257,11 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 		_ = dave.Close()
 		_ = dave.Connection().Close()
 	}
-	require.ErrorContains(t, err, "authentication", "an expired key must not open a direct session")
+	// The peer can close the channel before the authentication error reaches the client.
+	const rejectedSession = `authentication|^xconn: failed to read: channel closed$`
+	require.Nil(t, dave, "an expired key must not open a direct session")
+	require.Error(t, err)
+	require.Regexp(t, rejectedSession, err.Error())
 	require.NoError(
 		t,
 		service.Publish("remove.machine").
@@ -275,7 +279,9 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 		_ = revoked.Close()
 		_ = revoked.Connection().Close()
 	}
-	require.ErrorContains(t, err, "authentication", "a removed key must not open a new direct session")
+	require.Nil(t, revoked, "a removed key must not open a new direct session")
+	require.Error(t, err)
+	require.Regexp(t, rejectedSession, err.Error())
 	require.NoError(t, accepted.Close())
 	reconnected, _, err := listener.AcceptConnection(ctx)
 	require.NoError(t, err)
