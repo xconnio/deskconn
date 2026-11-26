@@ -28,6 +28,7 @@ type Deskconn struct {
 	appRegistry          *AppRegistry
 	desktop              bool
 	vpn                  *vpnServer
+	vpnChannels          vpnChannelPairs
 	capabilities         *capabilities
 	streamConns          streamConns
 	settings             *settings

@@ -87,6 +87,7 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 		return api.NewResult(nil, api.DuplexStream(endpoint))
 	}).ExecuteContext(ctx).Err)
 	backendResults := make(chan error, 4)
+	connectionIDs := make(chan string, 2)
 	directory := t.TempDir()
 	public, private, err := auth.GenerateCryptoSignKeyPair()
 	require.NoError(t, err)
@@ -119,7 +120,11 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	}
 	go func() {
 		application := &app.App{Session: localSession, Prefixes: []string{"com.deskconn."},
-			DatagramChannel: func(channel *api.WebRTCDataChannel) {
+			DatagramChannel: func(connectionID string, channel *api.WebRTCDataChannel) {
+				connectionIDs <- connectionID
+				if channel.Label() == "vpn-data" {
+					return
+				}
 				channel.OnMessage(func(message api.WebRTCDataChannelMessage) {
 					if !message.IsString || string(message.Data) != "hello" {
 						backendResults <- fmt.Errorf("datagram payload changed")
@@ -178,8 +183,26 @@ func TestCloudAttachmentLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, direct.Call("com.deskconn.echo").Arg("direct").ExecuteContext(ctx).Err)
 	checkStream(direct.Session)
-	channel, err := direct.OpenChannel("vpn", nil)
+	channel, err := direct.OpenChannel("vpn-control", nil)
 	require.NoError(t, err)
+	ordered, retries := false, uint16(0)
+	dataChannel, err := direct.OpenChannel("vpn-data", &api.WebRTCDataChannelInit{
+		Ordered: &ordered, MaxRetransmits: &retries,
+	})
+	require.NoError(t, err)
+	defer dataChannel.Close()
+	var ids []string
+	for range 2 {
+		select {
+		case id := <-connectionIDs:
+			require.NotEmpty(t, id)
+			ids = append(ids, id)
+		case <-ctx.Done():
+			t.Fatal("WebRTC provider did not dispatch both VPN channels")
+		}
+	}
+	require.Equal(t, ids[0], ids[1])
+	require.NoError(t, dataChannel.Close())
 	require.NoError(t, channel.SendText("hello"))
 	packet, err := channel.ReadDataPacketContext(ctx)
 	require.NoError(t, err)

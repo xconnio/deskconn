@@ -44,6 +44,7 @@ the current user's local daemon.
 
 Files, shell, ports, agents and logs use encrypted RPC byte streams. WebRTC
 uses one reliable ordered data channel per stream, without additional yamux.
-VPN retains its native unreliable data channel through `App.DatagramChannel`.
+VPN uses separate channels for reliable setup messages and unordered IP packets
+with zero retransmits. Both are dispatched through `App.DatagramChannel`.
 Removed keys block new direct sessions; authenticated sessions remain active
 until closed.

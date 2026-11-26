@@ -70,15 +70,16 @@ func startClient(t *testing.T, allowed func(net.IP) bool) *stack.Stack {
 	}, stack.AddressProperties{}))
 	client.SetRouteTable([]tcpip.Route{{Destination: header.IPv4EmptySubnet, NIC: 1}})
 
-	fake := &fakeChannel{text: make(chan string, 1)}
+	fake := &fakeChannel{}
+	control := &fakeChannel{text: make(chan string, 1)}
 	fake.onSend = func(data []byte) {
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(data)})
 		endpoint.InjectInbound(header.IPv4ProtocolNumber, pkt)
 		pkt.DecRef()
 	}
-	sess, err := startVPNTunnelServer(fake, allowed)
+	sess, err := startVPNTunnelServer(fake, control, allowed)
 	require.NoError(t, err)
-	require.Contains(t, <-fake.text, `"vpn-ready"`)
+	require.Contains(t, <-control.text, `"vpn-ready"`)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -234,16 +235,17 @@ func echoRequestPacket(dst net.IP, id, seq uint16, payload []byte) []byte {
 func startRawServer(t *testing.T, allowed func(net.IP) bool) (*fakeChannel, <-chan []byte) {
 	t.Helper()
 	out := make(chan []byte, 64)
-	fake := &fakeChannel{text: make(chan string, 1)}
+	fake := &fakeChannel{}
+	control := &fakeChannel{text: make(chan string, 1)}
 	fake.onSend = func(data []byte) {
 		select {
 		case out <- append([]byte(nil), data...):
 		default:
 		}
 	}
-	sess, err := startVPNTunnelServer(fake, allowed)
+	sess, err := startVPNTunnelServer(fake, control, allowed)
 	require.NoError(t, err)
-	<-fake.text
+	<-control.text
 	t.Cleanup(sess.close)
 	return fake, out
 }

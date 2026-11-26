@@ -267,13 +267,12 @@ const (
 	// side needs a reassembly protocol of its own.
 	VPNMTU = 1200
 
-	VPNChannelLabel = "vpn"
+	VPNDataChannelLabel    = "vpn-data"
+	VPNControlChannelLabel = "vpn-control"
 
 	// VPNFrameOpen  and VPNFrameReady are the "type" discriminators for the two
 	// control frames exchanged -- as DataChannel *text* messages -- before
-	// either side starts treating channel messages as raw binary IP
-	// packets. VPNFrameOpen also lets userd's relay dispatch tell a
-	// VPN channel apart from a file-stream channel.
+	// the client starts routing raw IP packets over the data channel.
 	VPNFrameOpen  = "vpn-open"
 	VPNFrameReady = "vpn-ready"
 
@@ -283,16 +282,6 @@ const (
 
 	vpnSendBufferHigh = 512 * 1024
 	vpnSendBufferLow  = 256 * 1024
-
-	// VPNMaxRetransmits bounds how many times SCTP will retry a lost chunk
-	// before giving up on it, instead of giving up immediately (0). Kept
-	// small and the channel stays unordered so tunneled TCP retransmits
-	// aren't needlessly duplicated and one loss can't head-of-line-block
-	// later packets, but it recovers most single, independent losses on the
-	// underlying path -- which otherwise pass straight through to whatever
-	// is running over the tunnel (ping/ICMP most visibly, since it has no
-	// retry of its own).
-	VPNMaxRetransmits = 2
 )
 
 // VPNFallbackDNS returns the resolvers a VPN client uses, through the

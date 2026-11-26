@@ -4,12 +4,10 @@ package deskconn
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -45,7 +43,7 @@ func pinTargets(ctx context.Context, session *webrtc.WebRTCSession) []string {
 	return ips
 }
 
-// ConnectVPNClient opens a VPN data channel on session, sets up this
+// ConnectVPNClient opens VPN data and control channels on session, sets up this
 // machine's local TUN device, does the open/ready handshake with the
 // remote end, then routes this machine's traffic through the tunnel (only
 // routes, as common.ParseVPNRoutes gives them, if any are given) and
@@ -85,73 +83,15 @@ func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, helper
 	// routes.Domains as they're looked up; a no-op without domains.
 	router := NewDNSRouter(routes.Domains, func(cidr string) error { return helper.AddTunnelRoute(cidr, ifaceName) })
 
-	ordered, maxRetransmits := false, uint16(common.VPNMaxRetransmits)
-	channel, err := session.OpenChannel(common.VPNChannelLabel, &webrtc.DataChannelInit{
-		Ordered:        &ordered,
-		MaxRetransmits: &maxRetransmits,
+	channel, ready, closedCh, closeChannels, err := openVPNChannels(ctx, session, func(packet []byte) {
+		if _, err := tun.Write(router.Filter(packet)); err != nil {
+			log.Debugf("iptunnel: tun write failed: %v", err)
+		}
 	})
 	if err != nil {
 		return err
 	}
-	teardown = append(teardown, func() { _ = channel.Close() })
-
-	// Registered up front so a rejection on the remote end (e.g. not armed to serve) is
-	// noticed the instant the channel closes, instead of sitting out the full
-	// VPNHandshakeTimeout waiting for a "ready" frame that was never coming.
-	closedCh := make(chan struct{})
-	var closedOnce sync.Once
-	signalClosed := func() { closedOnce.Do(func() { close(closedCh) }) }
-	channel.OnClose(signalClosed)
-	channel.OnError(func(error) { signalClosed() })
-
-	openCh := make(chan struct{})
-	channel.OnOpen(func() { close(openCh) })
-	select {
-	case <-openCh:
-	case <-closedCh:
-		return fmt.Errorf("remote machine closed the vpn channel before it opened")
-	case <-time.After(common.VPNHandshakeTimeout):
-		return fmt.Errorf("timed out opening vpn data channel")
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	readyCh := make(chan common.VPNReadyFrame, 1)
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		if msg.IsString {
-			var frame common.VPNReadyFrame
-			if json.Unmarshal(msg.Data, &frame) == nil && frame.Type == common.VPNFrameReady {
-				select {
-				case readyCh <- frame:
-				default:
-				}
-			}
-			return
-		}
-		if _, werr := tun.Write(router.Filter(msg.Data)); werr != nil {
-			log.Debugf("iptunnel: tun write failed: %v", werr)
-		}
-	})
-
-	openFrame, err := json.Marshal(common.VPNOpenFrame{Type: common.VPNFrameOpen})
-	if err != nil {
-		return err
-	}
-	if err := channel.SendText(string(openFrame)); err != nil {
-		return err
-	}
-
-	var ready common.VPNReadyFrame
-	select {
-	case ready = <-readyCh:
-	case <-closedCh:
-		return fmt.Errorf("remote machine rejected the tunnel (not currently serving? " +
-			"it needs \"desk vpn serve\" run on it first)")
-	case <-time.After(common.VPNHandshakeTimeout):
-		return fmt.Errorf("timed out waiting for the remote machine to set up the tunnel")
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	teardown = append(teardown, closeChannels)
 
 	// Pin the addresses that must keep working after the default route is replaced -- see
 	// pinTargets. Each goes via its own family's default route: the WebRTC peer may well be
@@ -207,7 +147,6 @@ func ConnectVPNClient(ctx context.Context, session *webrtc.WebRTCSession, helper
 	case <-closedCh:
 	case <-ctx.Done():
 	}
-	signalClosed()
 
 	return nil
 }
