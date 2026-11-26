@@ -77,7 +77,7 @@ go build -tags xconn_static -ldflags "-linkmode external -extldflags '-static'" 
 
 Windows local applications use authenticated loopback yamux because the native
 SDK has no Windows Unix-socket support. The daemon writes an owner-only endpoint
-file with a fresh random secret. CLI commands use `common.ConnectDaemon`;
+file with a fresh random secret. CLI commands use `connectivity.ConnectDaemon`;
 applications use `appkit.Connect(ctx, cfgDirectory)` on every platform.
 Unix applications may continue using `appkit.SocketURI` with a normal client.
 
