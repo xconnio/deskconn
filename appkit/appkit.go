@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/thumbnail"
 	"github.com/xconnio/xconn/bindings/go"
 )
 
@@ -82,13 +83,13 @@ func EncryptedCall(session *xconn.Session, procedure string, payload []byte, key
 // MaxThumbnailSourceSize is the largest image ImageThumbnail is used for, and
 // ThumbnailMaxDim is the longest side of a thumbnail, in pixels.
 const (
-	MaxThumbnailSourceSize = common.MaxThumbnailSourceSize
-	ThumbnailMaxDim        = common.ThumbnailMaxDim
+	MaxThumbnailSourceSize = thumbnail.MaxThumbnailSourceSize
+	ThumbnailMaxDim        = thumbnail.ThumbnailMaxDim
 )
 
 // ImageThumbnail, VideoThumbnail and PDFThumbnail return a base64 JPEG thumbnail of the
 // file at path, like deskconnd's file browser shows, or "" if it can't be made. Videos
 // need ffmpeg and PDFs pdftocairo.
-func ImageThumbnail(path string) string { return common.ImageThumbnail(path) }
-func VideoThumbnail(path string) string { return common.VideoThumbnail(path) }
-func PDFThumbnail(path string) string   { return common.PDFThumbnail(path) }
+func ImageThumbnail(path string) string { return thumbnail.ImageThumbnail(path) }
+func VideoThumbnail(path string) string { return thumbnail.VideoThumbnail(path) }
+func PDFThumbnail(path string) string   { return thumbnail.PDFThumbnail(path) }

@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/deskconn/internal/common"
+	"github.com/xconnio/deskconn/internal/thumbnail"
 )
 
 // thumbnailWorkers caps concurrent decodes/ffmpeg/pdftocairo runs across all callers,
@@ -343,12 +344,12 @@ func sameModTime(a, b os.FileInfo) bool {
 // gets none.
 func thumbnailGenerator(name string, size int64) func(string) string {
 	switch {
-	case isImageFile(name) && size <= common.MaxThumbnailSourceSize:
-		return common.ImageThumbnail
+	case isImageFile(name) && size <= thumbnail.MaxThumbnailSourceSize:
+		return thumbnail.ImageThumbnail
 	case isVideoFile(name):
-		return common.VideoThumbnail
+		return thumbnail.VideoThumbnail
 	case isPDFFile(name):
-		return common.PDFThumbnail
+		return thumbnail.PDFThumbnail
 	}
 	return nil
 }
