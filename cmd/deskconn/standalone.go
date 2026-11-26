@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +88,7 @@ func removeStandaloneMachine(cfgDirectory, name string) error {
 // standalone machine just removed as name: one added again under that name, maybe with
 // another URL or login, gets a connection of its own rather than the old one.
 func disconnectRemovedMachine(cfgDirectory, name string) {
-	if !daemonRunning(cfgDirectory) {
+	if !deskconn.DaemonRunning(cfgDirectory) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -115,24 +114,6 @@ func useStandaloneMachine(machine common.StandaloneMachine) string {
 	return realm
 }
 
-// throughDaemon reports whether realm's machine is reached through the local daemon's
-// persistent connection by default: a managed machine's always, a standalone machine's while
-// the daemon is running. Without the daemon, a standalone machine is reached on a connection
-// of its own, as it was before the daemon could keep one: it needs neither daemon nor cloud.
-func throughDaemon(cfgDirectory, realm string) bool {
-	return !common.IsStandaloneMachineRealm(realm) || daemonRunning(cfgDirectory)
-}
-
-// defaultMode is the --mode to reach realm's machine with: mode if given, otherwise "" (the
-// local daemon's persistent connection), or routed (a connection of its own) for a standalone
-// machine while the daemon isn't running (see throughDaemon).
-func defaultMode(cfgDirectory, realm, mode string) string {
-	if mode == "" && !throughDaemon(cfgDirectory, realm) {
-		return ModeRouted
-	}
-	return mode
-}
-
 // ambiguousMachineError reports name referring to both a standalone machine and managed, a
 // machine of the account, and how to tell them apart.
 func ambiguousMachineError(name string, managed common.Machine) error {
@@ -146,15 +127,4 @@ func ambiguousMachineError(name string, managed common.Machine) error {
 func loggedIn(cfgDirectory string) bool {
 	_, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519"))
 	return err == nil
-}
-
-// daemonRunning reports whether the current user's local daemon is listening on its socket:
-// a socket left behind by one that's gone refuses the connection.
-func daemonRunning(cfgDirectory string) bool {
-	conn, err := net.DialTimeout("unix", filepath.Join(cfgDirectory, "deskconn.sock"), time.Second)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
 }

@@ -372,7 +372,7 @@ pingLoop:
 // in milliseconds: through the daemon (see throughDaemon), otherwise over a connection of its
 // own, which the returned close func closes.
 func machinePinger(cfgDirectory, realm string) (func() (int64, error), func(), error) {
-	if !throughDaemon(cfgDirectory, realm) {
+	if !deskconn.ThroughDaemon(cfgDirectory, realm) {
 		conn, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
 		if err != nil {
 			return nil, nil, err
@@ -449,7 +449,7 @@ func showMachineInfo(cfgDirectory, machine, mode string) error {
 	if err != nil {
 		return err
 	}
-	rawData, err := fetchMachineInfo(cfgDirectory, realm, defaultMode(cfgDirectory, realm, mode))
+	rawData, err := fetchMachineInfo(cfgDirectory, realm, deskconn.DefaultMode(cfgDirectory, realm, mode))
 	if err != nil {
 		return err
 	}
@@ -526,8 +526,8 @@ func streamMachineLogs(cfgDirectory, machine, source string, follow bool, tail i
 		return err
 	}
 	return runUntilInterrupted("Stopping log stream...", func(ctx context.Context) error {
-		return deskconn.RunLogs(ctx, defaultMode(cfgDirectory, realm, mode), realm, cfgDirectory, source, follow, tail, since,
-			os.Stdout)
+		return deskconn.RunLogs(ctx, deskconn.DefaultMode(cfgDirectory, realm, mode), realm, cfgDirectory, source, follow,
+			tail, since, os.Stdout)
 	})
 }
 

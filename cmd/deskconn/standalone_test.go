@@ -194,15 +194,15 @@ func TestStandaloneDefaultModeFollowsDaemon(t *testing.T) {
 	dir := t.TempDir()
 	lab := common.StandaloneMachineRealm(testLab)
 
-	require.Equal(t, ModeRouted, defaultMode(dir, lab, ""), "no daemon")
-	require.Equal(t, "", defaultMode(dir, testRealm, ""), "managed machines always use the daemon")
-	require.Equal(t, ModeDirect, defaultMode(dir, lab, ModeDirect))
+	require.Equal(t, ModeRouted, deskconn.DefaultMode(dir, lab, ""), "no daemon")
+	require.Equal(t, "", deskconn.DefaultMode(dir, testRealm, ""), "managed machines always use the daemon")
+	require.Equal(t, ModeDirect, deskconn.DefaultMode(dir, lab, ModeDirect))
 
 	socket := filepath.Join(dir, "deskconn.sock")
 	listener, err := net.Listen("unix", socket)
 	require.NoError(t, err)
-	require.Equal(t, "", defaultMode(dir, lab, ""), "the daemon is running")
-	require.Equal(t, ModeRouted, defaultMode(dir, lab, ModeRouted))
+	require.Equal(t, "", deskconn.DefaultMode(dir, lab, ""), "the daemon is running")
+	require.Equal(t, ModeRouted, deskconn.DefaultMode(dir, lab, ModeRouted))
 
 	// Left behind by a daemon that's gone: refused, so it's not mistaken for a running one.
 	if l, ok := listener.(*net.UnixListener); ok {
@@ -210,5 +210,5 @@ func TestStandaloneDefaultModeFollowsDaemon(t *testing.T) {
 	}
 	require.NoError(t, listener.Close())
 	require.FileExists(t, socket)
-	require.Equal(t, ModeRouted, defaultMode(dir, lab, ""), "a stale socket")
+	require.Equal(t, ModeRouted, deskconn.DefaultMode(dir, lab, ""), "a stale socket")
 }
