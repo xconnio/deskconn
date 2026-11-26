@@ -43,6 +43,14 @@ func (anyKeyAuthenticator) Authenticate(request auth.Request) (auth.Response, er
 	return nil, errors.New("cryptosign only")
 }
 
+// addOwnerRealm adds realm to router, its owner role allowed to call any procedure.
+func addOwnerRealm(t *testing.T, router *xconn.Router, realm string) {
+	t.Helper()
+	require.NoError(t, router.AddRealm(realm, &xconn.RealmConfig{Roles: []xconn.RealmRole{{
+		Name: "owner", Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix", AllowCall: true}},
+	}}}))
+}
+
 func startStreamProxy(t *testing.T) (string, *userd.ClientSessions) {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "rpcproxy")
@@ -51,9 +59,7 @@ func startStreamProxy(t *testing.T) (string, *userd.ClientSessions) {
 	router, err := xconn.NewRouter(nil)
 	require.NoError(t, err)
 	t.Cleanup(router.Close)
-	require.NoError(t, router.AddRealm(streamProxyTestRealm, &xconn.RealmConfig{Roles: []xconn.RealmRole{{
-		Name: "owner", Permissions: []xconn.Permission{{URI: "", MatchPolicy: "prefix", AllowCall: true}},
-	}}}))
+	addOwnerRealm(t, router, streamProxyTestRealm)
 	host, err := xconn.ConnectInMemory(router, streamProxyTestRealm)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = host.Close() })

@@ -330,28 +330,16 @@ func catFile(cfgDirectory, target, mode string) error {
 	if err != nil {
 		return err
 	}
-	switch deskconn.DefaultMode(cfgDirectory, realm, mode) {
-	case ModeRouted:
-		quicSess, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer quicSess.Connection().Close()
-		return deskconn.CatFile(quicSess.Session, path)
-	case ModeDirect:
-		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = p2pSess.Leave() }()
-		return deskconn.CatFile(p2pSess, path)
-	default:
-		localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
-		if err != nil {
-			return err
-		}
-		return deskconn.CatFileViaProxy(localSession, realm, path)
+	session, err := deskconn.ConnectMachineSession(context.Background(), cfgDirectory, realm,
+		deskconn.DefaultMode(cfgDirectory, realm, mode))
+	if err != nil {
+		return err
 	}
+	if session.Proxied {
+		return deskconn.CatFileViaProxy(session.Session, realm, path)
+	}
+	defer session.Close()
+	return deskconn.CatFile(session.Session, path)
 }
 
 // editFile opens a copy of a remote text file in $EDITOR, then sends the machine only a
@@ -422,56 +410,31 @@ func editFile(cfgDirectory, target, mode string) error {
 }
 
 func readRemoteFile(cfgDirectory, realm, path, mode string) ([]byte, error) {
-	switch deskconn.DefaultMode(cfgDirectory, realm, mode) {
-	case ModeRouted:
-		quicSess, err := connectivity.ConnectMachineRealmQUIC(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return nil, err
-		}
-		defer quicSess.Connection().Close()
-		return deskconn.ReadFile(quicSess.Session, path)
-	case ModeDirect:
-		p2pSess, err := deskconn.ConnectMachineRealmP2P(context.Background(), realm, cfgDirectory)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = p2pSess.Leave() }()
-		return deskconn.ReadFile(p2pSess, path)
-	default:
-		localSession, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
-		if err != nil {
-			return nil, err
-		}
-		return deskconn.ReadFileViaProxy(localSession, realm, path)
+	session, err := deskconn.ConnectMachineSession(context.Background(), cfgDirectory, realm,
+		deskconn.DefaultMode(cfgDirectory, realm, mode))
+	if err != nil {
+		return nil, err
 	}
+	if session.Proxied {
+		return deskconn.ReadFileViaProxy(session.Session, realm, path)
+	}
+	defer session.Close()
+	return deskconn.ReadFile(session.Session, path)
 }
 
 func fileOp(ctx context.Context, realm, cfgDirectory, procedure string, payload []byte, mode string) error {
-	switch deskconn.DefaultMode(cfgDirectory, realm, mode) {
-	case ModeRouted:
-		quicSess, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer quicSess.Connection().Close()
-		_, err = deskconn.CallFileOp(quicSess.Session, procedure, payload)
+	session, err := deskconn.ConnectMachineSession(ctx, cfgDirectory, realm,
+		deskconn.DefaultMode(cfgDirectory, realm, mode))
+	if err != nil {
 		return err
-	case ModeDirect:
-		p2pSess, err := deskconn.ConnectMachineRealmP2P(ctx, realm, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = p2pSess.Leave() }()
-		_, err = deskconn.CallFileOp(p2pSess, procedure, payload)
-		return err
-	default:
-		localSession, err := connectivity.ConnectDaemon(ctx, cfgDirectory)
-		if err != nil {
-			return err
-		}
-		resp := localSession.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Execute()
+	}
+	if session.Proxied {
+		resp := session.Call(common.ProcedureProxyFileOp).Args(realm, procedure, payload).Execute()
 		return resp.Err
 	}
+	defer session.Close()
+	_, err = deskconn.CallFileOp(session.Session, procedure, payload)
+	return err
 }
 
 func machinePathCompletions(cfgDirectory string) func() []string {
