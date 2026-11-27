@@ -74,6 +74,7 @@ type worker struct {
 	exited   chan struct{} // closed once the shell has exited and exitCode is set
 	exitCode int           // -1 if unknown
 	closePTY sync.Once
+	removed  chan struct{} // closed once the session's record is gone
 
 	// outMu orders the session's output: what the screen has taken in, and what's been
 	// queued for the attachment after its snapshot.
@@ -234,7 +235,7 @@ func startWorker(spec Spec) (*worker, error) {
 		cols, rows = 80, 24
 	}
 	w := &worker{spec: spec, created: time.Now().UTC(), listener: listener, exited: make(chan struct{}),
-		screen: newScreen(cols, rows, spec.HistoryLimit)}
+		removed: make(chan struct{}), screen: newScreen(cols, rows, spec.HistoryLimit)}
 	w.ptyCols, w.ptyRows = w.screen.cols, w.screen.rows
 	if err := w.startShell(); err != nil {
 		_ = listener.Close()
@@ -370,6 +371,9 @@ func (w *worker) finish() {
 	w.ended = true
 	a := w.current
 	w.mu.Unlock()
+	// Gone before anyone's told it ended: its history no longer counts against a new session.
+	removeSession(w.spec.Dir, w.spec.ID)
+	close(w.removed)
 	// Answer whoever asked for the termination before going.
 	answered := make(chan struct{})
 	go func() { w.terminations.Wait(); close(answered) }()
@@ -390,7 +394,6 @@ func (w *worker) finish() {
 		a.abort()
 	}
 	_ = w.listener.Close()
-	removeSession(w.spec.Dir, w.spec.ID)
 	w.procs.killGroup()
 	w.procs.release()
 	w.closePty()
@@ -450,6 +453,10 @@ func (w *worker) handleConn(conn net.Conn) {
 		w.mu.Unlock()
 		defer w.terminations.Done()
 		w.terminate()
+		select {
+		case <-w.removed:
+		case <-time.After(exitDeliveryTimeout):
+		}
 		_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
 		_ = writeControl(conn, message{Op: opOK})
 		_ = conn.Close()
