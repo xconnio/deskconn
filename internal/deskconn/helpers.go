@@ -20,9 +20,20 @@ import (
 
 const ErrAuthenticationFailed = "wamp.error.authentication_failed"
 
-// Login signs username in to the cloud with a new key, keeps the key in cfgDirectory and
-// caches their machines, which it returns.
-func Login(ctx context.Context, username, password string) ([]common.Machine, error) {
+// loginHostname names this machine on the approval page. It is only a label, so a missing
+// one doesn't stop the login.
+func loginHostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return hostname
+}
+
+// Login signs in to the cloud with a new key, once the user approves it in a browser at the
+// URL handed to prompt, keeps the key in cfgDirectory and caches their machines, which it
+// returns.
+func Login(ctx context.Context, prompt func(url, userCode string)) ([]common.Machine, error) {
 	c, err := currentCloud()
 	if err != nil {
 		return nil, err
@@ -40,7 +51,7 @@ func Login(ctx context.Context, username, password string) ([]common.Machine, er
 		return nil, fmt.Errorf("failed to generate keypair: %w", err)
 	}
 
-	expiresAt, err := c.Login(ctx, username, password, pub)
+	username, expiresAt, err := c.Login(ctx, pub, loginHostname(), loginPurpose, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
@@ -122,7 +133,15 @@ func ConnectCloudCryptosign(ctx context.Context, authid, privKey string) (*xconn
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
+	return connectCloud(ctx, authenticator)
+}
 
+// ConnectCloudAnonymous joins the cloud without credentials, as authid.
+func ConnectCloudAnonymous(ctx context.Context, authid string) (*xconn.Session, error) {
+	return connectCloud(ctx, auth.NewAnonymousAuthenticator(authid, nil))
+}
+
+func connectCloud(ctx context.Context, authenticator auth.ClientAuthenticator) (*xconn.Session, error) {
 	quicSess, err := xconn.ConnectQUIC(ctx, common.CloudQUICAddress(), common.Realm,
 		&xconn.QUICDialerConfig{
 			Authenticator: authenticator,
@@ -137,14 +156,6 @@ func ConnectCloudCryptosign(ctx context.Context, authid, privKey string) (*xconn
 		_ = quicSess.Connection().Close()
 	})
 	return quicSess.Session, nil
-}
-
-func ConnectCloudCRA(ctx context.Context, username, password string) (*xconn.QUICSession, error) {
-	authenticator := auth.NewWAMPCRAAuthenticator(username, password, nil)
-	return xconn.ConnectQUIC(ctx, common.CloudQUICAddress(), common.Realm, &xconn.QUICDialerConfig{
-		Authenticator: authenticator,
-		TLSConfig:     common.CloudQUICTLSConfig(),
-	})
 }
 
 func RemoveCredentialsFiles(cfgDirectory string) error {

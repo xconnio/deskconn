@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,14 +12,14 @@ import (
 	"github.com/xconnio/xconn/bindings/go"
 )
 
-// The account service backend: it keeps the accounts and their machines, signs users in with
-// a one-time password and tells machines' daemons who may connect.
+// The account service backend: it keeps the accounts and their machines, signs users in by
+// having them approve the CLI's key in a browser and tells machines' daemons who may connect.
 
 const (
-	procedureAccountLogin       = "com.deskconn.account.login"
-	procedureAccountLoginVerify = "com.deskconn.account.login.verify"
-	procedureAccountGet         = "com.deskconn.account.get"
-	procedurePrincipalDelete    = "com.deskconn.account.principal.delete"
+	procedureCLILoginStart   = "com.deskconn.account.login.cli.start"
+	procedureCLILoginPoll    = "com.deskconn.account.login.cli.poll"
+	procedureAccountGet      = "com.deskconn.account.get"
+	procedurePrincipalDelete = "com.deskconn.account.principal.delete"
 
 	procedureDesktopList   = "com.deskconn.desktop.list"
 	procedureDesktopAttach = "com.deskconn.desktop.attach"
@@ -45,54 +46,114 @@ func accountServiceCloud() *deskconn.Cloud {
 	}
 }
 
-// connectAccountServiceCRA calls fn on a session signed in to the cloud with username and
-// password.
-func connectAccountServiceCRA(ctx context.Context, username, password string,
-	fn func(session *xconn.Session) error) error {
-	quicSess, err := deskconn.ConnectCloudCRA(ctx, username, password)
-	if err != nil {
-		return err
-	}
-	common.SafeGo(func() {
-		<-quicSess.Done()
-		_ = quicSess.Connection().Close()
-	})
-	defer quicSess.Connection().Close()
+const (
+	// cliAuthID is the anonymous identity the CLI joins the cloud with before the user signs
+	// in: the cloud only lets it start a browser login and poll for its approval.
+	cliAuthID = "deskconn-cli"
+	// loginStatusKey holds a login poll's answer: pending, approved, denied or expired.
+	loginStatusKey = "status"
+	// maxLoginPollFailures is how many polls in a row may fail before the login gives up.
+	maxLoginPollFailures = 3
+)
 
-	return fn(quicSess.Session)
+// minLoginPollInterval keeps the CLI from polling nonstop whatever interval the cloud asks for.
+var minLoginPollInterval = time.Second //nolint:gochecknoglobals // lowered by tests
+
+// accountServiceLogin has the account service start a browser login for publicKey, hands
+// prompt where to approve it, and polls until the user approves or denies it there or it
+// expires.
+func accountServiceLogin(ctx context.Context, publicKey, hostname, purpose string,
+	prompt func(url, userCode string)) (string, time.Time, error) {
+	session, err := deskconn.ConnectCloudAnonymous(ctx, cliAuthID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer func() { _ = session.Leave() }()
+
+	login, err := startCLILogin(ctx, session, publicKey, hostname, purpose)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	prompt(login.url, login.userCode)
+	return pollCLILogin(ctx, session, login)
 }
 
-// accountServiceLogin has the account service email username a one-time password, asks for
-// it and registers publicKey with it.
-func accountServiceLogin(ctx context.Context, username, password, publicKey string) (time.Time, error) {
-	var expiresAt time.Time
-	err := connectAccountServiceCRA(ctx, username, password, func(session *xconn.Session) error {
-		if err := session.Call(procedureAccountLogin).Args(username).Execute().Err; err != nil {
-			return err
+type cliLogin struct {
+	deviceCode, userCode, url string
+	interval                  time.Duration
+}
+
+func startCLILogin(ctx context.Context, session *xconn.Session, publicKey, hostname, purpose string) (cliLogin, error) {
+	callResp := session.Call(procedureCLILoginStart).Args(publicKey, hostname).Kwarg("purpose", purpose).
+		ExecuteContext(ctx)
+	if callResp.Err != nil {
+		return cliLogin{}, fmt.Errorf("failed to start login: %w", callResp.Err)
+	}
+	request, err := callResp.ArgDict(0)
+	if err != nil {
+		return cliLogin{}, fmt.Errorf("unexpected response from login start: %w", err)
+	}
+	login := cliLogin{interval: max(time.Duration(request.Int64Or("interval", 3))*time.Second, minLoginPollInterval)}
+	for key, value := range map[string]*string{
+		"device_code": &login.deviceCode, "user_code": &login.userCode, "verification_uri": &login.url,
+	} {
+		if *value, err = request.String(key); err != nil {
+			return cliLogin{}, fmt.Errorf("missing %s in login start response: %w", key, err)
+		}
+	}
+	return login, nil
+}
+
+// pollCLILogin waits for the user to answer login, returning the authid and key expiry the
+// approval gives.
+func pollCLILogin(ctx context.Context, session *xconn.Session, login cliLogin) (string, time.Time, error) {
+	failures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return "", time.Time{}, ctx.Err()
+		case <-time.After(login.interval):
 		}
 
-		otp, err := readOTP()
-		if err != nil {
-			return err
-		}
-
-		callResp := session.Call(procedureAccountLoginVerify).Args(username, otp, publicKey).Execute()
+		callResp := session.Call(procedureCLILoginPoll).Args(login.deviceCode).ExecuteContext(ctx)
 		if callResp.Err != nil {
-			return fmt.Errorf("failed to verify otp: %w", callResp.Err)
+			// The account service restarting: the login stays pending meanwhile. Other errors
+			// won't go away by asking again.
+			var wampErr *xconn.Error
+			retry := errors.As(callResp.Err, &wampErr) && wampErr.URI == common.ErrNoSuchProcedure
+			if failures++; retry && failures < maxLoginPollFailures && ctx.Err() == nil {
+				continue
+			}
+			return "", time.Time{}, fmt.Errorf("failed to check login: %w", callResp.Err)
 		}
-		principal, err := callResp.ArgDict(0)
+		failures = 0
+		result, err := callResp.ArgDict(0)
 		if err != nil {
-			return fmt.Errorf("unexpected response from login verify: %w", err)
+			return "", time.Time{}, fmt.Errorf("unexpected response from login poll: %w", err)
 		}
-		expiresAtStr, err := principal.String("expires_at")
+		status, err := result.String(loginStatusKey)
 		if err != nil {
-			return fmt.Errorf("missing expires_at in login verify response: %w", err)
+			return "", time.Time{}, fmt.Errorf("missing status in login poll response: %w", err)
 		}
-		// One we can't read never expires, as it didn't when the CLI kept it as it came.
-		expiresAt, _ = time.Parse(time.RFC3339Nano, expiresAtStr)
-		return nil
-	})
-	return expiresAt, err
+		switch status {
+		case "pending":
+		case "denied":
+			return "", time.Time{}, errors.New("login was denied in the browser")
+		case "expired":
+			return "", time.Time{}, errors.New("login expired before it was approved, please try again")
+		case "approved":
+			authid, err := result.String("authid")
+			if err != nil {
+				return "", time.Time{}, fmt.Errorf("missing authid in login poll response: %w", err)
+			}
+			// One we can't read never expires, as it didn't when the CLI kept it as it came.
+			expiresAtStr, _ := result.String("expires_at")
+			expiresAt, _ := time.Parse(time.RFC3339Nano, expiresAtStr)
+			return authid, expiresAt, nil
+		default:
+			return "", time.Time{}, fmt.Errorf("unexpected login status %q", status)
+		}
+	}
 }
 
 func accountServiceName(session *xconn.Session) (string, error) {
@@ -133,22 +194,16 @@ func accountServiceMachines(session *xconn.Session) ([]common.Machine, error) {
 	return machines, nil
 }
 
-func accountServiceAttach(ctx context.Context, username, password, machineID, publicKey,
-	name string) (string, error) {
-	var realm string
-	err := connectAccountServiceCRA(ctx, username, password, func(session *xconn.Session) error {
-		callResp := session.Call(procedureDesktopAttach).Args(machineID, publicKey, name).Execute()
-		if callResp.Err != nil {
-			return callResp.Err
-		}
-		respDict, err := callResp.ArgDict(0)
-		if err != nil {
-			return err
-		}
-		realm, err = respDict.String("realm")
-		return err
-	})
-	return realm, err
+func accountServiceAttach(session *xconn.Session, machineID, publicKey, name string) (string, error) {
+	callResp := session.Call(procedureDesktopAttach).Args(machineID, publicKey, name).Execute()
+	if callResp.Err != nil {
+		return "", callResp.Err
+	}
+	respDict, err := callResp.ArgDict(0)
+	if err != nil {
+		return "", err
+	}
+	return respDict.String("realm")
 }
 
 func accountServiceDetach(session *xconn.Session, machineID string) error {

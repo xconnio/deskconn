@@ -215,7 +215,7 @@ func ReadCredentials(cfgDirectory string) (string, string, error) {
 	credentialsStr, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", "", fmt.Errorf("user not logged in")
+			return "", "", fmt.Errorf("user not logged in, run `desk auth login` first")
 		}
 		return "", "", err
 	}
