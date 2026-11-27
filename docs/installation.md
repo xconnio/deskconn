@@ -42,8 +42,9 @@ daemon, as a userspace NAT that carries TCP, UDP and ping.
 ## Authentication
 
 All cloud connections use CryptoSign (Ed25519). `desk auth login` generates a
-keypair, registers the public key with the management service, and stores the
-private key in `~/.deskconn/id_ed25519`.
+keypair and prints a URL and a code. Open the URL on any device, log in, enter
+the code and approve, and the CLI stores the private key in `~/.deskconn/id_ed25519`.
+The private key never leaves the machine. Pass `--no-browser` to only print the URL.
 
 ## Credential files
 

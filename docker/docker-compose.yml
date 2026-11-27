@@ -66,6 +66,8 @@ services:
       DESKCONN_ACCOUNT_AUTHID: deskconn-account-service
       DESKCONN_ACCOUNT_PRIVATE_KEY: ${DESKCONN_ACCOUNT_PRIVATE_KEY:-11d1f3c03e779bd33a4757dbb390415418dc89d49c990a90a6980fe8ea4e1d9f}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # Where `desk auth login` sends the user to enter its code: this stack's web app
+      DESKCONN_CLI_LOGIN_URL: ${DESKCONN_CLI_LOGIN_URL:-http://localhost:3000/cli/authorize}
       # true prints OTPs to the logs instead of emailing them (RESEND_API_KEY not required)
       X_DEBUG: ${X_DEBUG:-true}
     depends_on:

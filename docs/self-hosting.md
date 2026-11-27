@@ -59,7 +59,8 @@ foreground:
 
 ```bash
 systemctl --user stop deskconn   # if the official release is installed; it shares ~/.deskconn
-bin/desk machine attach --username <email>
+bin/desk machine attach   # approved in the browser
+bin/desk auth login       # approved again: attach does not log the CLI in
 bin/desk serve
 ```
 

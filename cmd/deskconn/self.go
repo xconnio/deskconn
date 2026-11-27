@@ -70,6 +70,8 @@ const (
 	cliName    = "desk"
 )
 
+const goosDarwin = "darwin"
+
 // launchdTarget is the deskconn launchd agent in the current user's GUI session.
 func launchdTarget() string {
 	return fmt.Sprintf("gui/%d/%s", os.Getuid(), launchdLabel)
@@ -133,7 +135,7 @@ func updateApp() error {
 // way, it's left for the user to restart.
 func restartUserd() error {
 	cmd := exec.Command("systemctl", "--user", "restart", serviceName) // nolint: gosec
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == goosDarwin {
 		if !launchdAgentLoaded() {
 			fmt.Printf("%s isn't running as the %s launchd agent, so it wasn't restarted.\n",
 				serviceName, launchdLabel)
@@ -263,7 +265,7 @@ func removeApp(cfgDirectory string, skipConfirm bool) error {
 		_ = exec.Command("systemctl", "--user", "daemon-reload").Run() // nolint: gosec
 	}
 
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == goosDarwin {
 		plist := launchdPlist(homeDir)
 		if _, err := os.Stat(plist); err == nil {
 			fmt.Printf("Stopping %s service...\n", launchdLabel)

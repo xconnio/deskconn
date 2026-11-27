@@ -68,11 +68,21 @@ realms:
             allow_call: true
       - name: 'xconnio:deskconn:app:mobile'
         permissions: *signup
+      - name: 'xconnio:deskconn:app:cli'
+        permissions:
+          - uri: 'com.deskconn.account.login.cli.start'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.login.cli.poll'
+            match: exact
+            allow_call: true
       - name: 'xconnio:deskconn:ci'
         permissions:
           - uri: 'com.deskconn.app.update'
             match: exact
             allow_call: true
+      # TODO: remove with the password login it serves, once CLI releases before device code
+      # login (desk auth login with a username) are no longer supported.
       - name: 'user:cra'
         permissions:
           - uri: 'com.deskconn.account.login'
@@ -97,6 +107,15 @@ realms:
             allow_call: true
           - uri: 'com.deskconn.account.principal.'
             match: prefix
+            allow_call: true
+          - uri: 'com.deskconn.account.login.cli.get'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.login.cli.approve'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.account.login.cli.deny'
+            match: exact
             allow_call: true
           - uri: 'com.deskconn.desktop.access.'
             match: prefix
@@ -129,6 +148,9 @@ realms:
             match: exact
             allow_call: true
           - uri: 'com.deskconn.desktop.detach'
+            match: exact
+            allow_call: true
+          - uri: 'com.deskconn.desktop.attach'
             match: exact
             allow_call: true
           - uri: 'com.deskconn.coturn.credentials.create'
@@ -282,6 +304,11 @@ transports:
       key: /etc/letsencrypt/live/api.deskconn.com/privkey.pem
 
 authenticators:
+  # The CLI before the user signs in: its role may only start a browser login and poll it.
+  anonymous:
+    - authid: deskconn-cli
+      realm: com.deskconn
+      role: 'xconnio:deskconn:app:cli'
   cryptosign:
     - authid: deskconn-account-service
       realm: com.deskconn
