@@ -40,11 +40,16 @@ const (
 	terminalRetryMax         = 5 * time.Second
 	// terminalDetachTimeout bounds waiting for the machine to end a detached attachment.
 	terminalDetachTimeout = 5 * time.Second
+	// terminalDirectCheckMax is the longest between checks for a direct path to move to.
+	terminalDirectCheckMax = 30 * time.Second
+	// terminalMoveInputMax bounds the keys kept for the session while moving to a direct path.
+	terminalMoveInputMax = 64 << 10
 )
 
 // TerminalAttachment is a terminal attached to a persistent session: the user's keys go to
 // the session, its output to the terminal. A lost connection is attached again, to the same
-// session, restoring only what the terminal missed.
+// session, restoring only what the terminal missed. An attachment over the Hub moves, the same
+// way but quietly, to a direct path once there is one (see TerminalStream.MoveWhen).
 type TerminalAttachment struct {
 	dial   TerminalDialer
 	input  io.Reader // the user's keys
@@ -55,6 +60,8 @@ type TerminalAttachment struct {
 	cols, rows int
 	detaching  bool
 	detach     chan struct{} // closed on detaching
+	moving     bool          // moving to a stream over a direct path
+	pending    []byte        // keys typed while moving, for the next stream
 
 	outMu  sync.Mutex
 	mirror *terminal.Mirror
@@ -108,15 +115,29 @@ func (a *TerminalAttachment) Run(ctx context.Context, req common.TerminalControl
 	// A new session has no screen to restore: the terminal's is left as it is.
 	restore := req.Op != common.TerminalOpCreate
 	for {
+		stopMove := a.moveWhenDirect(ctx, ts)
 		seen, end, exitCode, err := a.attached(ts, reply, gapNotice, restore)
+		stopMove()
 		if err == nil {
 			return end, session, exitCode, nil
 		}
 		gapNotice, restore = "some output while disconnected is no longer kept", true
+		again := common.TerminalControlMsg{Op: common.TerminalOpAttach, Session: session, Token: token, Since: &seen}
 
-		a.notice("connection lost; reconnecting (Ctrl+] d detaches)")
-		ts, reply, err = a.reconnect(ctx, common.TerminalControlMsg{Op: common.TerminalOpAttach,
-			Session: session, Token: token, Since: &seen})
+		var refused *TerminalError
+		if a.isMoving() {
+			ts, reply, err = a.dial(ctx, a.sized(again))
+			if err == nil {
+				// The terminal has all the output to Offset: then, the snapshot redraws what it shows.
+				restore, token = reply.Offset != seen, reply.Token
+				continue
+			}
+			a.dropPending()
+		}
+		if !errors.As(err, &refused) || refused.Code == common.TerminalErrUnavailable {
+			a.notice("connection lost; reconnecting (Ctrl+] d detaches)")
+			ts, reply, err = a.reconnect(ctx, again)
+		}
 		switch {
 		case errors.Is(err, errTerminalDetached):
 			return TerminalDetached, session, 0, nil
@@ -146,10 +167,17 @@ func (a *TerminalAttachment) attached(ts *TerminalStream, reply common.TerminalC
 		return 0, TerminalDetached, 0, nil
 	}
 	a.ts = ts
+	// Keys typed while moving here, before any typed from now on.
+	if len(a.pending) > 0 {
+		_ = ts.SendInput(a.pending)
+	}
+	a.moving, a.pending = false, nil
 	a.mu.Unlock()
 	defer func() {
 		a.mu.Lock()
-		a.ts = nil
+		if a.ts == ts {
+			a.ts = nil
+		}
 		a.mu.Unlock()
 		ts.Close()
 	}()
@@ -216,10 +244,7 @@ func (a *TerminalAttachment) reconnect(ctx context.Context, req common.TerminalC
 
 	wait := 250 * time.Millisecond
 	for {
-		a.mu.Lock()
-		req.Cols, req.Rows = clampUint16(a.cols), clampUint16(a.rows)
-		a.mu.Unlock()
-		ts, reply, err := a.dial(ctx, req)
+		ts, reply, err := a.dial(ctx, a.sized(req))
 		if err == nil {
 			return ts, reply, nil
 		}
@@ -236,6 +261,54 @@ func (a *TerminalAttachment) reconnect(ctx context.Context, req common.TerminalC
 		}
 		wait = min(2*wait, terminalRetryMax)
 	}
+}
+
+// sized is req for the terminal's size now.
+func (a *TerminalAttachment) sized(req common.TerminalControlMsg) common.TerminalControlMsg {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	req.Cols, req.Rows = clampUint16(a.cols), clampUint16(a.rows)
+	return req
+}
+
+// moveWhenDirect, for ts over the Hub, ends its attachment once a direct path is there, for
+// Run to attach again over it: keys typed meanwhile wait for the new stream. The returned
+// function stops waiting.
+func (a *TerminalAttachment) moveWhenDirect(ctx context.Context, ts *TerminalStream) (stop func()) {
+	if ts.toDirect == nil {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		if ts.toDirect(ctx) != nil {
+			return
+		}
+		a.mu.Lock()
+		move := a.ts == ts && !a.detaching
+		if move {
+			a.ts, a.moving = nil, true
+		}
+		a.mu.Unlock()
+		if move {
+			ts.Close()
+		}
+	}()
+	return cancel
+}
+
+// isMoving reports whether the attachment ended to move to a direct path.
+func (a *TerminalAttachment) isMoving() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.moving
+}
+
+// dropPending drops keys kept for a move that failed: the connection is reconnected instead,
+// and keys typed meanwhile are dropped.
+func (a *TerminalAttachment) dropPending() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.moving, a.pending = false, nil
 }
 
 // inputLoop sends the user's keys to the session, but for the detach keys. Keys typed while
@@ -261,6 +334,9 @@ func (a *TerminalAttachment) inputLoop() {
 func (a *TerminalAttachment) send(data []byte) {
 	a.mu.Lock()
 	ts := a.ts
+	if ts == nil && a.moving && len(a.pending)+len(data) <= terminalMoveInputMax {
+		a.pending = append(a.pending, data...)
+	}
 	a.mu.Unlock()
 	if ts != nil {
 		_ = ts.SendInput(data)

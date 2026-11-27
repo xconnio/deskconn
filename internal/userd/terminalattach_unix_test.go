@@ -35,8 +35,10 @@ type cliTerminal struct {
 
 	mu      sync.Mutex
 	daemon  *userd.Deskconn
-	servers []net.Conn // the machine's end of each connection
-	offline bool       // the machine can't be reached
+	servers []net.Conn    // the machine's end of each connection
+	offline bool          // the machine can't be reached
+	direct  chan struct{} // set for connections over the Hub: closed as a direct path is there
+	dialing chan struct{} // set to hold connecting until it's closed
 }
 
 type lockedBuffer struct {
@@ -58,8 +60,16 @@ func (l *lockedBuffer) String() string {
 
 func runCLITerminal(t *testing.T, d *userd.Deskconn, req common.TerminalControlMsg) *cliTerminal {
 	t.Helper()
+	return runRoutedCLITerminal(t, d, req, nil)
+}
+
+// runRoutedCLITerminal is runCLITerminal connecting over the Hub, until routed is closed.
+func runRoutedCLITerminal(t *testing.T, d *userd.Deskconn, req common.TerminalControlMsg,
+	routed chan struct{}) *cliTerminal {
+	t.Helper()
 	keys, input := io.Pipe()
-	c := &cliTerminal{keys: input, output: &lockedBuffer{}, done: make(chan struct{}), daemon: d}
+	c := &cliTerminal{keys: input, output: &lockedBuffer{}, done: make(chan struct{}), daemon: d,
+		direct: routed}
 	dial := func(ctx context.Context, req common.TerminalControlMsg) (
 		*deskconn.TerminalStream, common.TerminalControlMsg, error) {
 		c.mu.Lock()
@@ -69,10 +79,24 @@ func runCLITerminal(t *testing.T, d *userd.Deskconn, req common.TerminalControlM
 		}
 		client, server := net.Pipe()
 		c.servers = append(c.servers, server)
-		d := c.daemon
+		d, direct, dialing := c.daemon, c.direct, c.dialing
 		c.mu.Unlock()
+		if dialing != nil {
+			<-dialing
+		}
 		go d.ServeTerminalStream(server, terminalOwner) //nolint:contextcheck // serves as long as the stream
-		return deskconn.StartTerminal(ctx, client, func() { _ = client.Close() }, req)
+		ts, reply, err := deskconn.StartTerminal(ctx, client, func() { _ = client.Close() }, req)
+		if err == nil && direct != nil {
+			ts.MoveWhen(func(ctx context.Context) error {
+				select {
+				case <-direct:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			})
+		}
+		return ts, reply, err
 	}
 	a := deskconn.NewTerminalAttachment(dial, keys, c.output, 80, 24)
 	go func() {
@@ -185,6 +209,39 @@ func TestCLIReconnects(t *testing.T) {
 	require.NoError(t, c.err)
 	require.Equal(t, deskconn.TerminalExited, c.end)
 	require.Zero(t, c.code)
+}
+
+func TestCLIMovesToDirectPath(t *testing.T) {
+	d, _ := terminalDaemon(t)
+	routed := make(chan struct{})
+	c := runRoutedCLITerminal(t, d, common.TerminalControlMsg{Op: common.TerminalOpCreate}, routed)
+	pid := c.pid(t, "routed")
+	c.typeKeys(t, "for i in $(seq 1 100); do echo history-$i; done\n")
+	c.waitFor(t, `history-100\r\n`)
+
+	// A direct path is there: the attachment moves to it, and keys typed meanwhile follow.
+	dialing := make(chan struct{})
+	c.mu.Lock()
+	c.direct, c.dialing = nil, dialing
+	c.mu.Unlock()
+	close(routed)
+	require.Eventually(t, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return len(c.servers) == 2
+	}, terminalWait, 20*time.Millisecond)
+	c.typeKeys(t, "echo typed-while-moving\n")
+	close(dialing)
+	c.waitFor(t, `[^ ]typed-while-moving\r\n`) // its output, not its echo
+	require.Equal(t, pid, c.pid(t, "direct"), "to the same session")
+
+	output := c.output.String()
+	require.NotContains(t, output, "connection lost", "moving isn't a lost connection")
+	require.NotContains(t, output, "\x1b[2J", "the screen, which the terminal has, isn't redrawn")
+	require.Equal(t, 1, strings.Count(output, "history-50\r\n"), "history the terminal has isn't sent again")
+	c.mu.Lock()
+	require.Len(t, c.servers, 2, "it moves once")
+	c.mu.Unlock()
 }
 
 func TestCLIReconnectToEndedSession(t *testing.T) {

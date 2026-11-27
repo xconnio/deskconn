@@ -34,8 +34,17 @@ type TerminalStream struct {
 	stream              net.Conn
 	sendKey, receiveKey []byte
 	cleanup             func()
-	writeMu             sync.Mutex
-	closeOnce           sync.Once
+	// toDirect, for a stream that took the Hub while a direct path could follow, returns once
+	// a stream opened again would go direct.
+	toDirect  func(ctx context.Context) error
+	writeMu   sync.Mutex
+	closeOnce sync.Once
+}
+
+// MoveWhen has an attachment on this stream move to a new one once ready returns nil: ready
+// returns once a stream opened again would take a direct path.
+func (ts *TerminalStream) MoveWhen(ready func(ctx context.Context) error) {
+	ts.toDirect = ready
 }
 
 // StartTerminal makes req on stream, an open terminal stream, and returns it with the
@@ -131,17 +140,17 @@ func (ts *TerminalStream) Close() {
 var ErrTerminalUnsupported = errors.New("the machine has no persistent terminal sessions")
 
 // openTerminalStream opens a stream to realm's machine's terminal sessions, over the
-// connection mode selects, as runStreamCommand does (without moving it to P2P later: an
-// attachment that loses its connection attaches again over whichever the daemon has).
-func openTerminalStream(ctx context.Context, mode, realm, cfgDirectory string) (net.Conn, func(), error) {
+// connection mode selects, as runStreamCommand does. For a stream through the daemon over the
+// Hub, toDirect returns once the daemon has a direct path, for the attachment to move to it.
+func openTerminalStream(ctx context.Context, mode, realm, cfgDirectory string) (
+	stream net.Conn, release func(), toDirect func(context.Context) error, err error) {
 	var session common.StreamSession
-	var release func()
 	transport := "QUIC"
 	switch mode {
 	case ModeDirect:
 		p2p, err := ConnectMachineRealmP2PSession(ctx, realm, cfgDirectory)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		session, release, transport = p2p, func() { _ = p2p.Close() }, "WebRTC"
 	default:
@@ -149,28 +158,54 @@ func openTerminalStream(ctx context.Context, mode, realm, cfgDirectory string) (
 			daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
 			if err == nil {
 				session, release, transport = daemon, func() { _ = daemon.Close() }, "local daemon"
+				if !daemon.P2P() {
+					toDirect = func(ctx context.Context) error { return awaitDaemonDirect(ctx, realm, cfgDirectory) }
+				}
 				break
 			} else if !errors.Is(err, ErrDaemonUnavailable) {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 		quic, err := connectivity.ConnectMachineRealmQUIC(ctx, realm, cfgDirectory)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		session, release = quic, func() { _ = quic.Connection().Close() }
 	}
-	stream, err := common.OpenRPCStream(ctx, session, common.ProcedureTerminalStream, false)
+	stream, err = common.OpenRPCStream(ctx, session, common.ProcedureTerminalStream, false)
 	if err != nil {
 		release()
 		var application *xconn.Error
 		if errors.As(err, &application) && application.URI == common.ErrNoSuchProcedure {
-			return nil, nil, ErrTerminalUnsupported
+			return nil, nil, nil, ErrTerminalUnsupported
 		}
-		return nil, nil, fmt.Errorf("open terminal RPC %s for realm %q via %s: %w",
+		return nil, nil, nil, fmt.Errorf("open terminal RPC %s for realm %q via %s: %w",
 			common.ProcedureTerminalStream, realm, transport, err)
 	}
-	return stream, release, nil
+	return stream, release, toDirect, nil
+}
+
+// awaitDaemonDirect returns once the daemon's connection to realm's machine has a direct path,
+// checking less often the longer it hasn't.
+func awaitDaemonDirect(ctx context.Context, realm, cfgDirectory string) error {
+	wait := time.Second
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+		daemon, err := DialDaemonStreams(ctx, realm, cfgDirectory)
+		if err != nil {
+			return err
+		}
+		direct := daemon.P2P()
+		_ = daemon.Close()
+		if direct {
+			return nil
+		}
+		wait = min(2*wait, terminalDirectCheckMax)
+	}
 }
 
 // TerminalDial is the TerminalDialer of realm's machine, over the connection mode selects.
@@ -181,11 +216,14 @@ func TerminalDial(mode, realm, cfgDirectory string) TerminalDialer {
 		// ctx and a timeout bound setup; the stream, once open, lasts until it's closed.
 		setupCtx, finishSetup, cancel := shellSetupContext(context.WithoutCancel(ctx), shellSetupTimeout)
 		stopAbort := context.AfterFunc(ctx, cancel)
-		stream, release, err := openTerminalStream(setupCtx, mode, realm, cfgDirectory)
+		stream, release, toDirect, err := openTerminalStream(setupCtx, mode, realm, cfgDirectory)
 		var ts *TerminalStream
 		var reply common.TerminalControlMsg
 		if err == nil {
 			ts, reply, err = StartTerminal(setupCtx, stream, func() { _ = stream.Close(); release(); cancel() }, req)
+		}
+		if err == nil {
+			ts.MoveWhen(toDirect)
 		}
 		aborted := !stopAbort()
 		if setupErr := finishSetup(); (setupErr != nil || aborted) && err == nil {
