@@ -16,18 +16,20 @@ import (
 // cloud and the machines with the login's CryptoSign key, keeping the credentials and caching
 // the machines work the same with any backend. Every field is required.
 type Cloud struct {
-	// Login signs username in with password and makes publicKey one of their keys,
-	// returning when it expires: zero for never.
-	Login func(ctx context.Context, username, password, publicKey string) (time.Time, error)
+	// Login asks the user to approve publicKey, from a machine named hostname, as one of
+	// their keys: it hands prompt the URL to approve it at and the code to check there, and
+	// returns, once approved, who the user is and when the key expires: zero for never.
+	Login func(ctx context.Context, publicKey, hostname string,
+		prompt func(url, userCode string)) (authid string, expiresAt time.Time, err error)
 	// Name returns the display name of the user signed in on session.
 	Name func(session *xconn.Session) (string, error)
 	// Logout revokes publicKey, on a session signed in with it.
 	Logout func(session *xconn.Session, publicKey string) error
 	// Machines lists the machines of the user signed in on session.
 	Machines func(session *xconn.Session) ([]common.Machine, error)
-	// Attach adds this machine, machineID, to username's machines as name, with publicKey
-	// as its daemon's key, and returns the realm it is served in.
-	Attach func(ctx context.Context, username, password, machineID, publicKey, name string) (string, error)
+	// Attach adds this machine, machineID, to the machines of the user signed in on session
+	// as name, with publicKey as its daemon's key, and returns the realm it is served in.
+	Attach func(session *xconn.Session, machineID, publicKey, name string) (string, error)
 	// Detach removes machine machineID, on a session signed in as one of its users.
 	Detach func(session *xconn.Session, machineID string) error
 

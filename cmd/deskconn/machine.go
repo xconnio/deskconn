@@ -36,8 +36,7 @@ type machineCommands struct {
 	lsRefresh  bool
 	lsDetailed bool
 
-	attachName     *string
-	attachUsername *string
+	attachName *string
 
 	addName     *string
 	addURL      *string
@@ -82,7 +81,6 @@ func registerMachineCommands(app *kingpin.Application, cfgDirectory string) *mac
 
 	cmds.attach = machineCmd.Command("attach", "Register this machine with your account")
 	cmds.attachName = cmds.attach.Flag("name", "Machine name").Short('n').String()
-	cmds.attachUsername = cmds.attach.Flag("username", "Username").Short('u').String()
 
 	cmds.add = machineCmd.Command("add", "Add a standalone machine (served with `desk serve --mode standalone`) "+
 		"to connect to directly")
@@ -149,7 +147,7 @@ func dispatchMachineCommand(parsedCmd string, cmds *machineCommands, cfgDirector
 	case cmds.ls.FullCommand(), cmds.lsShortcut.FullCommand():
 		exitOnErr(listMachines(cfgDirectory, cmds.lsRefresh, cmds.lsDetailed))
 	case cmds.attach.FullCommand():
-		exitOnErr(attach(*cmds.attachUsername, *cmds.attachName))
+		exitOnErr(attach(cfgDirectory, *cmds.attachName))
 	case cmds.add.FullCommand():
 		exitOnErr(addStandaloneMachine(cfgDirectory, common.StandaloneMachine{Name: *cmds.addName, URL: *cmds.addURL,
 			CertHash: *cmds.addCertHash, PrivateKey: *cmds.addKey, Username: *cmds.addUsername}))

@@ -21,7 +21,6 @@ import (
 
 const (
 	cloudUser     = "alice"
-	cloudPassword = "secret"
 	cloudUserRole = "user"
 )
 
@@ -31,6 +30,7 @@ type fakeCloud struct {
 	sync.Mutex
 	keys     map[string]string // public key -> authid
 	machines []common.Machine
+	deny     bool // the user denies logins in the browser
 }
 
 func (*fakeCloud) Methods() []auth.Method {
@@ -50,22 +50,24 @@ func (f *fakeCloud) Authenticate(request auth.Request) (auth.Response, error) {
 	return auth.NewResponse(request.AuthID(), cloudUserRole, 0)
 }
 
+func (f *fakeCloud) setDeny(deny bool) {
+	f.Lock()
+	defer f.Unlock()
+	f.deny = deny
+}
+
 func (f *fakeCloud) cloud() *deskconn.Cloud {
-	checkPassword := func(username, password string) error {
-		if username != cloudUser || password != cloudPassword {
-			return errors.New("wrong password")
-		}
-		return nil
-	}
 	return &deskconn.Cloud{
-		Login: func(_ context.Context, username, password, publicKey string) (time.Time, error) {
-			if err := checkPassword(username, password); err != nil {
-				return time.Time{}, err
-			}
+		Login: func(_ context.Context, publicKey, _ string,
+			prompt func(url, userCode string)) (string, time.Time, error) {
+			prompt("https://web.example/cli/authorize", "ABCD-EFGH")
 			f.Lock()
 			defer f.Unlock()
-			f.keys[publicKey] = username
-			return time.Time{}, nil
+			if f.deny {
+				return "", time.Time{}, errors.New("login was denied in the browser")
+			}
+			f.keys[publicKey] = cloudUser
+			return cloudUser, time.Time{}, nil
 		},
 		Name: func(session *xconn.Session) (string, error) {
 			return "Alice " + session.Details().AuthID(), nil
@@ -81,10 +83,7 @@ func (f *fakeCloud) cloud() *deskconn.Cloud {
 			defer f.Unlock()
 			return append([]common.Machine(nil), f.machines...), nil
 		},
-		Attach: func(_ context.Context, username, password, machineID, _, name string) (string, error) {
-			if err := checkPassword(username, password); err != nil {
-				return "", err
-			}
+		Attach: func(_ *xconn.Session, machineID, _, name string) (string, error) {
 			f.Lock()
 			defer f.Unlock()
 			f.machines = append(f.machines, common.Machine{Authid: machineID, Name: name, Realm: "realm-" + name})
@@ -140,11 +139,17 @@ func TestCloudWithoutAccountService(t *testing.T) {
 	cfgDirectory, err := common.CfgDirectory()
 	require.NoError(t, err)
 
-	_, err = deskconn.Login(context.Background(), cloudUser, "wrong")
-	require.ErrorContains(t, err, "wrong password")
+	var userCode string
+	prompt := func(_, code string) { userCode = code }
 
-	machines, err := deskconn.Login(context.Background(), cloudUser, cloudPassword)
+	f.setDeny(true)
+	_, err = deskconn.Login(context.Background(), prompt)
+	require.ErrorContains(t, err, "denied")
+	f.setDeny(false)
+
+	machines, err := deskconn.Login(context.Background(), prompt)
 	require.NoError(t, err)
+	require.Equal(t, "ABCD-EFGH", userCode)
 	require.Empty(t, machines)
 	authid, _, err := common.ReadCredentials(cfgDirectory)
 	require.NoError(t, err)
@@ -153,7 +158,7 @@ func TestCloudWithoutAccountService(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Alice "+cloudUser, strings.SplitN(strings.TrimSpace(string(pub)), " ", 3)[2])
 
-	require.NoError(t, deskconn.Attach(cloudUser, cloudPassword, "office"))
+	require.NoError(t, deskconn.Attach(cfgDirectory, "office"))
 	credentialsFile, err := common.CredentialsFilePath()
 	require.NoError(t, err)
 	data, err := os.ReadFile(credentialsFile)

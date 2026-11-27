@@ -73,16 +73,17 @@ limitations, and configuration paths.
 ## Getting started
 
 1. Create an account at [web.deskconn.com](https://web.deskconn.com) or in the mobile app.
-2. Attach the machine you want to access:
+2. Log in from the CLI. It prints a URL and a code: open the URL on any device (it opens
+   in your browser when it can), log in, enter the code and approve. This works over SSH too:
 
    ```sh
-   desk machine attach --username <email>
+   desk auth login
    ```
 
-3. Log in from the CLI and complete email verification:
+3. Attach the machine you want to access (login offers this when you have none yet):
 
    ```sh
-   desk auth login --username <email>
+   desk machine attach
    ```
 
 4. Find your machines and open a shell:

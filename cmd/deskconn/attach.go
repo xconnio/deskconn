@@ -11,7 +11,7 @@ import (
 	"github.com/xconnio/deskconn/internal/deskconn"
 )
 
-func attach(flagUsername, name string) error {
+func attach(cfgDirectory, name string) error {
 	file, err := common.CredentialsFilePath()
 	if err != nil {
 		return err
@@ -20,17 +20,12 @@ func attach(flagUsername, name string) error {
 		return fmt.Errorf("machine already attached")
 	}
 
-	username, password, err := readCredentials(flagUsername)
-	if err != nil {
-		return err
-	}
-
 	machineName, err := resolveMachineName(name)
 	if err != nil {
 		return err
 	}
 
-	return deskconn.Attach(username, password, machineName)
+	return deskconn.Attach(cfgDirectory, machineName)
 }
 
 func resolveMachineName(name string) (string, error) {
@@ -58,7 +53,7 @@ func resolveMachineName(name string) (string, error) {
 	return input, nil
 }
 
-func promptAttachMachine(username, password string) error {
+func promptAttachMachine(cfgDirectory string) error {
 	file, err := common.CredentialsFilePath()
 	if err != nil {
 		return err
@@ -80,12 +75,7 @@ func promptAttachMachine(username, password string) error {
 		return err
 	}
 
-	if err := deskconn.Attach(username, password, machineName); err != nil {
-		return err
-	}
-
-	cfgDirectory, err := common.CfgDirectory()
-	if err != nil {
+	if err := deskconn.Attach(cfgDirectory, machineName); err != nil {
 		return err
 	}
 

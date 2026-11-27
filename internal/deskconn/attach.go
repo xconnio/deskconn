@@ -1,7 +1,6 @@
 package deskconn
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,9 +11,9 @@ import (
 	"github.com/xconnio/xconn/bindings/go/auth"
 )
 
-// Attach adds this machine to username's machines as desktopName and keeps the key its
-// daemon serves it with.
-func Attach(username, password, desktopName string) error {
+// Attach adds this machine to the signed-in user's machines as desktopName and keeps the
+// key its daemon serves it with.
+func Attach(cfgDirectory, desktopName string) error {
 	c, err := currentCloud()
 	if err != nil {
 		return err
@@ -30,7 +29,13 @@ func Attach(username, password, desktopName string) error {
 		return fmt.Errorf("failed to generate cryptosign keypair: %w", err)
 	}
 
-	realm, err := c.Attach(context.Background(), username, password, machineIDStr, publicKey, desktopName)
+	session, err := ConnectCloudRealm(cfgDirectory)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = session.Leave() }()
+
+	realm, err := c.Attach(session, machineIDStr, publicKey, desktopName)
 	if err != nil {
 		return fmt.Errorf("failed to attach desktop: %w", err)
 	}

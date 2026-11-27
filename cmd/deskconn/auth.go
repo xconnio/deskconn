@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -21,29 +24,29 @@ type authCommands struct {
 	whoami *kingpin.CmdClause
 	logout *kingpin.CmdClause
 
-	loginUsername *string
+	loginNoBrowser *bool
 }
 
 func registerAuthCommands(app *kingpin.Application) *authCommands {
 	authCmd := app.Command("auth", "Manage CLI authentication")
 
 	loginCmd := authCmd.Command("login", "Sign in to access your machines")
-	loginUsername := loginCmd.Flag("username", "Username").Short('u').String()
+	loginNoBrowser := loginCmd.Flag("no-browser", "Print the login URL instead of opening a browser").Bool()
 	whoamiCmd := authCmd.Command("whoami", "Show your account")
 	logoutCmd := authCmd.Command("logout", "Sign out of the CLI")
 
 	return &authCommands{
-		login:         loginCmd,
-		whoami:        whoamiCmd,
-		logout:        logoutCmd,
-		loginUsername: loginUsername,
+		login:          loginCmd,
+		whoami:         whoamiCmd,
+		logout:         logoutCmd,
+		loginNoBrowser: loginNoBrowser,
 	}
 }
 
 func dispatchAuthCommand(parsedCmd string, cmds *authCommands, cfgDirectory string) bool {
 	switch parsedCmd {
 	case cmds.login.FullCommand():
-		exitOnErr(runLogin(cfgDirectory, *cmds.loginUsername))
+		exitOnErr(runLogin(cfgDirectory, *cmds.loginNoBrowser))
 	case cmds.whoami.FullCommand():
 		exitOnErr(whoami(cfgDirectory))
 	case cmds.logout.FullCommand():
@@ -56,7 +59,7 @@ func dispatchAuthCommand(parsedCmd string, cmds *authCommands, cfgDirectory stri
 
 // runLogin signs in, unless already signed in with a key that hasn't expired, and tells
 // the local daemon.
-func runLogin(cfgDirectory, username string) error {
+func runLogin(cfgDirectory string, noBrowser bool) error {
 	if _, err := os.Stat(filepath.Join(cfgDirectory, "id_ed25519")); err == nil {
 		_, _, credErr := common.ReadCredentials(cfgDirectory)
 		if !errors.Is(credErr, common.ErrKeyExpired) {
@@ -65,7 +68,7 @@ func runLogin(cfgDirectory, username string) error {
 		_ = deskconn.RemoveCredentialsFiles(cfgDirectory)
 	}
 
-	if err := login(username); err != nil {
+	if err := login(cfgDirectory, noBrowser); err != nil {
 		return err
 	}
 	session, err := connectivity.ConnectDaemon(context.Background(), cfgDirectory)
@@ -105,20 +108,48 @@ func whoami(cfgDirectory string) error {
 	return nil
 }
 
-func login(flagUsername string) error {
-	username, password, err := readCredentials(flagUsername)
-	if err != nil {
-		return err
-	}
-
-	machines, err := deskconn.Login(context.Background(), username, password)
+func login(cfgDirectory string, noBrowser bool) error {
+	// Only while waiting for approval: Ctrl-C at the attach prompt after it must still exit.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	machines, err := deskconn.Login(ctx, func(url, userCode string) {
+		fmt.Fprintf(os.Stderr, "To sign in, open this page on any device and enter the code:\n\n  %s\n\n  Code: %s\n\n",
+			url, userCode)
+		if !noBrowser {
+			openBrowser(url)
+		}
+		fmt.Fprintln(os.Stderr, "Waiting for approval...")
+	})
+	stop()
 	if err != nil {
 		return err
 	}
 
 	if len(machines) == 0 {
-		return promptAttachMachine(username, password)
+		return promptAttachMachine(cfgDirectory)
 	}
 
 	return nil
+}
+
+// openBrowser opens url in the default browser, unless this is an SSH session or has no
+// display, where the URL printed beside it is all there is.
+func openBrowser(url string) {
+	if os.Getenv("SSH_CONNECTION") != "" {
+		return
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case goosDarwin:
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+			return
+		}
+		cmd = exec.Command("xdg-open", url)
+	}
+	if cmd.Start() == nil {
+		common.SafeGo(func() { _ = cmd.Wait() })
+	}
 }

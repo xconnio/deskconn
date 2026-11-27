@@ -34,17 +34,18 @@ if (!(Test-Path .env)) { Copy-Item example.env .env }
 
 Set in `.env`. Every value has a working default.
 
-| Variable                              | Default                    | Description                                                               |
-|---------------------------------------|----------------------------|---------------------------------------------------------------------------|
-| `POSTGRES_PASSWORD`                   | `postgres`                 | Password of the Postgres superuser.                                       |
-| `ACCOUNT_SERVICE_DB_USER`             | `account-service`          | Database user of the account service.                                     |
-| `ACCOUNT_SERVICE_DB_PASSWORD`         | `account-service-password` | Password of the account service database user.                            |
-| `ROUTER_DB_USER`                      | `router`                   | Database user of the router (read-only).                                  |
-| `ROUTER_DB_PASSWORD`                  | `router-password`          | Password of the router database user.                                     |
-| `X_DEBUG`                             | `true`                     | Print OTPs to the logs instead of emailing them.                          |
-| `RESEND_API_KEY`                      | empty                      | [Resend](https://resend.com) API key; required when `X_DEBUG=false`.      |
-| `DESKCONN_ACCOUNT_PRIVATE_KEY`        | local-only key             | Private key the account service authenticates to the router with.        |
-| `DESKCONN_ACCOUNT_SERVICE_PUBLIC_KEY` | local-only key             | Public key the router accepts; must match `DESKCONN_ACCOUNT_PRIVATE_KEY`. |
+| Variable                              | Default                               | Description                                                               |
+|---------------------------------------|---------------------------------------|---------------------------------------------------------------------------|
+| `POSTGRES_PASSWORD`                   | `postgres`                            | Password of the Postgres superuser.                                       |
+| `ACCOUNT_SERVICE_DB_USER`             | `account-service`                     | Database user of the account service.                                     |
+| `ACCOUNT_SERVICE_DB_PASSWORD`         | `account-service-password`            | Password of the account service database user.                            |
+| `ROUTER_DB_USER`                      | `router`                              | Database user of the router (read-only).                                  |
+| `ROUTER_DB_PASSWORD`                  | `router-password`                     | Password of the router database user.                                     |
+| `X_DEBUG`                             | `true`                                | Print OTPs to the logs instead of emailing them.                          |
+| `DESKCONN_CLI_LOGIN_URL`              | `http://localhost:3000/cli/authorize` | Page `desk auth login` sends you to, to enter its code.                   |
+| `RESEND_API_KEY`                      | empty                                 | [Resend](https://resend.com) API key; required when `X_DEBUG=false`.      |
+| `DESKCONN_ACCOUNT_PRIVATE_KEY`        | local-only key                        | Private key the account service authenticates to the router with.         |
+| `DESKCONN_ACCOUNT_SERVICE_PUBLIC_KEY` | local-only key                        | Public key the router accepts; must match `DESKCONN_ACCOUNT_PRIVATE_KEY`. |
 
 Database users are created only on the first start. After changing them, reset the data (see [Stop / reset](#stop--reset)).
 

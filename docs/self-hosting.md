@@ -59,7 +59,8 @@ foreground:
 
 ```bash
 systemctl --user stop deskconn   # if the official release is installed; it shares ~/.deskconn
-bin/desk machine attach --username <email>
+bin/desk auth login
+bin/desk machine attach
 bin/desk serve
 ```
 

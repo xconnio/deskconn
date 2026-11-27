@@ -20,9 +20,10 @@ import (
 
 const ErrAuthenticationFailed = "wamp.error.authentication_failed"
 
-// Login signs username in to the cloud with a new key, keeps the key in cfgDirectory and
-// caches their machines, which it returns.
-func Login(ctx context.Context, username, password string) ([]common.Machine, error) {
+// Login signs in to the cloud with a new key, once the user approves it in a browser at the
+// URL handed to prompt, keeps the key in cfgDirectory and caches their machines, which it
+// returns.
+func Login(ctx context.Context, prompt func(url, userCode string)) ([]common.Machine, error) {
 	c, err := currentCloud()
 	if err != nil {
 		return nil, err
@@ -40,7 +41,13 @@ func Login(ctx context.Context, username, password string) ([]common.Machine, er
 		return nil, fmt.Errorf("failed to generate keypair: %w", err)
 	}
 
-	expiresAt, err := c.Login(ctx, username, password, pub)
+	// Only a label on the approval page, so a missing one doesn't stop the login.
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
+	username, expiresAt, err := c.Login(ctx, pub, hostname, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
@@ -137,14 +144,6 @@ func ConnectCloudCryptosign(ctx context.Context, authid, privKey string) (*xconn
 		_ = quicSess.Connection().Close()
 	})
 	return quicSess.Session, nil
-}
-
-func ConnectCloudCRA(ctx context.Context, username, password string) (*xconn.QUICSession, error) {
-	authenticator := auth.NewWAMPCRAAuthenticator(username, password, nil)
-	return xconn.ConnectQUIC(ctx, common.CloudQUICAddress(), common.Realm, &xconn.QUICDialerConfig{
-		Authenticator: authenticator,
-		TLSConfig:     common.CloudQUICTLSConfig(),
-	})
 }
 
 func RemoveCredentialsFiles(cfgDirectory string) error {
