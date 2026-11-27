@@ -28,6 +28,11 @@ import (
 type app struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Icon is what clients show the app with: an https:// URL; a path ending in .png, one of
+	// the app's PNG files, which clients fetch with ProcedureManifestFile; or anything else,
+	// an icon name clients may know (see common.ManifestIcons). Only manifest apps have one:
+	// addExternal drops other processes' icons, and clients use their own for the rest.
+	Icon string `json:"icon,omitempty"`
 	// KeyExchange is the procedure clients exchange keys with to call the app's
 	// procedures, which are all end-to-end encrypted. Other processes' apps must serve
 	// their own; userd's use ProcedureKeyExchange.
@@ -242,6 +247,7 @@ func (c *capabilities) addExternal(sessionID uint64, apps []*app) error {
 		if slices.ContainsFunc(c.apps(), func(b *app) bool { return b.ID == a.ID }) {
 			return fmt.Errorf("app %s is already registered", a.ID)
 		}
+		a.Icon = ""
 	}
 	c.external[sessionID] = apps
 	c.notify()
@@ -275,6 +281,9 @@ func (c *capabilities) list() []any {
 		}
 		if _, ok := c.manifests[a.ID]; ok {
 			entry["manifest"] = true
+		}
+		if a.Icon != "" {
+			entry["icon"] = a.Icon
 		}
 		result = append(result, entry)
 	}

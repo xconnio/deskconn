@@ -1,0 +1,24 @@
+id: home
+title: Example
+
+layout:
+  type: grid
+  columns: 2
+  children:
+    - id: ping
+      include: app-engine/blocks/button.yaml
+      visible:
+        bind: context.capabilities.ping
+      label: Ping
+      icon: https://example.com/icons/ping.png
+      call: com.deskconn.example.ping
+
+    - id: light
+      include: app-engine/blocks/toggle.yaml
+      visible:
+        bind: context.capabilities.light
+      label:
+        on: Turn off
+        off: Turn on
+      read: com.deskconn.example.light.ison
+      toggle: com.deskconn.example.light.toggle

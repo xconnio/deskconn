@@ -97,3 +97,19 @@ func connectAs(router *xconn.Router, realm, authID, authRole string) (*xconn.Ses
 	}
 	return xconn.NewSession(base, base.Serializer())
 }
+
+// Only manifest apps have icons: manifest.file serves no other app's PNG files.
+func TestExternalAppsHaveNoIcon(t *testing.T) {
+	dir := t.TempDir()
+	appRouter, appListener, appSession, err := xconnd.StartAppLayer(common.LocalRealm, filepath.Join(dir, "app.sock"))
+	require.NoError(t, err)
+	t.Cleanup(appRouter.Close)
+	t.Cleanup(func() { _ = appListener.Close() })
+	caps, err := userd.NewCapabilities(nil, dir, appSession)
+	require.NoError(t, err)
+
+	external := &userd.App{ID: "example", Name: "Example", Icon: "icons/example.png",
+		KeyExchange: "com.deskconn.example.key.exchange"}
+	require.NoError(t, caps.AddExternal(1, []*userd.App{external}))
+	require.Empty(t, external.Icon)
+}

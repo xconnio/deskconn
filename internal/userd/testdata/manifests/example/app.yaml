@@ -1,0 +1,15 @@
+schema_version: "1"
+
+app:
+  id: example
+  name: Example
+  description: A test app with a button and a toggle
+  icon: https://example.com/icons/example.png
+
+api:
+  key_exchange: com.deskconn.example.key.exchange
+
+entry_screen: home
+
+screens:
+  - screens/home.yaml

@@ -82,6 +82,7 @@ func (d *Deskconn) Register(session *xconn.Session) error {
 		common.ProcedureManifestRegister:   d.capabilities.handleManifestRegister,
 		common.ProcedureManifestUnregister: d.capabilities.handleManifestUnregister,
 		common.ProcedureManifestGet:        d.capabilities.handleManifestGet,
+		common.ProcedureManifestFile:       d.capabilities.handleManifestFile,
 		common.ProcedureAppRegister:        d.handleAppRegister,
 		common.ProcedureSettingsList:       d.settings.handleList,
 		common.ProcedureSettingsSave:       d.settings.handleSave,

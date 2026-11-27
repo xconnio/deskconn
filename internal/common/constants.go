@@ -156,11 +156,13 @@ const (
 
 // Manifest apps' UI is YAML that clients render, calling procedures other apps serve.
 // Owners and admins register them, with their files as JSON {"<path>": "<yaml>"}, and
-// clients get an enabled one's app.yaml with screens and includes resolved.
+// clients get an enabled one's app.yaml with screens and includes resolved, and its PNG
+// files, such as icons, one at a time.
 const (
 	ProcedureManifestRegister   = "com.deskconn.admin.manifest.register"
 	ProcedureManifestUnregister = "com.deskconn.admin.manifest.unregister"
 	ProcedureManifestGet        = "com.deskconn.manifest.get"
+	ProcedureManifestFile       = "com.deskconn.manifest.file"
 )
 
 // ProcedureAppRegister is how a process on userd's local socket registers the apps it
